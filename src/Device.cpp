@@ -1,20 +1,24 @@
 #include "Device.h"
 #include <set>
+#include <iostream>
 
 namespace RealEngine
 {
-    // NOTE: This is a placeholder debug callback implementation.
+    // NOTE: This is a basic debug callback implementation.
     // In production, this should be enhanced to:
-    // - Log messages to a file or console based on severity
+    // - Log messages to a file based on severity
     // - Filter messages by type and severity
-    // - Provide detailed error reporting
+    // - Provide more structured error reporting
     static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(
         VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
         VkDebugUtilsMessageTypeFlagsEXT messageType,
         const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
         void* pUserData)
     {
-        // Simple debug callback that can be enhanced later
+        if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+        {
+            std::cerr << "Vulkan validation: " << pCallbackData->pMessage << std::endl;
+        }
         return VK_FALSE;
     }
 
