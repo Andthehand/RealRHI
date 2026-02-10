@@ -1,5 +1,5 @@
-#include "../src/Device.h"
-#include "../src/CommandBuffer.h"
+#include "../../src/Device.h"
+#include "../../src/CommandBuffer.h"
 
 #include <iostream>
 
