@@ -7,9 +7,7 @@ A Vulkan abstraction layer for RealEngine game engine.
 ```
 RealRHI/
 ├── src/                    # Source files (.cpp and .h)
-│   ├── RealRHI.h          # Main RHI class
-│   ├── RealRHI.cpp
-│   ├── Device.h           # Device abstraction
+│   ├── Device.h           # Device and instance management
 │   ├── Device.cpp
 │   ├── CommandBuffer.h    # Command buffer abstraction
 │   ├── CommandBuffer.cpp
@@ -59,7 +57,7 @@ After building, run the basic example:
 
 ## Features
 
-- Vulkan instance management
+- Vulkan instance management integrated with device creation
 - Physical and logical device abstraction
 - Command buffer abstraction
 - Debug validation layer support

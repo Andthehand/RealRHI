@@ -1,4 +1,3 @@
-#include "../src/RealRHI.h"
 #include "../src/Device.h"
 #include "../src/CommandBuffer.h"
 
@@ -9,18 +8,9 @@ int main()
     std::cout << "RealRHI Basic Example - Testing Vulkan Abstraction Layer" << std::endl;
     std::cout << "=========================================================" << std::endl;
 
-    // Initialize RHI
-    RealEngine::RealRHI rhi;
-    if (!rhi.Initialize("RealRHI Basic Example", true))
-    {
-        std::cerr << "Failed to initialize RHI!" << std::endl;
-        return -1;
-    }
-    std::cout << "✓ RHI initialized successfully" << std::endl;
-
-    // Create device
+    // Create and initialize device (includes instance creation)
     RealEngine::Device device;
-    if (!device.Create(rhi.GetInstance()))
+    if (!device.Create("RealRHI Basic Example", true))
     {
         std::cerr << "Failed to create device!" << std::endl;
         return -1;

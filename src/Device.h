@@ -3,6 +3,7 @@
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <optional>
+#include <string>
 
 namespace RealEngine
 {
@@ -21,7 +22,7 @@ namespace RealEngine
     };
 
     /**
-     * @brief Device abstraction for Vulkan physical and logical devices
+     * @brief Device abstraction for Vulkan instance, physical and logical devices
      */
     class Device
     {
@@ -30,16 +31,22 @@ namespace RealEngine
         ~Device();
 
         /**
-         * @brief Create device from instance
-         * @param instance The Vulkan instance
+         * @brief Initialize and create device
+         * @param appName The application name
+         * @param enableValidation Enable Vulkan validation layers
          * @return true if creation succeeded
          */
-        bool Create(VkInstance instance);
+        bool Create(const std::string& appName, bool enableValidation = true);
 
         /**
-         * @brief Destroy the device
+         * @brief Destroy the device and instance
          */
         void Destroy();
+
+        /**
+         * @brief Get the Vulkan instance
+         */
+        VkInstance GetInstance() const { return m_Instance; }
 
         /**
          * @brief Get the logical device
@@ -57,12 +64,17 @@ namespace RealEngine
         VkQueue GetGraphicsQueue() const { return m_GraphicsQueue; }
 
     private:
+        VkInstance m_Instance;
+        VkDebugUtilsMessengerEXT m_DebugMessenger;
         VkPhysicalDevice m_PhysicalDevice;
         VkDevice m_Device;
         VkQueue m_GraphicsQueue;
         VkQueue m_PresentQueue;
+        bool m_ValidationEnabled;
 
-        bool PickPhysicalDevice(VkInstance instance);
+        bool CreateInstance(const std::string& appName);
+        bool SetupDebugMessenger();
+        bool PickPhysicalDevice();
         bool CreateLogicalDevice();
         QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
     };

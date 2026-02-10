@@ -1,5 +1,4 @@
 add_library(RealRHI
-    RealRHI.cpp
     Device.cpp
     CommandBuffer.cpp
 )
