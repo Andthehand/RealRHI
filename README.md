@@ -55,6 +55,32 @@ After building, run the basic example:
 ./examples/BasicExample
 ```
 
+## Usage
+
+The simplified API makes it easy to get started with Vulkan:
+
+```cpp
+#include "Device.h"
+#include "CommandBuffer.h"
+
+// Create device (automatically creates Vulkan instance)
+RealEngine::Device device;
+if (!device.Create("MyApp", /*enableValidation=*/true)) {
+    // Handle error
+}
+
+// Create command buffer
+RealEngine::CommandBuffer cmd;
+cmd.Create(device.GetDevice(), 0);
+
+// Record commands
+cmd.Begin();
+// ... record Vulkan commands ...
+cmd.End();
+
+// Cleanup is automatic via destructors
+```
+
 ## Features
 
 - Vulkan instance management integrated with device creation
