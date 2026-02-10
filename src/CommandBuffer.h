@@ -2,13 +2,11 @@
 
 #include <vulkan/vulkan.h>
 
-namespace RealEngine
-{
+namespace RealEngine {
     /**
      * @brief Command buffer abstraction for recording GPU commands
      */
-    class CommandBuffer
-    {
+    class CommandBuffer {
     public:
         CommandBuffer();
         ~CommandBuffer();

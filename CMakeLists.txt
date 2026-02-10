@@ -2,22 +2,38 @@ cmake_minimum_required(VERSION 3.15)
 
 project(RealRHI VERSION 1.0.0 LANGUAGES CXX)
 
-# Set C++ standard
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
+# Options
+option(BUILD_EXAMPLES "Build example applications" ON)
 
-# Find Vulkan (optional for build verification)
-find_package(Vulkan)
+find_package(Vulkan REQUIRED)
 
-if(Vulkan_FOUND)
-    message(STATUS "Vulkan SDK found - building with Vulkan support")
-    # Add source directory
-    add_subdirectory(src)
+# Create RealRHI library
+set(REALRHI_HEADERS
+    src/Device.h
+    src/CommandBuffer.h
+)
+
+set(REALRHI_SOURCES
+    src/Device.cpp
+    src/CommandBuffer.cpp
+)
     
-    # Add examples directory
+add_library(RealRHI ${REALRHI_SOURCES} ${REALRHI_HEADERS})
+    
+target_include_directories(RealRHI
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+    
+target_link_libraries(RealRHI
+        Vulkan::Vulkan
+)
+
+message(STATUS "Vulkan include directories: ${Vulkan_INCLUDE_DIRS}")
+    
+target_compile_features(RealRHI PUBLIC cxx_std_20)
+    
+# Add examples directory if enabled
+if(BUILD_EXAMPLES)
     add_subdirectory(examples)
-else()
-    message(WARNING "Vulkan SDK not found - skipping build. Please install Vulkan SDK to build the project.")
-    message(WARNING "Download from: https://vulkan.lunarg.com/sdk/home")
 endif()

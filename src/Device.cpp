@@ -2,105 +2,74 @@
 #include <set>
 #include <iostream>
 
-namespace RealEngine
-{
-    // NOTE: This is a basic debug callback implementation.
-    // In production, this should be enhanced to:
-    // - Log messages to a file based on severity
-    // - Filter messages by type and severity
-    // - Provide more structured error reporting
-    static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(
+namespace RealEngine {
+    static VKAPI_ATTR VkBool32 VKAPI_CALL DefaultDebugCallback(
         VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
         VkDebugUtilsMessageTypeFlagsEXT messageType,
         const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-        void* pUserData)
-    {
-        if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
-        {
+        void* pUserData) {
+        if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
             std::cerr << "Vulkan validation: " << pCallbackData->pMessage << std::endl;
         }
+
         return VK_FALSE;
     }
 
-    Device::Device()
-        : m_Instance(VK_NULL_HANDLE)
-        , m_DebugMessenger(VK_NULL_HANDLE)
-        , m_PhysicalDevice(VK_NULL_HANDLE)
-        , m_Device(VK_NULL_HANDLE)
-        , m_GraphicsQueue(VK_NULL_HANDLE)
-        , m_PresentQueue(VK_NULL_HANDLE)
-        , m_ValidationEnabled(false)
-    {
-    }
-
-    Device::~Device()
-    {
+    Device::~Device() {
         Destroy();
     }
 
-    bool Device::Create(const std::string& appName, bool enableValidation)
-    {
-        m_ValidationEnabled = enableValidation;
+    bool Device::Create(const DeviceCreateInfo& createInfo) {
+        m_ValidationEnabled = createInfo.EnableValidationLayers;
 
-        if (!CreateInstance(appName))
-        {
+        if (!CreateInstance(createInfo.EngineName, createInfo.AppName)) {
             return false;
         }
 
-        if (m_ValidationEnabled)
-        {
-            if (!SetupDebugMessenger())
-            {
+        if (m_ValidationEnabled) {
+            if (!SetupDebugMessenger(createInfo.DebugCallback)) {
                 return false;
             }
         }
 
-        if (!PickPhysicalDevice())
-        {
+        if (!PickPhysicalDevice()) {
             return false;
         }
 
-        if (!CreateLogicalDevice())
-        {
+        if (!CreateLogicalDevice()) {
             return false;
         }
 
         return true;
     }
 
-    void Device::Destroy()
-    {
-        if (m_Device != VK_NULL_HANDLE)
-        {
+    void Device::Destroy() {
+        if (m_Device != VK_NULL_HANDLE) {
             vkDestroyDevice(m_Device, nullptr);
             m_Device = VK_NULL_HANDLE;
         }
 
-        if (m_DebugMessenger != VK_NULL_HANDLE)
-        {
+        if (m_DebugMessenger != VK_NULL_HANDLE) {
             auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
                 m_Instance, "vkDestroyDebugUtilsMessengerEXT");
-            if (func != nullptr)
-            {
+            if (func != nullptr) {
                 func(m_Instance, m_DebugMessenger, nullptr);
             }
             m_DebugMessenger = VK_NULL_HANDLE;
         }
 
-        if (m_Instance != VK_NULL_HANDLE)
-        {
+        if (m_Instance != VK_NULL_HANDLE) {
             vkDestroyInstance(m_Instance, nullptr);
             m_Instance = VK_NULL_HANDLE;
         }
     }
 
-    bool Device::CreateInstance(const std::string& appName)
-    {
+    bool Device::CreateInstance(const char* engineName, const char* appName) {
         VkApplicationInfo appInfo{};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-        appInfo.pApplicationName = appName.c_str();
+        appInfo.pApplicationName = appName;
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-        appInfo.pEngineName = "RealEngine";
+        appInfo.pEngineName = engineName;
         appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
         appInfo.apiVersion = VK_API_VERSION_1_2;
 
@@ -111,8 +80,7 @@ namespace RealEngine
         std::vector<const char*> extensions;
         std::vector<const char*> layers;
 
-        if (m_ValidationEnabled)
-        {
+        if (m_ValidationEnabled) {
             extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
             layers.push_back("VK_LAYER_KHRONOS_validation");
         }
@@ -122,16 +90,14 @@ namespace RealEngine
         createInfo.enabledLayerCount = static_cast<uint32_t>(layers.size());
         createInfo.ppEnabledLayerNames = layers.data();
 
-        if (vkCreateInstance(&createInfo, nullptr, &m_Instance) != VK_SUCCESS)
-        {
+        if (vkCreateInstance(&createInfo, nullptr, &m_Instance) != VK_SUCCESS) {
             return false;
         }
 
         return true;
     }
 
-    bool Device::SetupDebugMessenger()
-    {
+    bool Device::SetupDebugMessenger(DebugCallbackFunc debugCallback) {
         VkDebugUtilsMessengerCreateInfoEXT createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
         createInfo.messageSeverity = 
@@ -142,31 +108,32 @@ namespace RealEngine
             VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
             VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
             VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-        createInfo.pfnUserCallback = DebugCallback;
+        if (debugCallback) {
+			createInfo.pfnUserCallback = debugCallback;
+        }
+        else {
+            createInfo.pfnUserCallback = DefaultDebugCallback;
+        }
 
         auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
             m_Instance, "vkCreateDebugUtilsMessengerEXT");
         
-        if (func == nullptr)
-        {
+        if (func == nullptr) {
             return false;
         }
 
-        if (func(m_Instance, &createInfo, nullptr, &m_DebugMessenger) != VK_SUCCESS)
-        {
+        if (func(m_Instance, &createInfo, nullptr, &m_DebugMessenger) != VK_SUCCESS) {
             return false;
         }
 
         return true;
     }
 
-    bool Device::PickPhysicalDevice()
-    {
+    bool Device::PickPhysicalDevice() {
         uint32_t deviceCount = 0;
         vkEnumeratePhysicalDevices(m_Instance, &deviceCount, nullptr);
 
-        if (deviceCount == 0)
-        {
+        if (deviceCount == 0) {
             return false;
         }
 
@@ -174,11 +141,9 @@ namespace RealEngine
         vkEnumeratePhysicalDevices(m_Instance, &deviceCount, devices.data());
 
         // Pick the first suitable device
-        for (const auto& device : devices)
-        {
+        for (const auto& device : devices) {
             QueueFamilyIndices indices = FindQueueFamilies(device);
-            if (indices.IsComplete())
-            {
+            if (indices.IsComplete()) {
                 m_PhysicalDevice = device;
                 return true;
             }
@@ -187,8 +152,7 @@ namespace RealEngine
         return false;
     }
 
-    bool Device::CreateLogicalDevice()
-    {
+    bool Device::CreateLogicalDevice() {
         QueueFamilyIndices indices = FindQueueFamilies(m_PhysicalDevice);
 
         std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
@@ -198,8 +162,7 @@ namespace RealEngine
         };
 
         float queuePriority = 1.0f;
-        for (uint32_t queueFamily : uniqueQueueFamilies)
-        {
+        for (uint32_t queueFamily : uniqueQueueFamilies) {
             VkDeviceQueueCreateInfo queueCreateInfo{};
             queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
             queueCreateInfo.queueFamilyIndex = queueFamily;
@@ -217,8 +180,7 @@ namespace RealEngine
         createInfo.pEnabledFeatures = &deviceFeatures;
         createInfo.enabledExtensionCount = 0;
 
-        if (vkCreateDevice(m_PhysicalDevice, &createInfo, nullptr, &m_Device) != VK_SUCCESS)
-        {
+        if (vkCreateDevice(m_PhysicalDevice, &createInfo, nullptr, &m_Device) != VK_SUCCESS) {
             return false;
         }
 
@@ -228,8 +190,7 @@ namespace RealEngine
         return true;
     }
 
-    QueueFamilyIndices Device::FindQueueFamilies(VkPhysicalDevice device)
-    {
+    QueueFamilyIndices Device::FindQueueFamilies(VkPhysicalDevice device) {
         QueueFamilyIndices indices;
 
         uint32_t queueFamilyCount = 0;
@@ -239,10 +200,8 @@ namespace RealEngine
         vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
 
         int queueFamilyIndex = 0;
-        for (const auto& queueFamily : queueFamilies)
-        {
-            if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)
-            {
+        for (const auto& queueFamily : queueFamilies) {
+            if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
                 indices.graphicsFamily = queueFamilyIndex;
                 // TODO: Add proper present queue support for different queue families
                 // For simplicity, we assume graphics and present queues are in the same family.
@@ -250,8 +209,7 @@ namespace RealEngine
                 indices.presentFamily = queueFamilyIndex;
             }
 
-            if (indices.IsComplete())
-            {
+            if (indices.IsComplete()) {
                 break;
             }
 

@@ -21,7 +21,7 @@ RealRHI/
 ## Prerequisites
 
 - CMake 3.15 or higher
-- C++17 compatible compiler
+- C++20 compatible compiler
 - Vulkan SDK (download from https://vulkan.lunarg.com/sdk/home)
 
 ### Installing Vulkan SDK

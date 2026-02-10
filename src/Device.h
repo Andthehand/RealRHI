@@ -1,33 +1,44 @@
 #pragma once
 
-#include <vulkan/vulkan.h>
 #include <vector>
 #include <optional>
 #include <string>
 
-namespace RealEngine
-{
+#include <vulkan/vulkan.h>
+
+namespace RealEngine {
+    typedef VkBool32(VKAPI_PTR* DebugCallbackFunc)(
+        VkDebugUtilsMessageSeverityFlagBitsEXT           messageSeverity,
+        VkDebugUtilsMessageTypeFlagsEXT                  messageTypes,
+        const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+        void* pUserData);
+
     /**
      * @brief Queue family indices for different queue types
      */
-    struct QueueFamilyIndices
-    {
+    struct QueueFamilyIndices {
         std::optional<uint32_t> graphicsFamily;
         std::optional<uint32_t> presentFamily;
 
-        bool IsComplete() const
-        {
+        bool IsComplete() const {
             return graphicsFamily.has_value() && presentFamily.has_value();
         }
+    };
+
+    struct DeviceCreateInfo {
+        const char* EngineName = "RealEngine";
+        const char* AppName;
+        
+		bool EnableValidationLayers;
+        DebugCallbackFunc DebugCallback;
     };
 
     /**
      * @brief Device abstraction for Vulkan instance, physical and logical devices
      */
-    class Device
-    {
+    class Device {
     public:
-        Device();
+        Device() = default;
         ~Device();
 
         /**
@@ -36,7 +47,7 @@ namespace RealEngine
          * @param enableValidation Enable Vulkan validation layers
          * @return true if creation succeeded
          */
-        bool Create(const std::string& appName, bool enableValidation = true);
+        bool Create(const DeviceCreateInfo& createInfo);
 
         /**
          * @brief Destroy the device and instance
@@ -64,16 +75,17 @@ namespace RealEngine
         VkQueue GetGraphicsQueue() const { return m_GraphicsQueue; }
 
     private:
-        VkInstance m_Instance;
-        VkDebugUtilsMessengerEXT m_DebugMessenger;
-        VkPhysicalDevice m_PhysicalDevice;
-        VkDevice m_Device;
-        VkQueue m_GraphicsQueue;
-        VkQueue m_PresentQueue;
-        bool m_ValidationEnabled;
+        bool m_ValidationEnabled = false;
 
-        bool CreateInstance(const std::string& appName);
-        bool SetupDebugMessenger();
+        VkInstance m_Instance = VK_NULL_HANDLE;
+        VkDebugUtilsMessengerEXT m_DebugMessenger = VK_NULL_HANDLE;
+        VkPhysicalDevice m_PhysicalDevice = VK_NULL_HANDLE;
+        VkDevice m_Device = VK_NULL_HANDLE;
+        VkQueue m_GraphicsQueue = VK_NULL_HANDLE;
+        VkQueue m_PresentQueue = VK_NULL_HANDLE;
+
+        bool CreateInstance(const char* engineName, const char* appName);
+        bool SetupDebugMessenger(DebugCallbackFunc debugCallback);
         bool PickPhysicalDevice();
         bool CreateLogicalDevice();
         QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
