@@ -32,7 +32,8 @@ namespace RealEngine {
 		bool EnableValidationLayers;
         DebugCallbackFunc DebugCallback;
         
-        // Optional surface extensions (e.g., for windowing systems)
+        // Optional instance extensions (e.g., for windowing systems like GLFW)
+        // When non-empty, automatically enables VK_KHR_swapchain device extension
         std::vector<const char*> RequiredExtensions;
     };
 
