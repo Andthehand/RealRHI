@@ -31,6 +31,10 @@ namespace RealEngine {
         
 		bool EnableValidationLayers;
         DebugCallbackFunc DebugCallback;
+        
+        // Optional instance extensions (e.g., for windowing systems like GLFW)
+        // When non-empty, automatically enables VK_KHR_swapchain device extension
+        std::vector<const char*> RequiredExtensions;
     };
 
     /**
@@ -76,6 +80,7 @@ namespace RealEngine {
 
     private:
         bool m_ValidationEnabled = false;
+        std::vector<const char*> m_RequiredExtensions;
 
         VkInstance m_Instance = VK_NULL_HANDLE;
         VkDebugUtilsMessengerEXT m_DebugMessenger = VK_NULL_HANDLE;

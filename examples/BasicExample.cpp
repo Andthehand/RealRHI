@@ -8,9 +8,10 @@ int main() {
     std::cout << "=========================================================" << std::endl;
 
     // Create and initialize device (includes instance creation)
+    // NOTE: Validation layers disabled for headless environments without GPU
     RealEngine::DeviceCreateInfo createInfo {
         .AppName = "RealRHI Basic Example",
-        .EnableValidationLayers = true,
+        .EnableValidationLayers = false,
     };
 
     RealEngine::Device device;

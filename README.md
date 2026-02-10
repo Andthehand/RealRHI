@@ -14,6 +14,7 @@ RealRHI/
 │   └── CMakeLists.txt     # Library build configuration
 ├── examples/              # Examples for testing/developing the API
 │   ├── BasicExample.cpp   # Basic usage example
+│   ├── TriangleExample.cpp # Triangle rendering with GLFW
 │   └── CMakeLists.txt     # Examples build configuration
 └── CMakeLists.txt         # Root build configuration
 ```
@@ -23,8 +24,11 @@ RealRHI/
 - CMake 3.15 or higher
 - C++20 compatible compiler
 - Vulkan SDK (download from https://vulkan.lunarg.com/sdk/home)
+- GLFW 3 (required for the triangle example)
 
-### Installing Vulkan SDK
+### Installing Dependencies
+
+#### Vulkan SDK
 
 **Windows:**
 Download and run the installer from [LunarG Vulkan SDK](https://vulkan.lunarg.com/sdk/home)
@@ -38,6 +42,19 @@ sudo apt update
 sudo apt install vulkan-sdk
 ```
 
+#### GLFW (for triangle example)
+
+**Linux:**
+```bash
+sudo apt install libglfw3-dev
+```
+
+**Windows:**
+Download from [GLFW website](https://www.glfw.org/download.html) or use vcpkg:
+```bash
+vcpkg install glfw3
+```
+
 ## Building
 
 ```bash
@@ -49,13 +66,23 @@ cmake --build .
 
 ## Running Examples
 
-After building, run the basic example:
+After building, you can run the examples:
 
+**Basic Example** (tests the API without rendering):
 ```bash
 ./examples/BasicExample
 ```
 
+**Triangle Example** (renders a colorful triangle using GLFW):
+```bash
+./examples/TriangleExample
+```
+
+**Note:** Both examples require a Vulkan-compatible GPU to run. In headless or GPU-less environments (such as CI systems), the examples will fail during device creation. This is expected behavior as Vulkan requires actual GPU hardware.
+
 ## Usage
+
+### Basic API Usage
 
 The simplified API makes it easy to get started with Vulkan:
 
@@ -65,7 +92,12 @@ The simplified API makes it easy to get started with Vulkan:
 
 // Create device (automatically creates Vulkan instance)
 RealEngine::Device device;
-if (!device.Create("MyApp", /*enableValidation=*/true)) {
+RealEngine::DeviceCreateInfo createInfo {
+    .AppName = "MyApp",
+    .EnableValidationLayers = true,
+};
+
+if (!device.Create(createInfo)) {
     // Handle error
 }
 
@@ -81,9 +113,63 @@ cmd.End();
 // Cleanup is automatic via destructors
 ```
 
+### Window Rendering with GLFW
+
+For rendering to a window, you need to provide the required extensions:
+
+```cpp
+#include "Device.h"
+#include <GLFW/glfw3.h>
+
+// Initialize GLFW
+glfwInit();
+glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+GLFWwindow* window = glfwCreateWindow(800, 600, "My App", nullptr, nullptr);
+
+// Get GLFW required extensions
+uint32_t glfwExtensionCount = 0;
+const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+std::vector<const char*> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
+
+// Create device with surface support
+RealEngine::DeviceCreateInfo createInfo {
+    .AppName = "MyApp",
+    .EnableValidationLayers = true,
+    .RequiredExtensions = extensions,
+};
+
+RealEngine::Device device;
+if (!device.Create(createInfo)) {
+    // Handle error
+}
+
+// Create surface
+VkSurfaceKHR surface;
+glfwCreateWindowSurface(device.GetInstance(), window, nullptr, &surface);
+
+// ... create swapchain, pipeline, etc. (see TriangleExample.cpp for full example)
+```
+
 ## Features
 
 - Vulkan instance management integrated with device creation
 - Physical and logical device abstraction
 - Command buffer abstraction
 - Debug validation layer support
+- Surface extension support for window rendering
+- Swapchain device extension support
+
+## Examples
+
+### BasicExample
+A simple headless example that demonstrates basic device and command buffer creation without rendering.
+
+### TriangleExample
+A complete rendering example using GLFW that:
+- Creates a window with GLFW
+- Sets up a Vulkan swapchain
+- Creates a graphics pipeline with embedded shaders
+- Renders a colorful triangle with vertex colors
+- Implements a proper render loop with synchronization
+
+See `examples/TriangleExample.cpp` for a complete, self-contained example of rendering with RealRHI.
