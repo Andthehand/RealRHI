@@ -429,3 +429,6 @@ CTestTestfile.cmake
 _deps/
 build/
 install_manifest.txt
+
+# CodeQL
+_codeql_detected_source_root

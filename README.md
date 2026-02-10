@@ -40,12 +40,6 @@ sudo apt update
 sudo apt install vulkan-sdk
 ```
 
-**macOS:**
-```bash
-# Using Homebrew
-brew install vulkan-sdk
-```
-
 ## Building
 
 ```bash
