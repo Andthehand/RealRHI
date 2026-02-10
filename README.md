@@ -13,9 +13,15 @@ RealRHI/
 │   ├── CommandBuffer.cpp
 │   └── CMakeLists.txt     # Library build configuration
 ├── examples/              # Examples for testing/developing the API
-│   ├── BasicExample.cpp   # Basic usage example
-│   ├── TriangleExample.cpp # Triangle rendering with GLFW
+│   ├── BasicExample/      # Basic usage example
+│   │   ├── BasicExample.cpp
+│   │   └── CMakeLists.txt
+│   ├── TriangleExample/   # Triangle rendering with GLFW
+│   │   ├── TriangleExample.cpp
+│   │   └── CMakeLists.txt
 │   └── CMakeLists.txt     # Examples build configuration
+├── external/              # External dependencies
+│   └── glfw/              # GLFW submodule
 └── CMakeLists.txt         # Root build configuration
 ```
 
@@ -24,7 +30,7 @@ RealRHI/
 - CMake 3.15 or higher
 - C++20 compatible compiler
 - Vulkan SDK (download from https://vulkan.lunarg.com/sdk/home)
-- GLFW 3 (required for the triangle example)
+- Git (for cloning with submodules)
 
 ### Installing Dependencies
 
@@ -42,17 +48,18 @@ sudo apt update
 sudo apt install vulkan-sdk
 ```
 
-#### GLFW (for triangle example)
+## Cloning the Repository
 
-**Linux:**
+This project uses GLFW as a git submodule. Clone with submodules using:
+
 ```bash
-sudo apt install libglfw3-dev
+git clone --recursive https://github.com/Andthehand/RealRHI.git
 ```
 
-**Windows:**
-Download from [GLFW website](https://www.glfw.org/download.html) or use vcpkg:
+Or if you've already cloned the repository:
+
 ```bash
-vcpkg install glfw3
+git submodule update --init --recursive
 ```
 
 ## Building
@@ -172,4 +179,4 @@ A complete rendering example using GLFW that:
 - Renders a colorful triangle with vertex colors
 - Implements a proper render loop with synchronization
 
-See `examples/TriangleExample.cpp` for a complete, self-contained example of rendering with RealRHI.
+See `examples/TriangleExample/TriangleExample.cpp` for a complete, self-contained example of rendering with RealRHI.

@@ -1,8 +1,8 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
-#include "../src/Device.h"
-#include "../src/CommandBuffer.h"
+#include "../../src/Device.h"
+#include "../../src/CommandBuffer.h"
 
 #include <iostream>
 #include <vector>
