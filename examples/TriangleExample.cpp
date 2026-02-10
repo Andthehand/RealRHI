@@ -725,9 +725,10 @@ int main() {
         std::vector<const char*> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
 
         // Create and initialize device
+        // NOTE: Validation layers may fail in headless/GPU-less environments
         RealEngine::DeviceCreateInfo createInfo {
             .AppName = "RealRHI Triangle Example",
-            .EnableValidationLayers = true,
+            .EnableValidationLayers = false,  // Set to true if you have validation layers
             .RequiredExtensions = extensions,
         };
 
