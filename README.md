@@ -33,7 +33,7 @@ Download and run the installer from [LunarG Vulkan SDK](https://vulkan.lunarg.co
 
 **Linux:**
 ```bash
-# Ubuntu/Debian
+# Ubuntu/Debian (replace 'jammy' with your Ubuntu version: focal for 20.04, jammy for 22.04, noble for 24.04)
 wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
 sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
 sudo apt update

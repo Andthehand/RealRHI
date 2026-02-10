@@ -28,6 +28,8 @@ int main()
     std::cout << "✓ Device created successfully" << std::endl;
 
     // Create command buffer
+    // NOTE: Using queue family index 0 for simplicity in this example.
+    // In production code, you should obtain the actual graphics queue family index from the device.
     RealEngine::CommandBuffer cmdBuffer;
     if (!cmdBuffer.Create(device.GetDevice(), 0))
     {

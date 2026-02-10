@@ -4,6 +4,11 @@
 
 namespace RealEngine
 {
+    // NOTE: This is a placeholder debug callback implementation.
+    // In production, this should be enhanced to:
+    // - Log messages to a file or console based on severity
+    // - Filter messages by type and severity
+    // - Provide detailed error reporting
     static VKAPI_ATTR VkBool32 VKAPI_CALL DebugCallback(
         VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
         VkDebugUtilsMessageTypeFlagsEXT messageType,

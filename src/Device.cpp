@@ -118,13 +118,16 @@ namespace RealEngine
         std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
         vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
 
-        int i = 0;
+        int queueFamilyIndex = 0;
         for (const auto& queueFamily : queueFamilies)
         {
             if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)
             {
-                indices.graphicsFamily = i;
-                indices.presentFamily = i; // For simplicity, assume same queue
+                indices.graphicsFamily = queueFamilyIndex;
+                // TODO: Add proper present queue support for different queue families
+                // For simplicity, we assume graphics and present queues are in the same family.
+                // This works for most hardware but may need to be improved for some configurations.
+                indices.presentFamily = queueFamilyIndex;
             }
 
             if (indices.IsComplete())
@@ -132,7 +135,7 @@ namespace RealEngine
                 break;
             }
 
-            i++;
+            queueFamilyIndex++;
         }
 
         return indices;
