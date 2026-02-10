@@ -24,7 +24,7 @@ RealRHI/
 - CMake 3.15 or higher
 - C++20 compatible compiler
 - Vulkan SDK (download from https://vulkan.lunarg.com/sdk/home)
-- GLFW 3 (required for the triangle example)
+- Git (for cloning with submodules)
 
 ### Installing Dependencies
 
@@ -42,17 +42,18 @@ sudo apt update
 sudo apt install vulkan-sdk
 ```
 
-#### GLFW (for triangle example)
+## Cloning the Repository
 
-**Linux:**
+This project uses GLFW as a git submodule. Clone with submodules using:
+
 ```bash
-sudo apt install libglfw3-dev
+git clone --recursive https://github.com/Andthehand/RealRHI.git
 ```
 
-**Windows:**
-Download from [GLFW website](https://www.glfw.org/download.html) or use vcpkg:
+Or if you've already cloned the repository:
+
 ```bash
-vcpkg install glfw3
+git submodule update --init --recursive
 ```
 
 ## Building

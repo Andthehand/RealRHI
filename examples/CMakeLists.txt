@@ -7,8 +7,6 @@ target_link_libraries(BasicExample
         RealRHI
 )
 
-find_package(glfw3 REQUIRED)
-
 add_executable(TriangleExample
     TriangleExample.cpp
 )

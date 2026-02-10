@@ -35,5 +35,11 @@ target_compile_features(RealRHI PUBLIC cxx_std_20)
     
 # Add examples directory if enabled
 if(BUILD_EXAMPLES)
+    # Add GLFW submodule (disable unnecessary GLFW features)
+    option(GLFW_BUILD_DOCS "Build the GLFW documentation" OFF)
+    option(GLFW_BUILD_TESTS "Build the GLFW test programs" OFF)
+    option(GLFW_BUILD_EXAMPLES "Build the GLFW example programs" OFF)
+    add_subdirectory(external/glfw)
+    
     add_subdirectory(examples)
 endif()
