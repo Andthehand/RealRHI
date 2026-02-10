@@ -13,9 +13,15 @@ RealRHI/
 │   ├── CommandBuffer.cpp
 │   └── CMakeLists.txt     # Library build configuration
 ├── examples/              # Examples for testing/developing the API
-│   ├── BasicExample.cpp   # Basic usage example
-│   ├── TriangleExample.cpp # Triangle rendering with GLFW
+│   ├── BasicExample/      # Basic usage example
+│   │   ├── BasicExample.cpp
+│   │   └── CMakeLists.txt
+│   ├── TriangleExample/   # Triangle rendering with GLFW
+│   │   ├── TriangleExample.cpp
+│   │   └── CMakeLists.txt
 │   └── CMakeLists.txt     # Examples build configuration
+├── external/              # External dependencies
+│   └── glfw/              # GLFW submodule
 └── CMakeLists.txt         # Root build configuration
 ```
 
@@ -173,4 +179,4 @@ A complete rendering example using GLFW that:
 - Renders a colorful triangle with vertex colors
 - Implements a proper render loop with synchronization
 
-See `examples/TriangleExample.cpp` for a complete, self-contained example of rendering with RealRHI.
+See `examples/TriangleExample/TriangleExample.cpp` for a complete, self-contained example of rendering with RealRHI.
