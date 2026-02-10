@@ -24,7 +24,27 @@ RealRHI/
 
 - CMake 3.15 or higher
 - C++17 compatible compiler
-- Vulkan SDK
+- Vulkan SDK (download from https://vulkan.lunarg.com/sdk/home)
+
+### Installing Vulkan SDK
+
+**Windows:**
+Download and run the installer from [LunarG Vulkan SDK](https://vulkan.lunarg.com/sdk/home)
+
+**Linux:**
+```bash
+# Ubuntu/Debian
+wget -qO - https://packages.lunarg.com/lunarg-signing-key-pub.asc | sudo apt-key add -
+sudo wget -qO /etc/apt/sources.list.d/lunarg-vulkan-jammy.list https://packages.lunarg.com/vulkan/lunarg-vulkan-jammy.list
+sudo apt update
+sudo apt install vulkan-sdk
+```
+
+**macOS:**
+```bash
+# Using Homebrew
+brew install vulkan-sdk
+```
 
 ## Building
 
