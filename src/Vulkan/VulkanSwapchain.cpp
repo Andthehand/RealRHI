@@ -27,10 +27,12 @@ namespace RealRHI {
 	bool VulkanSwapchain::CreateSurface(const WindowHandle& window) {
 		switch (window.Type) {
 		case WindowHandleType::HWND: {
-			VkWin32SurfaceCreateInfoKHR surfaceCreateInfo = {};
-			surfaceCreateInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
-			surfaceCreateInfo.hinstance = ::GetModuleHandle(nullptr);
-			surfaceCreateInfo.hwnd = (HWND)window.HandleValues[0];
+			VkWin32SurfaceCreateInfoKHR surfaceCreateInfo = {
+                .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
+                .hinstance = ::GetModuleHandle(nullptr),
+                .hwnd = (HWND)window.HandleValues[0],
+            };
+			
 			if (vkCreateWin32SurfaceKHR(m_Device->GetInstance(), &surfaceCreateInfo, nullptr, &m_Surface)) {
 				std::cerr << "Failed to create Win32 surface for VulkanSwapchain." << std::endl;
 				return true;
@@ -115,21 +117,22 @@ namespace RealRHI {
             imageCount = swapChainSupport.Capabilities.maxImageCount;
         }
 
-        VkSwapchainCreateInfoKHR createInfo{};
-        createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-        createInfo.surface = m_Surface;
-        createInfo.minImageCount = imageCount;
-        createInfo.imageFormat = surfaceFormat.format;
-        createInfo.imageColorSpace = surfaceFormat.colorSpace;
-        createInfo.imageExtent = extent;
-        createInfo.imageArrayLayers = 1;
-        createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-        createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        createInfo.preTransform = swapChainSupport.Capabilities.currentTransform;
-        createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-        createInfo.presentMode = presentMode;
-        createInfo.clipped = VK_TRUE;
-        createInfo.oldSwapchain = VK_NULL_HANDLE;
+        VkSwapchainCreateInfoKHR createInfo{
+            .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+            .surface = m_Surface,
+            .minImageCount = imageCount,
+            .imageFormat = surfaceFormat.format,
+            .imageColorSpace = surfaceFormat.colorSpace,
+            .imageExtent = extent,
+            .imageArrayLayers = 1,
+            .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+            .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            .preTransform = swapChainSupport.Capabilities.currentTransform,
+            .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+            .presentMode = presentMode,
+            .clipped = VK_TRUE,
+            .oldSwapchain = VK_NULL_HANDLE,
+        };
 
         if (vkCreateSwapchainKHR(m_Device->GetDevice(), &createInfo, nullptr, &m_Swapchain) != VK_SUCCESS) {
 			std::cerr << "Failed to create swapchain." << std::endl;

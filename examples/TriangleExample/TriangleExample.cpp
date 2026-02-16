@@ -79,20 +79,27 @@ void CreateImageViews() {
     swapchainImageViews.resize(swapchain->GetSwapchainImages().size());
 
     for (size_t i = 0; i < swapchain->GetSwapchainImages().size(); i++) {
-        VkImageViewCreateInfo createInfo{};
-        createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        createInfo.image = swapchain->GetSwapchainImages()[i];
-        createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        createInfo.format = swapchain->GetSwapchainImageFormat();
-        createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-        createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        createInfo.subresourceRange.baseMipLevel = 0;
-        createInfo.subresourceRange.levelCount = 1;
-        createInfo.subresourceRange.baseArrayLayer = 0;
-        createInfo.subresourceRange.layerCount = 1;
+        constexpr VkComponentMapping componentMapping{
+            .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .a = VK_COMPONENT_SWIZZLE_IDENTITY,
+		};
+        constexpr VkImageSubresourceRange subresourceRange{
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+		};
+        VkImageViewCreateInfo createInfo{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = swapchain->GetSwapchainImages()[i],
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .format = swapchain->GetSwapchainImageFormat(),
+            .components = componentMapping,
+            .subresourceRange = subresourceRange,
+        };
 
         if (vkCreateImageView(device->GetDevice(), &createInfo, nullptr, &swapchainImageViews[i]) != VK_SUCCESS) {
             throw std::runtime_error("Failed to create image views!");
@@ -101,10 +108,11 @@ void CreateImageViews() {
 }
 
 VkShaderModule CreateShaderModule(const std::vector<uint32_t>& code) {
-    VkShaderModuleCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    createInfo.codeSize = code.size() * sizeof(uint32_t);
-    createInfo.pCode = code.data();
+    VkShaderModuleCreateInfo createInfo{
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = code.size() * sizeof(uint32_t),
+        .pCode = code.data(),
+    };
 
     VkShaderModule shaderModule;
     if (vkCreateShaderModule(device->GetDevice(), &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
