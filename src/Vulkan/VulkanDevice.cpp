@@ -1,0 +1,324 @@
+#include "Device.h"
+#include "VulkanDevice.h"
+
+#include "VulkanSwapchain.h"
+
+#include <set>
+#include <iostream>
+
+namespace RealRHI {
+    VulkanDevice::VulkanDevice(const DeviceDesc& desc) 
+        : m_EnableDebug(desc.EnableDebug) {
+        if (!CreateInstance(desc.ApplicationName)) {
+            return;
+        }
+
+        if (m_EnableDebug) {
+            if (!SetupDebugMessenger(desc.DebugCallback)) {
+                return;
+            }
+        }
+
+        if (!PickPhysicalDevice()) {
+            return;
+        }
+
+        if (!CreateLogicalDevice()) {
+            return;
+        }
+    }
+
+    VulkanDevice::~VulkanDevice() {
+        if (m_Device != VK_NULL_HANDLE) {
+            vkDestroyDevice(m_Device, nullptr);
+        }
+
+        if (m_DebugMessenger != VK_NULL_HANDLE) {
+
+            auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
+                m_Instance, "vkDestroyDebugUtilsMessengerEXT");
+            if (func != nullptr) {
+                func(m_Instance, m_DebugMessenger, nullptr);
+            }
+        }
+        
+        if (m_Instance != VK_NULL_HANDLE) {
+            vkDestroyInstance(m_Instance, nullptr);
+		}
+    }
+
+    Buffer* VulkanDevice::CreateBuffer(const BufferDesc&) {
+        return nullptr;
+    }
+
+    Pipeline* VulkanDevice::CreateGraphicsPipeline(const PipelineDesc&) {
+        return nullptr;
+    }
+
+    CommandList* VulkanDevice::CreateCommandList() {
+        return nullptr;
+    }
+
+    std::unique_ptr<Swapchain> VulkanDevice::CreateSwapchain(const SwapchainDesc& desc) {
+        return std::make_unique<VulkanSwapchain>((const VulkanDevice*)this, desc);
+    }
+
+
+    bool VulkanDevice::CreateInstance(const char* appName) {
+        VkApplicationInfo appInfo{};
+        appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+        appInfo.pApplicationName = appName;
+        appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+        appInfo.pEngineName = "RealEngine";
+        appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
+        appInfo.apiVersion = VK_API_VERSION_1_3;
+
+        VkInstanceCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+        createInfo.pApplicationInfo = &appInfo;
+
+        std::vector<const char*> extensions;
+        std::vector<const char*> layers;
+
+		for (const char* ext : s_InstanceExtensions) {
+            extensions.push_back(ext);
+        }
+
+        if (m_EnableDebug) {
+            extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+            layers.push_back("VK_LAYER_KHRONOS_validation");
+        }
+
+        createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+        createInfo.ppEnabledExtensionNames = extensions.data();
+        createInfo.enabledLayerCount = static_cast<uint32_t>(layers.size());
+        createInfo.ppEnabledLayerNames = layers.data();
+
+        if (vkCreateInstance(&createInfo, nullptr, &m_Instance) != VK_SUCCESS) {
+            return false;
+        }
+
+        return true;
+    }
+
+    bool VulkanDevice::SetupDebugMessenger(DebugCallback debugCallback) {
+        VkDebugUtilsMessengerCreateInfoEXT createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+        createInfo.messageSeverity =
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+        createInfo.messageType =
+            VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+            VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+            VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+        createInfo.pfnUserCallback = VulkanDebugCallback;
+		createInfo.pUserData = reinterpret_cast<void*>(debugCallback);
+
+        auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
+            m_Instance, "vkCreateDebugUtilsMessengerEXT");
+
+        if (func == nullptr) {
+            return false;
+        }
+
+        if (func(m_Instance, &createInfo, nullptr, &m_DebugMessenger) != VK_SUCCESS) {
+            return false;
+        }
+
+        return true;
+    }
+
+    int VulkanDevice::RatePhysicalDevice(VkPhysicalDevice device) {
+        VkPhysicalDeviceProperties properties;
+        VkPhysicalDeviceFeatures features;
+
+        vkGetPhysicalDeviceProperties(device, &properties);
+        vkGetPhysicalDeviceFeatures(device, &features);
+
+        // Must support required queues
+        QueueFamilyIndices indices = FindQueueFamilies(device);
+        if (!indices.IsComplete())
+            return 0;
+
+        int score = 0;
+
+        // Prefer discrete GPU
+        if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+            score += 1000;
+
+        // Slight preference for integrated if no discrete
+        if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)
+            score += 100;
+
+        // Prefer larger max image dimension (usually stronger GPU)
+        score += properties.limits.maxImageDimension2D;
+
+        return score;
+    }
+
+    bool VulkanDevice::PickPhysicalDevice() {
+        uint32_t deviceCount = 0;
+        vkEnumeratePhysicalDevices(m_Instance, &deviceCount, nullptr);
+
+        if (deviceCount == 0)
+            return false;
+
+        std::vector<VkPhysicalDevice> devices(deviceCount);
+        vkEnumeratePhysicalDevices(m_Instance, &deviceCount, devices.data());
+
+        VkPhysicalDevice bestDevice = VK_NULL_HANDLE;
+        int bestScore = 0;
+
+        for (const auto& device : devices) {
+            int score = RatePhysicalDevice(device);
+
+            VkPhysicalDeviceProperties props;
+            vkGetPhysicalDeviceProperties(device, &props);
+
+            std::cout << "Found device: " << props.deviceName << std::endl;
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestDevice = device;
+            }
+        }
+
+        if (bestDevice == VK_NULL_HANDLE)
+            return false;
+
+        m_PhysicalDevice = bestDevice;
+
+        VkPhysicalDeviceProperties props;
+        vkGetPhysicalDeviceProperties(m_PhysicalDevice, &props);
+        std::cout << "Selected device: " << props.deviceName << std::endl;
+
+        return true;
+    }
+
+    bool VulkanDevice::CreateLogicalDevice() {
+        QueueFamilyIndices indices = FindQueueFamilies(m_PhysicalDevice);
+
+        m_GraphicsQueueFamily = indices.graphicsFamily.value();
+        m_PresentQueueFamily = indices.presentFamily.value();
+
+        std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+        std::set<uint32_t> uniqueQueueFamilies = {
+            m_GraphicsQueueFamily,
+            m_PresentQueueFamily
+        };
+
+        float queuePriority = 1.0f;
+        for (uint32_t queueFamily : uniqueQueueFamilies) {
+            VkDeviceQueueCreateInfo queueCreateInfo{};
+            queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+            queueCreateInfo.queueFamilyIndex = queueFamily;
+            queueCreateInfo.queueCount = 1;
+            queueCreateInfo.pQueuePriorities = &queuePriority;
+            queueCreateInfos.push_back(queueCreateInfo);
+        }
+
+        VkPhysicalDeviceFeatures deviceFeatures{};
+
+        constexpr VkPhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeature {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR,
+            .dynamicRendering = VK_TRUE,
+        };
+
+        VkDeviceCreateInfo createInfo{
+            .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+            .pNext = &dynamicRenderingFeature,
+            .queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size()),
+            .pQueueCreateInfos = queueCreateInfos.data(),
+            .enabledExtensionCount = static_cast<uint32_t>(s_DeviceExtensions.size()),
+            .ppEnabledExtensionNames = s_DeviceExtensions.data(),
+            .pEnabledFeatures = &deviceFeatures,
+        };
+        
+
+        if (vkCreateDevice(m_PhysicalDevice, &createInfo, nullptr, &m_Device) != VK_SUCCESS) {
+            return false;
+        }
+
+        vkGetDeviceQueue(m_Device, m_GraphicsQueueFamily, 0, &m_GraphicsQueue);
+        vkGetDeviceQueue(m_Device, m_PresentQueueFamily, 0, &m_PresentQueue);
+
+        return true;
+    }
+
+    QueueFamilyIndices VulkanDevice::FindQueueFamilies(VkPhysicalDevice device) {
+        QueueFamilyIndices indices;
+
+        uint32_t queueFamilyCount = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+
+        std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+        int queueFamilyIndex = 0;
+        for (const auto& queueFamily : queueFamilies) {
+            if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+                indices.graphicsFamily = queueFamilyIndex;
+                // TODO: Add proper present queue support for different queue families
+                // For simplicity, we assume graphics and present queues are in the same family.
+                // This works for most hardware but may need to be improved for some configurations.
+                indices.presentFamily = queueFamilyIndex;
+            }
+
+            if (indices.IsComplete()) {
+                break;
+            }
+
+            queueFamilyIndex++;
+        }
+
+        return indices;
+    }
+    VKAPI_ATTR VkBool32 VulkanDevice::VulkanDebugCallback(
+        VkDebugUtilsMessageSeverityFlagBitsEXT severity, 
+        VkDebugUtilsMessageTypeFlagsEXT type, 
+        const VkDebugUtilsMessengerCallbackDataEXT* callbackData, 
+        void* userData) {
+		DebugCallback debugCallback = reinterpret_cast<DebugCallback>(userData);
+
+        if (debugCallback == nullptr) {
+            std::cerr << "Vulkan Debug: " << callbackData->pMessage << std::endl;
+        }
+        else {
+            DebugMessage message;
+
+			switch (severity) {
+                case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
+                    message.Severity = DebugSeverity::Info;
+                    break;
+                case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
+                    message.Severity = DebugSeverity::Warning;
+                    break;
+                case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
+                    message.Severity = DebugSeverity::Error;
+                    break;
+                default:
+                    message.Severity = DebugSeverity::Info;
+            }
+
+            switch (type) {
+                case VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT:
+                    message.Type = DebugMessageType::General;
+                    break;
+                case VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT:
+                    message.Type = DebugMessageType::Validation;
+                    break;
+                case VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT:
+                    message.Type = DebugMessageType::Performance;
+                    break;
+                default:
+                    message.Type = DebugMessageType::General;
+			}
+
+            message.Message = callbackData->pMessage;
+            debugCallback(message);
+        }
+
+        return VK_FALSE;
+    }
+}

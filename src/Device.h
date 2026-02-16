@@ -1,98 +1,25 @@
 #pragma once
+#include "BufferDesc.h"
+#include "Buffer.h"
 
-#include <vector>
-#include <optional>
-#include <string>
+#include "PipelineDesc.h"
+#include "Pipeline.h"
 
-#include <vulkan/vulkan.h>
+#include "CommandList.h"
 
-namespace RealEngine {
-    typedef VkBool32(VKAPI_PTR* DebugCallbackFunc)(
-        VkDebugUtilsMessageSeverityFlagBitsEXT           messageSeverity,
-        VkDebugUtilsMessageTypeFlagsEXT                  messageTypes,
-        const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-        void* pUserData);
+#include "SwapchainDesc.h"
+#include "Swapchain.h"
 
-    /**
-     * @brief Queue family indices for different queue types
-     */
-    struct QueueFamilyIndices {
-        std::optional<uint32_t> graphicsFamily;
-        std::optional<uint32_t> presentFamily;
+#include <memory>
 
-        bool IsComplete() const {
-            return graphicsFamily.has_value() && presentFamily.has_value();
-        }
-    };
-
-    struct DeviceCreateInfo {
-        const char* EngineName = "RealEngine";
-        const char* AppName;
-        
-		bool EnableValidationLayers;
-        DebugCallbackFunc DebugCallback;
-        
-        // Optional instance extensions (e.g., for windowing systems like GLFW)
-        // When non-empty, automatically enables VK_KHR_swapchain device extension
-        std::vector<const char*> RequiredExtensions;
-    };
-
-    /**
-     * @brief Device abstraction for Vulkan instance, physical and logical devices
-     */
+namespace RealRHI {
     class Device {
     public:
-        Device() = default;
-        ~Device();
+        virtual ~Device() = default;
 
-        /**
-         * @brief Initialize and create device
-         * @param appName The application name
-         * @param enableValidation Enable Vulkan validation layers
-         * @return true if creation succeeded
-         */
-        bool Create(const DeviceCreateInfo& createInfo);
-
-        /**
-         * @brief Destroy the device and instance
-         */
-        void Destroy();
-
-        /**
-         * @brief Get the Vulkan instance
-         */
-        VkInstance GetInstance() const { return m_Instance; }
-
-        /**
-         * @brief Get the logical device
-         */
-        VkDevice GetDevice() const { return m_Device; }
-
-        /**
-         * @brief Get the physical device
-         */
-        VkPhysicalDevice GetPhysicalDevice() const { return m_PhysicalDevice; }
-
-        /**
-         * @brief Get the graphics queue
-         */
-        VkQueue GetGraphicsQueue() const { return m_GraphicsQueue; }
-
-    private:
-        bool m_ValidationEnabled = false;
-        std::vector<const char*> m_RequiredExtensions;
-
-        VkInstance m_Instance = VK_NULL_HANDLE;
-        VkDebugUtilsMessengerEXT m_DebugMessenger = VK_NULL_HANDLE;
-        VkPhysicalDevice m_PhysicalDevice = VK_NULL_HANDLE;
-        VkDevice m_Device = VK_NULL_HANDLE;
-        VkQueue m_GraphicsQueue = VK_NULL_HANDLE;
-        VkQueue m_PresentQueue = VK_NULL_HANDLE;
-
-        bool CreateInstance(const char* engineName, const char* appName);
-        bool SetupDebugMessenger(DebugCallbackFunc debugCallback);
-        bool PickPhysicalDevice();
-        bool CreateLogicalDevice();
-        QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
+        virtual Buffer* CreateBuffer(const BufferDesc&) = 0;
+        virtual Pipeline* CreateGraphicsPipeline(const PipelineDesc&) = 0;
+        virtual CommandList* CreateCommandList() = 0;
+        virtual std::unique_ptr<Swapchain> CreateSwapchain(const SwapchainDesc& desc) = 0;
     };
 }
