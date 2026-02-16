@@ -48,9 +48,9 @@ VkDeviceMemory vertexBufferMemory = VK_NULL_HANDLE;
 std::vector<VkCommandBuffer> commandBuffers;
 VkCommandPool commandPool = VK_NULL_HANDLE;
 
-std::vector<VkSemaphore> imageAvailableSemaphores;
-std::vector<VkSemaphore> renderFinishedSemaphores;
-std::vector<VkFence> inFlightFences;
+std::vector<VkSemaphore> imageAvailableSemaphores; // GPU->GPU synchronization
+std::vector<VkSemaphore> renderFinishedSemaphores; // GPU->GPU synchronization
+std::vector<VkFence> inFlightFences; // CPU->GPU synchronization
 uint32_t currentFrame = 0;
 
 std::unique_ptr<RealRHI::VulkanDevice> device;

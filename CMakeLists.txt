@@ -11,12 +11,12 @@ find_package(Vulkan REQUIRED)
 set(REALRHI_HEADERS
     "src/Vulkan/VulkanDevice.h"
     
- "src/Swapchain.h" "src/Texture.h" "src/Buffer.h" "src/Pipeline.h" "src/CommandList.h" "src/Device.h" "src/BufferDesc.h" "src/PipelineDesc.h" "src/TextureDesc.h" "src/DeviceDesc.h" "src/Vulkan/VulkanSwapchain.h" "src/SwapchainDesc.h" "src/glfw.h")
+ "src/Swapchain.h" "src/Texture.h" "src/Buffer.h" "src/Pipeline.h" "src/CommandList.h" "src/Device.h" "src/BufferDesc.h" "src/PipelineDesc.h" "src/TextureDesc.h" "src/DeviceDesc.h" "src/Vulkan/VulkanSwapchain.h" "src/SwapchainDesc.h" "src/glfw.h"  "src/Shader.h" "src/Vulkan/VulkanShader.h")
 
 set(REALRHI_SOURCES
     "src/Vulkan/VulkanDevice.cpp"
     
-  "src/Vulkan/VulkanSwapchain.cpp")
+  "src/Vulkan/VulkanSwapchain.cpp" "src/Vulkan/VulkanShader.cpp")
     
 add_library(RealRHI ${REALRHI_SOURCES} ${REALRHI_HEADERS})
     
