@@ -16,12 +16,11 @@ RealRHI/
 │   ├── BasicExample/      # Basic usage example
 │   │   ├── BasicExample.cpp
 │   │   └── CMakeLists.txt
-│   ├── TriangleExample/   # Triangle rendering with GLFW
+│   ├── TriangleExample/   # Triangle rendering with SDL3
 │   │   ├── TriangleExample.cpp
 │   │   └── CMakeLists.txt
 │   └── CMakeLists.txt     # Examples build configuration
-├── external/              # External dependencies
-│   └── glfw/              # GLFW submodule
+├── vendor/                # External dependencies (submodules)
 └── CMakeLists.txt         # Root build configuration
 ```
 
@@ -30,7 +29,7 @@ RealRHI/
 - CMake 3.15 or higher
 - C++20 compatible compiler
 - Vulkan SDK (download from https://vulkan.lunarg.com/sdk/home)
-- Git (for cloning with submodules)
+- SDL3 (for window rendering examples)
 
 ### Installing Dependencies
 
@@ -48,18 +47,25 @@ sudo apt update
 sudo apt install vulkan-sdk
 ```
 
-## Cloning the Repository
+#### SDL3
 
-This project uses GLFW as a git submodule. Clone with submodules using:
+**Note:** SDL3 is included with the Vulkan SDK and will be automatically found by CMake using the find_library command. The SDL3 library should be located in `$VULKAN_SDK/lib`.
+
+If you need to install SDL3 separately, you can build it from source:
 
 ```bash
-git clone --recursive https://github.com/Andthehand/RealRHI.git
+git clone https://github.com/libsdl-org/SDL.git
+cd SDL
+mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release
+cmake --build .
+sudo cmake --install .
 ```
 
-Or if you've already cloned the repository:
+## Cloning the Repository
 
 ```bash
-git submodule update --init --recursive
+git clone https://github.com/Andthehand/RealRHI.git
 ```
 
 ## Building
@@ -80,7 +86,7 @@ After building, you can run the examples:
 ./examples/BasicExample
 ```
 
-**Triangle Example** (renders a colorful triangle using GLFW):
+**Triangle Example** (renders a colorful triangle using SDL3):
 ```bash
 ./examples/TriangleExample
 ```
@@ -120,23 +126,23 @@ cmd.End();
 // Cleanup is automatic via destructors
 ```
 
-### Window Rendering with GLFW
+### Window Rendering with SDL3
 
 For rendering to a window, you need to provide the required extensions:
 
 ```cpp
 #include "Device.h"
-#include <GLFW/glfw3.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 
-// Initialize GLFW
-glfwInit();
-glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-GLFWwindow* window = glfwCreateWindow(800, 600, "My App", nullptr, nullptr);
+// Initialize SDL3
+SDL_Init(SDL_INIT_VIDEO);
+SDL_Window* window = SDL_CreateWindow("My App", 800, 600, SDL_WINDOW_VULKAN);
 
-// Get GLFW required extensions
-uint32_t glfwExtensionCount = 0;
-const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-std::vector<const char*> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
+// Get SDL3 required extensions
+uint32_t extensionCount = 0;
+const char* const* extensionNames = SDL_Vulkan_GetInstanceExtensions(&extensionCount);
+std::vector<const char*> extensions(extensionNames, extensionNames + extensionCount);
 
 // Create device with surface support
 RealEngine::DeviceCreateInfo createInfo {
@@ -152,7 +158,7 @@ if (!device.Create(createInfo)) {
 
 // Create surface
 VkSurfaceKHR surface;
-glfwCreateWindowSurface(device.GetInstance(), window, nullptr, &surface);
+SDL_Vulkan_CreateSurface(window, device.GetInstance(), nullptr, &surface);
 
 // ... create swapchain, pipeline, etc. (see TriangleExample.cpp for full example)
 ```
@@ -172,8 +178,8 @@ glfwCreateWindowSurface(device.GetInstance(), window, nullptr, &surface);
 A simple headless example that demonstrates basic device and command buffer creation without rendering.
 
 ### TriangleExample
-A complete rendering example using GLFW that:
-- Creates a window with GLFW
+A complete rendering example using SDL3 that:
+- Creates a window with SDL3
 - Sets up a Vulkan swapchain
 - Creates a graphics pipeline with embedded shaders
 - Renders a colorful triangle with vertex colors
