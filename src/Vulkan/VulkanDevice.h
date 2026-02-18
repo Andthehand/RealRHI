@@ -5,6 +5,8 @@
 #include <array>
 #include <optional>
 
+#undef CreateWindow
+
 namespace RealRHI {
 	struct QueueFamilyIndices {
 		std::optional<uint32_t> graphicsFamily;
@@ -33,6 +35,7 @@ namespace RealRHI {
 		DebugCallback GetDebugCallback() const override { return m_DebugCallback; }
 		bool IsDebugEnabled() const override { return m_EnableDebug; }
 
+		std::unique_ptr<Window> CreateWindow(const WindowDesc& desc) override;
 		Buffer* CreateBuffer(const BufferDesc&) override;
 		std::unique_ptr<Shader> CreateShader(const char* moduleName) override;
 		Pipeline* CreateGraphicsPipeline(const PipelineDesc&) override;
@@ -65,17 +68,6 @@ namespace RealRHI {
 			DebugCallback m_DebugCallback;
 
 			bool m_EnableDebug;
-
-			static constexpr std::array<const char*, 2> s_InstanceExtensions {
-			#if defined(_WIN32)
-				"VK_KHR_win32_surface",
-			#elif defined(__linux__)
-				"VK_KHR_xcb_surface",
-			#elif defined(__APPLE__)
-				"VK_EXT_metal_surface",
-			#endif
-				VK_KHR_SURFACE_EXTENSION_NAME,
-			};
 
 			static constexpr std::array<const char*, 2> s_DeviceExtensions{
 				VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,

@@ -1,5 +1,6 @@
 #pragma once
 #include "Vulkan/VulkanDevice.h"
+#include "Vulkan/VulkanWindow.h"
 
 #include "Swapchain.h"
 #include "SwapchainDesc.h"
@@ -30,8 +31,6 @@ namespace RealRHI {
 		void Present() override;
 		Texture* GetCurrentBackBuffer() override;
 	private:
-		bool CreateSurface(const WindowHandle& window);
-		
 		SwapChainSupportDetails QuerySwapChainSupport();
 		VkSurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
 		VkPresentModeKHR ChooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
@@ -39,6 +38,7 @@ namespace RealRHI {
 		bool CreateSwapchain(VkExtent2D requestedExtent);
 	private:
 		const VulkanDevice* m_Device;
+		const VulkanWindow* m_Window;
 		VkSurfaceKHR m_Surface;
 		VkSwapchainKHR m_Swapchain;
 

@@ -5,5 +5,5 @@ add_executable(TriangleExample
 target_link_libraries(TriangleExample
     PRIVATE
         RealRHI
-        $<IF:$<TARGET_EXISTS:SDL3::SDL3>,SDL3::SDL3,${SDL_LIBRARY}>
+        ${SDL_LIBRARY}
 )

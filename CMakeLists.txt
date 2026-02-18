@@ -13,17 +13,18 @@ option(BUILD_EXAMPLES "Build example applications" ON)
 
 find_package(Vulkan REQUIRED)
 find_library(Slang_LIBRARY NAMES slang slang-compiler HINTS "$ENV{VULKAN_SDK}/lib" REQUIRED)
+find_library(SDL_LIBRARY NAMES SDL3 HINTS "$ENV{VULKAN_SDK}/lib" REQUIRED)
 
 # Create RealRHI library
 set(REALRHI_HEADERS
     "src/Vulkan/VulkanDevice.h"
     
- "src/Swapchain.h" "src/Texture.h" "src/Buffer.h" "src/Pipeline.h" "src/CommandList.h" "src/Device.h" "src/BufferDesc.h" "src/PipelineDesc.h" "src/TextureDesc.h" "src/DeviceDesc.h" "src/Vulkan/VulkanSwapchain.h" "src/SwapchainDesc.h" "src/sdl.h"  "src/Shader.h" "src/Vulkan/VulkanShader.h")
+ "src/Swapchain.h" "src/Texture.h" "src/Buffer.h" "src/Pipeline.h" "src/CommandList.h" "src/Device.h" "src/BufferDesc.h" "src/PipelineDesc.h" "src/TextureDesc.h" "src/DeviceDesc.h" "src/Vulkan/VulkanSwapchain.h" "src/SwapchainDesc.h"   "src/Shader.h" "src/Vulkan/VulkanShader.h" "src/Window.h" "src/Vulkan/VulkanWindow.h" "src/WindowDesc.h")
 
 set(REALRHI_SOURCES
     "src/Vulkan/VulkanDevice.cpp"
     
-  "src/Vulkan/VulkanSwapchain.cpp" "src/Vulkan/VulkanShader.cpp")
+  "src/Vulkan/VulkanSwapchain.cpp" "src/Vulkan/VulkanShader.cpp" "src/Vulkan/VulkanWindow.cpp")
     
 add_library(RealRHI ${REALRHI_SOURCES} ${REALRHI_HEADERS})
     
@@ -34,6 +35,7 @@ target_include_directories(RealRHI
     
 target_link_libraries(RealRHI
         Vulkan::Vulkan
+        ${SDL_LIBRARY}
         ${Slang_LIBRARY}
 )
     

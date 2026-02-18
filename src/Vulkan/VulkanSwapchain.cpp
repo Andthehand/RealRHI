@@ -3,15 +3,17 @@
 #include <algorithm>
 
 namespace RealRHI {
-	VulkanSwapchain::VulkanSwapchain(const VulkanDevice* device, const SwapchainDesc& desc) 
+    VulkanSwapchain::VulkanSwapchain(const VulkanDevice* device, const SwapchainDesc& desc)
         : m_Device(device) {
-		CreateSurface(desc.Window);
-        CreateSwapchain(VkExtent2D{ .width = desc.Width, .height = desc.Height });
+        m_Window = static_cast<VulkanWindow*>(desc.WindowPtr);
+        m_Window->CreateVulkanSurface(*device, &m_Surface);
+
+        CreateSwapchain(VkExtent2D{ .width = (uint32_t)m_Window->GetWidth(), .height = m_Window->GetHeight()});
 	}
 
     VulkanSwapchain::~VulkanSwapchain() {
         vkDestroySwapchainKHR(m_Device->GetDevice(), m_Swapchain, nullptr);
-		vkDestroySurfaceKHR(m_Device->GetInstance(), m_Surface, nullptr);
+		m_Window->DestroyVulkanSurface(*m_Device, m_Surface);
     }
 
     void VulkanSwapchain::BeginFrame() {
@@ -23,29 +25,6 @@ namespace RealRHI {
     Texture* VulkanSwapchain::GetCurrentBackBuffer() {
         return nullptr;
     }
-	
-	bool VulkanSwapchain::CreateSurface(const WindowHandle& window) {
-		switch (window.Type) {
-		case WindowHandleType::HWND: {
-			VkWin32SurfaceCreateInfoKHR surfaceCreateInfo = {
-                .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
-                .hinstance = ::GetModuleHandle(nullptr),
-                .hwnd = (HWND)window.HandleValues[0],
-            };
-			
-			if (vkCreateWin32SurfaceKHR(m_Device->GetInstance(), &surfaceCreateInfo, nullptr, &m_Surface)) {
-				std::cerr << "Failed to create Win32 surface for VulkanSwapchain." << std::endl;
-				return true;
-			}
-			break;
-		}
-		default:
-			std::cerr << "Unsupported window handle type for VulkanSwapchain." << std::endl;
-			return true;
-		}
-
-		return false;
-	}
 
     SwapChainSupportDetails VulkanSwapchain::QuerySwapChainSupport() {
         SwapChainSupportDetails details;

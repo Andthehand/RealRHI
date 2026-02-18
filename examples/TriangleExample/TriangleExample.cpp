@@ -1,7 +1,6 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
-#include "sdl.h"
 #include "Vulkan/VulkanDevice.h"
 #include "Vulkan/VulkanSwapchain.h"
 
@@ -28,10 +27,8 @@ const std::vector<Vertex> vertices = {
     {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
 };
 
-// SDL window
-SDL_Window* window = nullptr;
-
 // Vulkan objects
+std::unique_ptr<RealRHI::Window> window;
 std::unique_ptr<RealRHI::Swapchain> baseSwapchain;
 RealRHI::VulkanSwapchain* swapchain = nullptr;
 std::vector<VkImageView> swapchainImageViews;
@@ -54,28 +51,14 @@ uint32_t currentFrame = 0;
 
 std::unique_ptr<RealRHI::VulkanDevice> device;
 
-void InitWindow() {
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
-        std::cerr << "Failed to initialize SDL: " << SDL_GetError() << std::endl;
-        exit(1);
-    }
-    window = SDL_CreateWindow("RealRHI Triangle Example", WIDTH, HEIGHT, SDL_WINDOW_VULKAN);
-    if (!window) {
-        std::cerr << "Failed to create SDL window: " << SDL_GetError() << std::endl;
-        SDL_Quit();
-        exit(1);
-    }
-}
-
 void CreateSwapChain() {
 	int width, height;
-	SDL_GetWindowSizeInPixels(window, &width, &height);
 
+	window = device->CreateWindow({ WIDTH, HEIGHT });
 	RealRHI::SwapchainDesc swapchainDesc {
-        .Window = RealRHI::GetWindowHandleFromSDL(window),
-        .Width = (uint32_t)width,
-        .Height = (uint32_t)height
+        .WindowPtr = window.get(),
     };
+
     baseSwapchain = device->CreateSwapchain(swapchainDesc);
 	swapchain = static_cast<RealRHI::VulkanSwapchain*>(baseSwapchain.get()); //TODO: Remove jank
 }
@@ -488,16 +471,11 @@ void Cleanup() {
 
 	baseSwapchain.reset();
     device.reset();
-
-    SDL_DestroyWindow(window);
-    SDL_Quit();
 }
 
 int main() {
     std::cout << "RealRHI Triangle Example - Simple Triangle Rendering" << std::endl;
     std::cout << "====================================================" << std::endl;
-
-    InitWindow();
 
     // Create and initialize device
     // NOTE: Validation layers may fail in headless/GPU-less environments

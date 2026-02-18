@@ -1,6 +1,9 @@
 #pragma once
 #include "DeviceDesc.h"
 
+#include "Window.h"
+#include "WindowDesc.h"
+
 #include "BufferDesc.h"
 #include "Buffer.h"
 
@@ -26,9 +29,10 @@ namespace RealRHI {
 		virtual DebugCallback GetDebugCallback() const = 0;
 		virtual bool IsDebugEnabled() const = 0;
 
+		virtual std::unique_ptr<Window> CreateWindow(const WindowDesc& desc) = 0;
 		virtual std::unique_ptr<Shader> CreateShader(const char* moduleName) = 0;
-        virtual Buffer* CreateBuffer(const BufferDesc&) = 0;
-        virtual Pipeline* CreateGraphicsPipeline(const PipelineDesc&) = 0;
+        virtual Buffer* CreateBuffer(const BufferDesc& desc) = 0;
+        virtual Pipeline* CreateGraphicsPipeline(const PipelineDesc& desc) = 0;
         virtual CommandList* CreateCommandList() = 0;
         virtual std::unique_ptr<Swapchain> CreateSwapchain(const SwapchainDesc& desc) = 0;
     };

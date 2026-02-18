@@ -1,6 +1,7 @@
 #include "Device.h"
 #include "VulkanDevice.h"
 
+#include "VulkanWindow.h"
 #include "VulkanSwapchain.h"
 #include "VulkanShader.h"
 
@@ -10,6 +11,15 @@
 namespace RealRHI {
     VulkanDevice::VulkanDevice(const DeviceDesc& desc) 
         : m_EnableDebug(desc.EnableDebug), m_ShaderDirectory(desc.ShaderDirectory), m_DebugCallback(desc.DebugCallback) {
+        if (!SDL_Init(SDL_INIT_VIDEO)) {
+            // TODO: Actually handle this error
+            return;
+        }
+        if (!SDL_Vulkan_LoadLibrary(nullptr)) {
+            // TODO: Actually handle this error
+            return;
+        }
+
         if (!CreateInstance(desc.ApplicationName, desc.EnableValidationLayers)) {
             // TODO: Actually handle this error
             return;
@@ -50,6 +60,13 @@ namespace RealRHI {
         if (m_Instance != VK_NULL_HANDLE) {
             vkDestroyInstance(m_Instance, nullptr);
 		}
+
+		SDL_Vulkan_UnloadLibrary();
+		SDL_Quit();
+    }
+
+    std::unique_ptr<Window> VulkanDevice::CreateWindow(const WindowDesc& desc) {
+        return std::make_unique<VulkanWindow>(desc);
     }
 
     Buffer* VulkanDevice::CreateBuffer(const BufferDesc&) {
@@ -72,7 +89,6 @@ namespace RealRHI {
         return std::make_unique<VulkanSwapchain>((const VulkanDevice*)this, desc);
     }
 
-
     bool VulkanDevice::CreateInstance(const char* appName, bool enableValidationLayer) {
         VkApplicationInfo appInfo{
             .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -86,10 +102,13 @@ namespace RealRHI {
         std::vector<const char*> extensions;
         std::vector<const char*> layers;
 
-		for (const char* ext : s_InstanceExtensions) {
-            extensions.push_back(ext);
+        // Add SDL required extensions
+        uint32_t sdlExtensionsCount{ 0 };
+        char const* const* sdlExtensions{ SDL_Vulkan_GetInstanceExtensions(&sdlExtensionsCount) };
+        for (uint32_t i = 0; i < sdlExtensionsCount; ++i) {
+            extensions.push_back(sdlExtensions[i]);
         }
-
+        
         if (enableValidationLayer) {
             extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
             layers.push_back("VK_LAYER_KHRONOS_validation");
@@ -271,7 +290,8 @@ namespace RealRHI {
 
         int queueFamilyIndex = 0;
         for (const auto& queueFamily : queueFamilies) {
-            if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT
+                && SDL_Vulkan_GetPresentationSupport(m_Instance, device, queueFamilyIndex)) {
                 indices.graphicsFamily = queueFamilyIndex;
                 // TODO: Add proper present queue support for different queue families
                 // For simplicity, we assume graphics and present queues are in the same family.
