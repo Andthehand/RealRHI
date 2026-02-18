@@ -14,7 +14,7 @@ namespace RealRHI {
 
 		VkShaderModule GetShaderModule() const { return m_ShaderModule; }
 	private:
-		static void InitializeSlang(const char* shaderDirectory);
+		static void InitializeSlang(const char* shaderDirectory, bool isDebugEnabled);
 
 		bool CheckSlangDiagnostics(const Slang::ComPtr<slang::IBlob> diagnostics) const;
 	private:

@@ -503,6 +503,7 @@ int main() {
         .ApplicationName = "RealRHI Triangle Example",
         .ShaderDirectory = "shaders",
         .EnableDebug = true,
+        .EnableValidationLayers = true,
     };
 
 	device = std::make_unique<RealRHI::VulkanDevice>(createInfo);

@@ -31,6 +31,7 @@ namespace RealRHI {
 
 		std::filesystem::path GetShaderDirectory() const override { return m_ShaderDirectory; }
 		DebugCallback GetDebugCallback() const override { return m_DebugCallback; }
+		bool IsDebugEnabled() const override { return m_EnableDebug; }
 
 		Buffer* CreateBuffer(const BufferDesc&) override;
 		std::unique_ptr<Shader> CreateShader(const char* moduleName) override;
@@ -38,7 +39,7 @@ namespace RealRHI {
 		CommandList* CreateCommandList() override;
 		std::unique_ptr<Swapchain> CreateSwapchain(const SwapchainDesc& desc) override;
 	private:
-		bool CreateInstance(const char* appName);
+		bool CreateInstance(const char* appName, bool enableValidationLayer);
 		bool SetupDebugMessenger();
 		int RatePhysicalDevice(VkPhysicalDevice device);
 		bool PickPhysicalDevice();

@@ -5,7 +5,7 @@
 namespace RealRHI {
 	VulkanShader::VulkanShader(const VulkanDevice* device, const char* moduleName) 
 		: m_Device(device) {
-		InitializeSlang(m_Device->GetShaderDirectory().string().c_str());
+		InitializeSlang(m_Device->GetShaderDirectory().string().c_str(), device->IsDebugEnabled());
 
 		Slang::ComPtr<slang::IBlob> diagnostics;
 		m_SlangModule = s_SlangSession->loadModule(moduleName, diagnostics.writeRef());
@@ -39,7 +39,7 @@ namespace RealRHI {
 		vkDestroyShaderModule(m_Device->GetDevice(), m_ShaderModule, nullptr);
 	}
 
-	void VulkanShader::InitializeSlang(const char* shaderDirectory) {
+	void VulkanShader::InitializeSlang(const char* shaderDirectory, bool isDebugEnabled) {
 		if (!s_SlangGlobalSession) {
 			slang::createGlobalSession(s_SlangGlobalSession.writeRef());
 			std::array<slang::TargetDesc, 1> slangTargets{
@@ -50,11 +50,17 @@ namespace RealRHI {
 					}
 				})
 			};
-			std::array<slang::CompilerOptionEntry, 1> slangOptions{
+
+			SlangDebugInfoLevel debugInfoLevel = isDebugEnabled ? SLANG_DEBUG_INFO_LEVEL_STANDARD : SLANG_DEBUG_INFO_LEVEL_NONE;
+			std::array<slang::CompilerOptionEntry, 2> slangOptions{
 				std::to_array<slang::CompilerOptionEntry>({
 					slang::CompilerOptionEntry{
 						slang::CompilerOptionName::EmitSpirvDirectly, // Emit SPIR-V directly instead of generating source code that will be compiled by a downstream compiler.
 						slang::CompilerOptionValue{slang::CompilerOptionValueKind::Int, 1} // Set to 1 to enable, 0 to disable. Default is false (0).
+					},
+					slang::CompilerOptionEntry{
+						slang::CompilerOptionName::DebugInformation,
+						slang::CompilerOptionValue{slang::CompilerOptionValueKind::Int, (int)debugInfoLevel}
 					}
 				})
 			};

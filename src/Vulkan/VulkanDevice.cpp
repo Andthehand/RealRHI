@@ -10,12 +10,12 @@
 namespace RealRHI {
     VulkanDevice::VulkanDevice(const DeviceDesc& desc) 
         : m_EnableDebug(desc.EnableDebug), m_ShaderDirectory(desc.ShaderDirectory), m_DebugCallback(desc.DebugCallback) {
-        if (!CreateInstance(desc.ApplicationName)) {
+        if (!CreateInstance(desc.ApplicationName, desc.EnableValidationLayers)) {
             // TODO: Actually handle this error
             return;
         }
 
-        if (m_EnableDebug) {
+        if (desc.EnableValidationLayers) {
             if (!SetupDebugMessenger()) {
                 // TODO: Actually handle this error
                 return;
@@ -73,7 +73,7 @@ namespace RealRHI {
     }
 
 
-    bool VulkanDevice::CreateInstance(const char* appName) {
+    bool VulkanDevice::CreateInstance(const char* appName, bool enableValidationLayer) {
         VkApplicationInfo appInfo{
             .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
             .pApplicationName = appName,
@@ -90,7 +90,7 @@ namespace RealRHI {
             extensions.push_back(ext);
         }
 
-        if (m_EnableDebug) {
+        if (enableValidationLayer) {
             extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
             layers.push_back("VK_LAYER_KHRONOS_validation");
         }

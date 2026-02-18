@@ -24,6 +24,7 @@ namespace RealRHI {
 
 		virtual std::filesystem::path GetShaderDirectory() const = 0;
 		virtual DebugCallback GetDebugCallback() const = 0;
+		virtual bool IsDebugEnabled() const = 0;
 
 		virtual std::unique_ptr<Shader> CreateShader(const char* moduleName) = 0;
         virtual Buffer* CreateBuffer(const BufferDesc&) = 0;

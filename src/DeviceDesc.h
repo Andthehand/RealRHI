@@ -50,6 +50,7 @@ namespace RealRHI {
         uint32_t MaxFramesInFlight = 2;
 
 		bool EnableDebug = false;
+		bool EnableValidationLayers = false;
         DebugCallback DebugCallback = DefaultDebugCallback;
     };
 }
