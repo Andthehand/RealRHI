@@ -1,10 +1,17 @@
-# Add GLFW submodule (disable unnecessary GLFW features)
-set(GLFW_BUILD_DOCS OFF CACHE BOOL "Build the GLFW documentation" FORCE)
-set(GLFW_BUILD_TESTS OFF CACHE BOOL "Build the GLFW test programs" FORCE)
-set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "Build the GLFW example programs" FORCE)
+# Find SDL3 library
+# Try find_package first, then fall back to find_library with Vulkan SDK hint
+find_package(SDL3 QUIET)
+if(NOT SDL3_FOUND)
+    find_library(SDL_LIBRARY NAMES SDL3 HINTS "$ENV{VULKAN_SDK}/lib")
+    if(NOT SDL_LIBRARY)
+        if(DEFINED ENV{VULKAN_SDK})
+            message(FATAL_ERROR "SDL3 not found. Checked in $ENV{VULKAN_SDK}/lib. Please install SDL3 or ensure it's available via system package manager.")
+        else()
+            message(FATAL_ERROR "SDL3 not found. Please install SDL3 or set the VULKAN_SDK environment variable if SDL3 is bundled with your Vulkan SDK.")
+        endif()
+    endif()
+endif()
 
-# TODO: Change to FetchContent_Declare or something so we don't need to worry about submodule bloat
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../vendor/glfw ${CMAKE_CURRENT_BINARY_DIR}/glfw)
 
 # Add example subdirectories
 add_subdirectory(BasicExample)
