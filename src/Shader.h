@@ -1,6 +1,8 @@
 #pragma once
 
-class Shader {
-public:
-	virtual ~Shader() = default;
-};
+namespace RealRHI {
+	class Shader {
+	public:
+		virtual ~Shader() = default;
+	};
+}

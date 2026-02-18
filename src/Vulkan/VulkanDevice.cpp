@@ -2,28 +2,33 @@
 #include "VulkanDevice.h"
 
 #include "VulkanSwapchain.h"
+#include "VulkanShader.h"
 
 #include <set>
 #include <iostream>
 
 namespace RealRHI {
     VulkanDevice::VulkanDevice(const DeviceDesc& desc) 
-        : m_EnableDebug(desc.EnableDebug) {
+        : m_EnableDebug(desc.EnableDebug), m_ShaderDirectory(desc.ShaderDirectory), m_DebugCallback(desc.DebugCallback) {
         if (!CreateInstance(desc.ApplicationName)) {
+            // TODO: Actually handle this error
             return;
         }
 
         if (m_EnableDebug) {
-            if (!SetupDebugMessenger(desc.DebugCallback)) {
+            if (!SetupDebugMessenger()) {
+                // TODO: Actually handle this error
                 return;
             }
         }
 
         if (!PickPhysicalDevice()) {
+            // TODO: Actually handle this error
             return;
         }
 
         if (!CreateLogicalDevice()) {
+            // TODO: Actually handle this error
             return;
         }
     }
@@ -49,6 +54,10 @@ namespace RealRHI {
 
     Buffer* VulkanDevice::CreateBuffer(const BufferDesc&) {
         return nullptr;
+    }
+
+    std::unique_ptr<Shader> VulkanDevice::CreateShader(const char* moduleName) {
+        return std::make_unique<VulkanShader>((const VulkanDevice*)this, moduleName);
     }
 
     Pipeline* VulkanDevice::CreateGraphicsPipeline(const PipelineDesc&) {
@@ -102,7 +111,7 @@ namespace RealRHI {
         return true;
     }
 
-    bool VulkanDevice::SetupDebugMessenger(DebugCallback debugCallback) {
+    bool VulkanDevice::SetupDebugMessenger() {
         VkDebugUtilsMessengerCreateInfoEXT createInfo{
             .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
             .messageSeverity =
@@ -114,7 +123,7 @@ namespace RealRHI {
                 VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                 VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
             .pfnUserCallback = VulkanDebugCallback,
-            .pUserData = reinterpret_cast<void*>(debugCallback)
+            .pUserData = reinterpret_cast<void*>(m_DebugCallback)
         };
         
 
@@ -286,43 +295,37 @@ namespace RealRHI {
         void* userData) {
 		DebugCallback debugCallback = reinterpret_cast<DebugCallback>(userData);
 
-        if (debugCallback == nullptr) {
-            std::cerr << "Vulkan Debug: " << callbackData->pMessage << std::endl;
+        DebugMessage message;
+		switch (severity) {
+            case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
+                message.Severity = DebugSeverity::Info;
+                break;
+            case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
+                message.Severity = DebugSeverity::Warning;
+                break;
+            case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
+                message.Severity = DebugSeverity::Error;
+                break;
+            default:
+                message.Severity = DebugSeverity::Info;
         }
-        else {
-            DebugMessage message;
 
-			switch (severity) {
-                case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
-                    message.Severity = DebugSeverity::Info;
-                    break;
-                case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
-                    message.Severity = DebugSeverity::Warning;
-                    break;
-                case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
-                    message.Severity = DebugSeverity::Error;
-                    break;
-                default:
-                    message.Severity = DebugSeverity::Info;
-            }
+        switch (type) {
+            case VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT:
+                message.Type = DebugMessageType::General;
+                break;
+            case VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT:
+                message.Type = DebugMessageType::Validation;
+                break;
+            case VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT:
+                message.Type = DebugMessageType::Performance;
+                break;
+            default:
+                message.Type = DebugMessageType::General;
+		}
 
-            switch (type) {
-                case VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT:
-                    message.Type = DebugMessageType::General;
-                    break;
-                case VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT:
-                    message.Type = DebugMessageType::Validation;
-                    break;
-                case VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT:
-                    message.Type = DebugMessageType::Performance;
-                    break;
-                default:
-                    message.Type = DebugMessageType::General;
-			}
-
-            message.Message = callbackData->pMessage;
-            debugCallback(message);
-        }
+        message.Message = callbackData->pMessage;
+        debugCallback(message);
 
         return VK_FALSE;
     }

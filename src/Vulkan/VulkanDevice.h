@@ -1,6 +1,5 @@
 #pragma once
 #include "Device.h"
-#include "DeviceDesc.h"
 
 #include <vulkan/vulkan.h>
 #include <array>
@@ -16,7 +15,6 @@ namespace RealRHI {
 		}
 	};
 
-
 	class VulkanDevice : public Device {
 	public:
 		VulkanDevice(const DeviceDesc& desc);
@@ -31,13 +29,17 @@ namespace RealRHI {
 		uint32_t GetGraphicsQueueFamily() const { return m_GraphicsQueueFamily; }
 		uint32_t GetPresentQueueFamily() const { return m_PresentQueueFamily; }
 
+		std::filesystem::path GetShaderDirectory() const override { return m_ShaderDirectory; }
+		DebugCallback GetDebugCallback() const override { return m_DebugCallback; }
+
 		Buffer* CreateBuffer(const BufferDesc&) override;
+		std::unique_ptr<Shader> CreateShader(const char* moduleName) override;
 		Pipeline* CreateGraphicsPipeline(const PipelineDesc&) override;
 		CommandList* CreateCommandList() override;
 		std::unique_ptr<Swapchain> CreateSwapchain(const SwapchainDesc& desc) override;
 	private:
 		bool CreateInstance(const char* appName);
-		bool SetupDebugMessenger(DebugCallback debugCallback);
+		bool SetupDebugMessenger();
 		int RatePhysicalDevice(VkPhysicalDevice device);
 		bool PickPhysicalDevice();
 		bool CreateLogicalDevice();
@@ -57,6 +59,9 @@ namespace RealRHI {
 			uint32_t m_PresentQueueFamily;
 			VkQueue m_GraphicsQueue;
 			VkQueue m_PresentQueue;
+
+			std::filesystem::path m_ShaderDirectory;
+			DebugCallback m_DebugCallback;
 
 			bool m_EnableDebug;
 

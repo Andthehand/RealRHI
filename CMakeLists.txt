@@ -2,10 +2,17 @@ cmake_minimum_required(VERSION 3.15)
 
 project(RealRHI VERSION 1.0.0 LANGUAGES CXX)
 
+if (NOT IS_DIRECTORY $ENV{VULKAN_SDK})
+    message(WARNING "Vulkan SDK not detected, if installed please set VULKAN_SDK env var or manually provide libraries")
+else()
+    message(STATUS "Found Vulkan SDK in $ENV{VULKAN_SDK}")
+endif()
+
 # Options
 option(BUILD_EXAMPLES "Build example applications" ON)
 
 find_package(Vulkan REQUIRED)
+find_library(Slang_LIBRARY NAMES slang slang-compiler HINTS "$ENV{VULKAN_SDK}/lib" REQUIRED)
 
 # Create RealRHI library
 set(REALRHI_HEADERS
@@ -27,6 +34,7 @@ target_include_directories(RealRHI
     
 target_link_libraries(RealRHI
         Vulkan::Vulkan
+        ${Slang_LIBRARY}
 )
     
 target_compile_features(RealRHI PUBLIC cxx_std_20)
