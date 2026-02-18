@@ -5,5 +5,5 @@ add_executable(TriangleExample
 target_link_libraries(TriangleExample
     PRIVATE
         RealRHI
-        glfw
+        ${SDL_LIBRARY}
 )

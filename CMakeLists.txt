@@ -18,7 +18,7 @@ find_library(Slang_LIBRARY NAMES slang slang-compiler HINTS "$ENV{VULKAN_SDK}/li
 set(REALRHI_HEADERS
     "src/Vulkan/VulkanDevice.h"
     
- "src/Swapchain.h" "src/Texture.h" "src/Buffer.h" "src/Pipeline.h" "src/CommandList.h" "src/Device.h" "src/BufferDesc.h" "src/PipelineDesc.h" "src/TextureDesc.h" "src/DeviceDesc.h" "src/Vulkan/VulkanSwapchain.h" "src/SwapchainDesc.h" "src/glfw.h"  "src/Shader.h" "src/Vulkan/VulkanShader.h")
+ "src/Swapchain.h" "src/Texture.h" "src/Buffer.h" "src/Pipeline.h" "src/CommandList.h" "src/Device.h" "src/BufferDesc.h" "src/PipelineDesc.h" "src/TextureDesc.h" "src/DeviceDesc.h" "src/Vulkan/VulkanSwapchain.h" "src/SwapchainDesc.h" "src/sdl.h"  "src/Shader.h" "src/Vulkan/VulkanShader.h")
 
 set(REALRHI_SOURCES
     "src/Vulkan/VulkanDevice.cpp"

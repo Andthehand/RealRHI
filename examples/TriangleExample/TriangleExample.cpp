@@ -1,11 +1,7 @@
-#define GLFW_INCLUDE_VULKAN
-#if defined(_WIN32)
-#define GLFW_EXPOSE_NATIVE_WIN32
-#endif
-#include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 
-#include "glfw.h"
+#include "sdl.h"
 #include "Vulkan/VulkanDevice.h"
 #include "Vulkan/VulkanSwapchain.h"
 
@@ -32,8 +28,8 @@ const std::vector<Vertex> vertices = {
     {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
 };
 
-// GLFW window
-GLFWwindow* window = nullptr;
+// SDL window
+SDL_Window* window = nullptr;
 
 // Vulkan objects
 std::unique_ptr<RealRHI::Swapchain> baseSwapchain;
@@ -59,18 +55,16 @@ uint32_t currentFrame = 0;
 std::unique_ptr<RealRHI::VulkanDevice> device;
 
 void InitWindow() {
-    glfwInit();
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-    window = glfwCreateWindow(WIDTH, HEIGHT, "RealRHI Triangle Example", nullptr, nullptr);
+    SDL_Init(SDL_INIT_VIDEO);
+    window = SDL_CreateWindow("RealRHI Triangle Example", WIDTH, HEIGHT, SDL_WINDOW_VULKAN);
 }
 
 void CreateSwapChain() {
 	int width, height;
-	glfwGetFramebufferSize(window, &width, &height);
+	SDL_GetWindowSizeInPixels(window, &width, &height);
 
 	RealRHI::SwapchainDesc swapchainDesc {
-        .Window = RealRHI::GetWindowHandleFromGLFW(window),
+        .Window = RealRHI::GetWindowHandleFromSDL(window),
         .Width = (uint32_t)width,
         .Height = (uint32_t)height
     };
@@ -487,8 +481,8 @@ void Cleanup() {
 	baseSwapchain.reset();
     device.reset();
 
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    SDL_DestroyWindow(window);
+    SDL_Quit();
 }
 
 int main() {
@@ -534,8 +528,14 @@ int main() {
     std::cout << std::endl << "Rendering triangle..." << std::endl;
 
     // Main loop
-    while (!glfwWindowShouldClose(window)) {
-        glfwPollEvents();
+    bool running = true;
+    SDL_Event event;
+    while (running) {
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_QUIT) {
+                running = false;
+            }
+        }
         DrawFrame();
     }
 
