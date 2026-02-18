@@ -55,8 +55,16 @@ uint32_t currentFrame = 0;
 std::unique_ptr<RealRHI::VulkanDevice> device;
 
 void InitWindow() {
-    SDL_Init(SDL_INIT_VIDEO);
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        std::cerr << "Failed to initialize SDL: " << SDL_GetError() << std::endl;
+        exit(1);
+    }
     window = SDL_CreateWindow("RealRHI Triangle Example", WIDTH, HEIGHT, SDL_WINDOW_VULKAN);
+    if (!window) {
+        std::cerr << "Failed to create SDL window: " << SDL_GetError() << std::endl;
+        SDL_Quit();
+        exit(1);
+    }
 }
 
 void CreateSwapChain() {

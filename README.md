@@ -20,7 +20,6 @@ RealRHI/
 │   │   ├── TriangleExample.cpp
 │   │   └── CMakeLists.txt
 │   └── CMakeLists.txt     # Examples build configuration
-├── vendor/                # External dependencies (submodules)
 └── CMakeLists.txt         # Root build configuration
 ```
 
