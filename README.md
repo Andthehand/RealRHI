@@ -157,7 +157,10 @@ if (!device.Create(createInfo)) {
 
 // Create surface
 VkSurfaceKHR surface;
-SDL_Vulkan_CreateSurface(window, device.GetInstance(), nullptr, &surface);
+if (!SDL_Vulkan_CreateSurface(window, device.GetInstance(), nullptr, &surface)) {
+    std::cerr << "Failed to create Vulkan surface: " << SDL_GetError() << std::endl;
+    // Handle error
+}
 
 // ... create swapchain, pipeline, etc. (see TriangleExample.cpp for full example)
 ```
