@@ -2,6 +2,8 @@
 #include "Device.h"
 
 #include <vulkan/vulkan.h>
+#include <vma/vk_mem_alloc.h>
+
 #include <array>
 #include <optional>
 
@@ -31,6 +33,9 @@ namespace RealRHI {
 		uint32_t GetGraphicsQueueFamily() const { return m_GraphicsQueueFamily; }
 		uint32_t GetPresentQueueFamily() const { return m_PresentQueueFamily; }
 
+		//Allocator
+		VmaAllocator* GetAllocator() { return &m_Allocator; }
+
 		std::filesystem::path GetShaderDirectory() const override { return m_ShaderDirectory; }
 		DebugCallback GetDebugCallback() const override { return m_DebugCallback; }
 		bool IsDebugEnabled() const override { return m_EnableDebug; }
@@ -48,6 +53,7 @@ namespace RealRHI {
 		bool PickPhysicalDevice();
 		bool CreateLogicalDevice();
 		QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
+		bool CreateAllocator();
 
 		static VKAPI_ATTR VkBool32 VulkanDebugCallback(
 			VkDebugUtilsMessageSeverityFlagBitsEXT severity,
@@ -63,6 +69,8 @@ namespace RealRHI {
 			uint32_t m_PresentQueueFamily;
 			VkQueue m_GraphicsQueue;
 			VkQueue m_PresentQueue;
+
+			VmaAllocator m_Allocator;
 
 			std::filesystem::path m_ShaderDirectory;
 			DebugCallback m_DebugCallback;

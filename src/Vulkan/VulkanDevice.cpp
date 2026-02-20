@@ -1,4 +1,5 @@
 #include "Device.h"
+#define VMA_IMPLEMENTATION
 #include "VulkanDevice.h"
 
 #include "VulkanWindow.h"
@@ -41,15 +42,20 @@ namespace RealRHI {
             // TODO: Actually handle this error
             return;
         }
+
+        if (!CreateAllocator()) {
+            // TODO: Actually handle this error
+            return;
+        }
     }
 
     VulkanDevice::~VulkanDevice() {
         if (m_Device != VK_NULL_HANDLE) {
+			vmaDestroyAllocator(m_Allocator);
             vkDestroyDevice(m_Device, nullptr);
         }
 
         if (m_DebugMessenger != VK_NULL_HANDLE) {
-
             auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
                 m_Instance, "vkDestroyDebugUtilsMessengerEXT");
             if (func != nullptr) {
@@ -251,16 +257,21 @@ namespace RealRHI {
             queueCreateInfos.push_back(queueCreateInfo);
         }
 
-        VkPhysicalDeviceFeatures deviceFeatures{};
-
-        constexpr VkPhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeature {
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR,
-            .dynamicRendering = VK_TRUE,
+        VkPhysicalDeviceVulkan12Features enabledVk12Features{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
         };
-
+        const VkPhysicalDeviceVulkan13Features enabledVk13Features {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+            .pNext = &enabledVk12Features,
+            .synchronization2 = true,
+            .dynamicRendering = true,
+        };
+        VkPhysicalDeviceFeatures deviceFeatures{
+            .samplerAnisotropy = VK_TRUE,
+        };
         VkDeviceCreateInfo createInfo{
             .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-            .pNext = &dynamicRenderingFeature,
+            .pNext = &enabledVk13Features,
             .queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size()),
             .pQueueCreateInfos = queueCreateInfos.data(),
             .enabledExtensionCount = static_cast<uint32_t>(s_DeviceExtensions.size()),
@@ -308,6 +319,23 @@ namespace RealRHI {
 
         return indices;
     }
+
+    bool VulkanDevice::CreateAllocator() {
+        VmaVulkanFunctions vkFunctions{ 
+            .vkGetInstanceProcAddr = vkGetInstanceProcAddr, 
+            .vkGetDeviceProcAddr = vkGetDeviceProcAddr, 
+            .vkCreateImage = vkCreateImage 
+        };
+        VmaAllocatorCreateInfo allocatorCI{ 
+            .flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT, 
+            .physicalDevice = m_PhysicalDevice, 
+            .device = m_Device, 
+            .pVulkanFunctions = &vkFunctions, 
+            .instance = m_Instance 
+        };
+        return vmaCreateAllocator(&allocatorCI, &m_Allocator);
+    }
+
     VKAPI_ATTR VkBool32 VulkanDevice::VulkanDebugCallback(
         VkDebugUtilsMessageSeverityFlagBitsEXT severity, 
         VkDebugUtilsMessageTypeFlagsEXT type, 
