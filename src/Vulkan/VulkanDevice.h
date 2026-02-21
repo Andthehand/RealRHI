@@ -41,9 +41,9 @@ namespace RealRHI {
 		bool IsDebugEnabled() const override { return m_EnableDebug; }
 
 		std::unique_ptr<Window> CreateWindow(const WindowDesc& desc) override;
-		Buffer* CreateBuffer(const BufferDesc&) override;
 		std::unique_ptr<Shader> CreateShader(const char* moduleName) override;
-		Pipeline* CreateGraphicsPipeline(const PipelineDesc&) override;
+		std::unique_ptr<Pipeline> CreateGraphicsPipeline(const PipelineDesc& desc) override;
+		Buffer* CreateBuffer(const BufferDesc&) override;
 		CommandList* CreateCommandList() override;
 		std::unique_ptr<Swapchain> CreateSwapchain(const SwapchainDesc& desc) override;
 	private:

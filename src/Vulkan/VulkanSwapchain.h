@@ -19,11 +19,12 @@ namespace RealRHI {
 		VulkanSwapchain(const VulkanDevice* device, const SwapchainDesc& desc);
 		~VulkanSwapchain();
 
+		TextureFormat GetSwapchainImageFormat() const override { return m_SwapchainImageFormat; }
+
 		// TODO: Remove these getters
 		VkSurfaceKHR GetSurface() const { return m_Surface; }
 		VkSwapchainKHR GetSwapchain() const { return m_Swapchain; }
 		std::vector<VkImage>& GetSwapchainImages() { return m_SwapchainImages; }
-		const VkFormat& GetSwapchainImageFormat() const { return m_SwapchainImageFormat; }
 		VkExtent2D GetSwapchainExtent() const { return m_SwapchainExtent; }
 
 		// TODO: Implement these functions
@@ -43,7 +44,7 @@ namespace RealRHI {
 		VkSwapchainKHR m_Swapchain;
 
 		std::vector<VkImage> m_SwapchainImages;
-		VkFormat m_SwapchainImageFormat;
+		TextureFormat m_SwapchainImageFormat;
 		VkExtent2D m_SwapchainExtent;
 	};
 }

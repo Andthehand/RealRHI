@@ -5,6 +5,7 @@
 #include "VulkanWindow.h"
 #include "VulkanSwapchain.h"
 #include "VulkanShader.h"
+#include "VulkanPipeline.h"
 
 #include <set>
 #include <iostream>
@@ -83,8 +84,8 @@ namespace RealRHI {
         return std::make_unique<VulkanShader>((const VulkanDevice*)this, moduleName);
     }
 
-    Pipeline* VulkanDevice::CreateGraphicsPipeline(const PipelineDesc&) {
-        return nullptr;
+    std::unique_ptr<Pipeline> VulkanDevice::CreateGraphicsPipeline(const PipelineDesc& desc) {
+        return std::make_unique<VulkanPipeline>((const VulkanDevice*)this, desc);
     }
 
     CommandList* VulkanDevice::CreateCommandList() {

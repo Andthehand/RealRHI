@@ -1,32 +1,13 @@
 #pragma once
+#include "Shader.h"
+#include "TextureFormat.h"
+#include "BufferAttributes.h"
+
 #include <cstdint>
 #include <vector>
-
-#include "TextureDesc.h"
+#include <memory>
 
 namespace RealRHI {
-    enum class VertexFormat {
-        Float,
-        Float2,
-        Float3,
-        Float4,
-        UInt,
-        UInt2,
-        UInt3,
-        UInt4,
-    };
-
-    struct VertexAttribute {
-        uint32_t Location;
-        VertexFormat Format;
-        uint32_t Offset;
-    };
-
-    struct VertexLayout {
-        uint32_t Stride;
-        std::vector<VertexAttribute> Attributes;
-    };
-
     enum class CullMode {
         None,
         Front,
@@ -39,9 +20,9 @@ namespace RealRHI {
     };
 
     struct RasterState {
-        CullMode CullMode = CullMode::Back;
-        FillMode FillMode = FillMode::Solid;
-        bool FrontCounterClockwise = false;
+        CullMode cullMode = CullMode::Back;
+        FillMode fillMode = FillMode::Solid;
+        bool frontCounterClockwise = false;
     };
 
     enum class CompareOp {
@@ -56,31 +37,29 @@ namespace RealRHI {
     };
 
     struct DepthState {
-        bool DepthTestEnable = true;
-        bool DepthWriteEnable = true;
-        CompareOp CompareOp = CompareOp::Less;
+        bool depthTestEnable = true;
+        bool depthWriteEnable = true;
+        CompareOp compareOp = CompareOp::Less;
     };
 
     struct BlendState {
-        bool Enable = false;
+        bool enable = false;
     };
 
     struct RenderTargetFormats {
-        std::vector<Format> ColorFormats;
-        Format DepthFormat = Format::Unknown;
+        std::vector<TextureFormat> colorFormats;
+        TextureFormat depthFormat = TextureFormat::Unknown;
     };
 
     struct PipelineDesc {
-        // TODO: Replace with shader objects
-        std::vector<uint32_t> VertexShader;
-        std::vector<uint32_t> FragmentShader;
+        std::unique_ptr<Shader> shader;
 
-        VertexLayout VertexLayout;
+        BufferAttributes vertexLayout;
 
-        RasterState RasterState;
-        DepthState DepthState;
-        BlendState BlendState;
+        RasterState rasterState;
+        DepthState depthState;
+        BlendState blendState;
 
-        RenderTargetFormats RenderTargetFormats;
+        RenderTargetFormats renderTargetFormats;
     };
 }

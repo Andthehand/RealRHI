@@ -1,4 +1,6 @@
 #include "VulkanSwapchain.h"
+#include "VulkanConvertions.h"
+
 #include <iostream>
 #include <algorithm>
 
@@ -122,7 +124,7 @@ namespace RealRHI {
         m_SwapchainImages.resize(imageCount);
         vkGetSwapchainImagesKHR(m_Device->GetDevice(), m_Swapchain, &imageCount, m_SwapchainImages.data());
 
-        m_SwapchainImageFormat = surfaceFormat.format;
+        m_SwapchainImageFormat = Utils::VkFormatToTextureFormat(surfaceFormat.format);
         m_SwapchainExtent = extent;
 
 		return false;

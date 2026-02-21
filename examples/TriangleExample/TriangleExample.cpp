@@ -3,6 +3,9 @@
 
 #include "Vulkan/VulkanDevice.h"
 #include "Vulkan/VulkanSwapchain.h"
+#include "Vulkan/VulkanShader.h"
+#include "Vulkan/VulkanPipeline.h"
+#include "Vulkan/VulkanConvertions.h"
 
 #include <iostream>
 #include <vector>
@@ -10,11 +13,10 @@
 #include <algorithm>
 #include <limits>
 #include <cstring>
-#include <Vulkan/VulkanShader.h>
 
-const uint32_t WIDTH = 800;
-const uint32_t HEIGHT = 600;
-const int MAX_FRAMES_IN_FLIGHT = 2;
+constexpr uint32_t WIDTH = 800;
+constexpr uint32_t HEIGHT = 600;
+constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
 struct Vertex {
     float pos[2];
@@ -23,7 +25,7 @@ struct Vertex {
 
 const std::vector<Vertex> vertices = {
     {{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-    {{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+    {{0.5f, 0.5f},  {0.0f, 1.0f, 0.0f}},
     {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
 };
 
@@ -33,10 +35,8 @@ std::unique_ptr<RealRHI::Swapchain> baseSwapchain;
 RealRHI::VulkanSwapchain* swapchain = nullptr;
 std::vector<VkImageView> swapchainImageViews;
 
-std::unique_ptr<RealRHI::Shader> shader;
-RealRHI::VulkanShader* vulkanShader = nullptr; //TODO: Remove jank
-VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
-VkPipeline graphicsPipeline = VK_NULL_HANDLE;
+std::unique_ptr<RealRHI::Pipeline> basePipeline;
+RealRHI::VulkanPipeline* pipeline = nullptr; //TODO: Remove jank
 
 VkBuffer vertexBuffer = VK_NULL_HANDLE;
 VkDeviceMemory vertexBufferMemory = VK_NULL_HANDLE;
@@ -84,7 +84,7 @@ void CreateImageViews() {
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
             .image = swapchain->GetSwapchainImages()[i],
             .viewType = VK_IMAGE_VIEW_TYPE_2D,
-            .format = swapchain->GetSwapchainImageFormat(),
+            .format = RealRHI::Utils::TextureFormatToVkFormat(baseSwapchain->GetSwapchainImageFormat()),
             .components = componentMapping,
             .subresourceRange = subresourceRange,
         };
@@ -96,120 +96,35 @@ void CreateImageViews() {
 }
 
 void CreateGraphicsPipeline() {
-	shader = device->CreateShader("shader");
-	vulkanShader = static_cast<RealRHI::VulkanShader*>(shader.get()); //TODO: Remove jank
+    std::unique_ptr<RealRHI::Shader> shader = device->CreateShader("shader");
 
-	VkShaderModule shaderModule = vulkanShader->GetShaderModule();
-    std::vector<VkPipelineShaderStageCreateInfo> shaderStages{
-        {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = shaderModule, .pName = "main"},
-        {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = shaderModule, .pName = "main" }
+    RealRHI::PipelineDesc desc{
+        .shader = std::move(shader),
+        .vertexLayout = {
+            RealRHI::DataType::Float2, // pos
+            RealRHI::DataType::Float3, // color
+        },
+        .rasterState = {
+            .cullMode = RealRHI::CullMode::Back,
+            .fillMode = RealRHI::FillMode::Solid,
+            .frontCounterClockwise = false,
+		},
+        .depthState = {
+            .depthTestEnable = false,
+            .depthWriteEnable = false,
+			.compareOp = RealRHI::CompareOp::Less,
+        },
+        .blendState = {
+			.enable = false,
+        },
+        .renderTargetFormats = {
+            .colorFormats = { baseSwapchain->GetSwapchainImageFormat() },
+            .depthFormat = RealRHI::TextureFormat::Unknown,
+        },
     };
 
-    VkVertexInputBindingDescription bindingDescription{};
-    bindingDescription.binding = 0;
-    bindingDescription.stride = sizeof(Vertex);
-    bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-
-    std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
-    attributeDescriptions[0].binding = 0;
-    attributeDescriptions[0].location = 0;
-    attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
-    attributeDescriptions[0].offset = offsetof(Vertex, pos);
-
-    attributeDescriptions[1].binding = 0;
-    attributeDescriptions[1].location = 1;
-    attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[1].offset = offsetof(Vertex, color);
-
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 1;
-    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
-    vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
-    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
-
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    inputAssembly.primitiveRestartEnable = VK_FALSE;
-
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = (float) swapchain->GetSwapchainExtent().width;
-    viewport.height = (float) swapchain->GetSwapchainExtent().height;
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = swapchain->GetSwapchainExtent();
-
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.pViewports = &viewport;
-    viewportState.scissorCount = 1;
-    viewportState.pScissors = &scissor;
-
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.depthClampEnable = VK_FALSE;
-    rasterizer.rasterizerDiscardEnable = VK_FALSE;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
-    rasterizer.depthBiasEnable = VK_FALSE;
-
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | 
-                                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = VK_FALSE;
-
-    VkPipelineColorBlendStateCreateInfo colorBlending{};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.logicOpEnable = VK_FALSE;
-    colorBlending.attachmentCount = 1;
-    colorBlending.pAttachments = &colorBlendAttachment;
-
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-
-    if (vkCreatePipelineLayout(device->GetDevice(), &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create pipeline layout!");
-    }
-
-	VkPipelineRenderingCreateInfo pipelineRenderingInfo{
-		.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-		.colorAttachmentCount = 1,
-		.pColorAttachmentFormats = &swapchain->GetSwapchainImageFormat()
-    };
-
-    VkGraphicsPipelineCreateInfo pipelineInfo{
-        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-		.pNext = &pipelineRenderingInfo, // Chain the dynamic rendering info
-        .stageCount = (uint32_t)shaderStages.size(),
-        .pStages = shaderStages.data(),
-        .pVertexInputState = &vertexInputInfo,
-        .pInputAssemblyState = &inputAssembly,
-        .pViewportState = &viewportState,
-        .pRasterizationState = &rasterizer,
-        .pMultisampleState = &multisampling,
-        .pColorBlendState = &colorBlending,
-        .layout = pipelineLayout,
-        .renderPass = nullptr, // We're using dynamic rendering, so no render pass
-        .subpass = 0
-    };
-
-    if (vkCreateGraphicsPipelines(device->GetDevice(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create graphics pipeline!");
-    }
+	basePipeline = device->CreateGraphicsPipeline(desc);
+	pipeline = static_cast<RealRHI::VulkanPipeline*>(basePipeline.get()); //TODO: Remove jank
 }
 
 uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
@@ -345,7 +260,21 @@ void RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
     };
 
 	vkCmdBeginRendering(commandBuffer, &renderPassInfo);
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->GetPipeline());
+
+	// Dynamic Viewport and Scissor
+    VkViewport viewport{
+        .width = static_cast<float>(swapchain->GetSwapchainExtent().width),
+        .height = static_cast<float>(swapchain->GetSwapchainExtent().height),
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f,
+	};
+    VkRect2D scissor{
+        .offset = {0, 0},
+        .extent = swapchain->GetSwapchainExtent(),
+	};
+	vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+	vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
     VkBuffer vertexBuffers[] = {vertexBuffer};
     VkDeviceSize offsets[] = {0};
@@ -481,9 +410,7 @@ void Cleanup() {
 
     vkDestroyCommandPool(device->GetDevice(), commandPool, nullptr);
 
-	shader.reset();
-    vkDestroyPipeline(device->GetDevice(), graphicsPipeline, nullptr);
-    vkDestroyPipelineLayout(device->GetDevice(), pipelineLayout, nullptr);
+	basePipeline.reset();
 
     for (auto imageView : swapchainImageViews) {
         vkDestroyImageView(device->GetDevice(), imageView, nullptr);

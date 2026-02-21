@@ -1,17 +1,9 @@
 #pragma once
+#include "TextureFormat.h"
+
 #include <cstdint>
 
 namespace RealRHI {
-    enum class Format {
-        RGBA8_UNorm,
-        RGBA8_SRGB,
-        BGRA8_UNorm,
-        D24S8,
-        R32_Float,
-
-		Unknown
-    };
-
     enum class TextureUsage : uint32_t {
         None = 0,
         ShaderResource = 1 << 0,
@@ -30,7 +22,7 @@ namespace RealRHI {
         uint32_t mipLevels = 1;
         uint32_t arrayLayers = 1;
 
-        Format format;
+        TextureFormat format;
 
         TextureUsage usage;
     };
