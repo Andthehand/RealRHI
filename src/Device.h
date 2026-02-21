@@ -7,6 +7,7 @@
 #include "BufferDesc.h"
 #include "Buffer.h"
 
+#include "ShaderDesc.h"
 #include "Shader.h"
 
 #include "PipelineDesc.h"
@@ -30,7 +31,7 @@ namespace RealRHI {
 		virtual bool IsDebugEnabled() const = 0;
 
 		virtual std::unique_ptr<Window> CreateWindow(const WindowDesc& desc) = 0;
-		virtual std::unique_ptr<Shader> CreateShader(const char* moduleName) = 0;
+		virtual std::unique_ptr<Shader> CreateShader(const ShaderDesc& desc) = 0;
 		virtual std::unique_ptr<Pipeline> CreateGraphicsPipeline(const PipelineDesc& desc) = 0;
         virtual std::unique_ptr<Swapchain> CreateSwapchain(const SwapchainDesc& desc) = 0;
     };

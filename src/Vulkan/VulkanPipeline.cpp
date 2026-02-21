@@ -6,11 +6,19 @@
 namespace RealRHI {
     VulkanPipeline::VulkanPipeline(const VulkanDevice* device, const PipelineDesc& desc) 
         : m_Device(device) {
-		VkShaderModule shaderModule = static_cast<const VulkanShader*>(desc.shader.get())->GetShaderModule();
-        std::vector<VkPipelineShaderStageCreateInfo> shaderStages = {
-            { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = shaderModule, .pName = "main" },
-            { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = shaderModule, .pName = "main" }
-        };
+		const VulkanShader* shader = static_cast<VulkanShader*>(desc.shader.get());
+		VkShaderModule shaderModule = shader->GetShaderModule();
+
+		const std::vector<EntryPoint>& entryPoints = shader->GetEntryPoints();
+        std::vector<VkPipelineShaderStageCreateInfo> shaderStages(entryPoints.size());
+		for (size_t i = 0; i < entryPoints.size(); i++) {
+            shaderStages[i] = VkPipelineShaderStageCreateInfo{
+                .sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                .stage  = Utils::ShaderStageToVkShaderStage(entryPoints[i].stage),
+                .module = shaderModule,
+                .pName  = entryPoints[i].entryPoint
+            };
+        }
 
         VkVertexInputBindingDescription bindingDescription{
             .binding = 0,

@@ -76,8 +76,8 @@ namespace RealRHI {
         return std::make_unique<VulkanWindow>(desc);
     }
 
-    std::unique_ptr<Shader> VulkanDevice::CreateShader(const char* moduleName) {
-        return std::make_unique<VulkanShader>((const VulkanDevice*)this, moduleName);
+    std::unique_ptr<Shader> VulkanDevice::CreateShader(const ShaderDesc& desc) {
+        return std::make_unique<VulkanShader>((const VulkanDevice*)this, desc);
     }
 
     std::unique_ptr<Pipeline> VulkanDevice::CreateGraphicsPipeline(const PipelineDesc& desc) {

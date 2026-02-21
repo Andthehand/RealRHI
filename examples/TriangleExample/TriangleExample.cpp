@@ -96,7 +96,14 @@ void CreateImageViews() {
 }
 
 void CreateGraphicsPipeline() {
-    std::unique_ptr<RealRHI::Shader> shader = device->CreateShader("shader");
+    const RealRHI::ShaderDesc shaderDesc{
+        .moduleName = "shader",
+        .entryPoints = {
+			{ .entryPoint = "main", .stage = RealRHI::ShaderStage::Vertex },
+            { .entryPoint = "main", .stage = RealRHI::ShaderStage::Fragment },
+        }
+	};
+    std::unique_ptr<RealRHI::Shader> shader = device->CreateShader(shaderDesc);
 
     RealRHI::PipelineDesc desc{
         .shader = std::move(shader),

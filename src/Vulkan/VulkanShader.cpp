@@ -3,12 +3,12 @@
 
 
 namespace RealRHI {
-	VulkanShader::VulkanShader(const VulkanDevice* device, const char* moduleName) 
-		: m_Device(device) {
+	VulkanShader::VulkanShader(const VulkanDevice* device, const ShaderDesc& desc)
+		: m_Device(device), m_EntryPoints(desc.entryPoints) {
 		InitializeSlang(m_Device->GetShaderDirectory().string().c_str(), device->IsDebugEnabled());
 
 		Slang::ComPtr<slang::IBlob> diagnostics;
-		m_SlangModule = s_SlangSession->loadModule(moduleName, diagnostics.writeRef());
+		m_SlangModule = s_SlangSession->loadModule(desc.moduleName, diagnostics.writeRef());
 		if(CheckSlangDiagnostics(diagnostics)) {
 			return;
 		}
