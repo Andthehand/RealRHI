@@ -106,7 +106,7 @@ void CreateGraphicsPipeline() {
     std::unique_ptr<RealRHI::Shader> shader = device->CreateShader(shaderDesc);
 
     RealRHI::PipelineDesc desc{
-        .shader = std::move(shader),
+        .shader = shader.get(),
         .vertexLayout = {
             RealRHI::DataType::Float2, // pos
             RealRHI::DataType::Float3, // color

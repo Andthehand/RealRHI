@@ -52,8 +52,9 @@ namespace RealRHI {
     };
 
     struct PipelineDesc {
-        std::unique_ptr<Shader> shader;
+        Shader* shader;
 
+		//TODO: Use shader reflection to get this information instead of hardcoding it in the pipeline desc
         BufferAttributes vertexLayout;
 
         RasterState rasterState;
