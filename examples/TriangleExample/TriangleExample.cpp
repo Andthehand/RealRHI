@@ -56,7 +56,7 @@ void CreateSwapChain() {
 
 	window = device->CreateWindow({ WIDTH, HEIGHT });
 	RealRHI::SwapchainDesc swapchainDesc {
-        .WindowPtr = window.get(),
+        .window = window.get(),
     };
 
     baseSwapchain = device->CreateSwapchain(swapchainDesc);
@@ -84,7 +84,7 @@ void CreateImageViews() {
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
             .image = swapchain->GetSwapchainImages()[i],
             .viewType = VK_IMAGE_VIEW_TYPE_2D,
-            .format = RealRHI::Utils::TextureFormatToVkFormat(baseSwapchain->GetSwapchainImageFormat()),
+            .format = RealRHI::Utils::TextureFormatToVkFormat(baseSwapchain->GetBackBufferFormat()),
             .components = componentMapping,
             .subresourceRange = subresourceRange,
         };
@@ -118,7 +118,7 @@ void CreateGraphicsPipeline() {
 			.enable = false,
         },
         .renderTargetFormats = {
-            .colorFormats = { baseSwapchain->GetSwapchainImageFormat() },
+            .colorFormats = { baseSwapchain->GetBackBufferFormat() },
             .depthFormat = RealRHI::TextureFormat::Unknown,
         },
     };
@@ -430,10 +430,10 @@ int main() {
     // Create and initialize device
     // NOTE: Validation layers may fail in headless/GPU-less environments
     RealRHI::DeviceDesc createInfo {
-        .ApplicationName = "RealRHI Triangle Example",
-        .ShaderDirectory = "shaders",
-        .EnableDebug = true,
-        .EnableValidationLayers = true,
+        .applicationName = "RealRHI Triangle Example",
+        .shaderDirectory = "shaders",
+        .enableDebug = true,
+        .enableValidationLayers = true,
     };
 
 	device = std::make_unique<RealRHI::VulkanDevice>(createInfo);

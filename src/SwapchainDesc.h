@@ -3,6 +3,6 @@
 
 namespace RealRHI {
     struct SwapchainDesc {
-        Window* WindowPtr;
+        Window* window;
 	};
 }

@@ -43,8 +43,6 @@ namespace RealRHI {
 		std::unique_ptr<Window> CreateWindow(const WindowDesc& desc) override;
 		std::unique_ptr<Shader> CreateShader(const char* moduleName) override;
 		std::unique_ptr<Pipeline> CreateGraphicsPipeline(const PipelineDesc& desc) override;
-		Buffer* CreateBuffer(const BufferDesc&) override;
-		CommandList* CreateCommandList() override;
 		std::unique_ptr<Swapchain> CreateSwapchain(const SwapchainDesc& desc) override;
 	private:
 		bool CreateInstance(const char* appName, bool enableValidationLayer);

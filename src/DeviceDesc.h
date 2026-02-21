@@ -18,39 +18,39 @@ namespace RealRHI {
     };
 
     struct DebugMessage {
-        DebugSeverity Severity;
-        DebugMessageType Type;
-        const char* Message;
+        DebugSeverity severity;
+        DebugMessageType type;
+        const char* message;
     };
 
     using DebugCallback = void(*)(const DebugMessage& message);
 
     static void DefaultDebugCallback(const DebugMessage& message) {
         const char* severityStr = "";
-        switch (message.Severity) {
+        switch (message.severity) {
             case DebugSeverity::Info: severityStr = "Info"; break;
             case DebugSeverity::Warning: severityStr = "Warning"; break;
             case DebugSeverity::Error: severityStr = "Error"; break;
         }
         const char* typeStr = "";
-        switch (message.Type) {
+        switch (message.type) {
             case DebugMessageType::General: typeStr = "General"; break;
             case DebugMessageType::Validation: typeStr = "Validation"; break;
 			case DebugMessageType::Performance: typeStr = "Performance"; break;
                 case DebugMessageType::ShaderCompilation: typeStr = "ShaderCompilation"; break;
         }
-        std::cerr << "[" << severityStr << "][" << typeStr << "] " << message.Message << std::endl;
+        std::cerr << "[" << severityStr << "][" << typeStr << "] " << message.message << std::endl;
 	}
 
     struct DeviceDesc {
-        const char* ApplicationName = "RealEngine";
+        const char* applicationName = "RealEngine";
 
-		std::filesystem::path ShaderDirectory = "assets/shaders";
+		std::filesystem::path shaderDirectory = "assets/shaders";
 
-        uint32_t MaxFramesInFlight = 2;
+        uint32_t maxFramesInFlight = 2;
 
-		bool EnableDebug = false;
-		bool EnableValidationLayers = false;
-        DebugCallback DebugCallback = DefaultDebugCallback;
+		bool enableDebug = false;
+		bool enableValidationLayers = false;
+        DebugCallback debugCallback = DefaultDebugCallback;
     };
 }

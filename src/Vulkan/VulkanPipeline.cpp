@@ -14,19 +14,19 @@ namespace RealRHI {
 
         VkVertexInputBindingDescription bindingDescription{
             .binding = 0,
-            .stride = desc.vertexLayout.Stride,
+            .stride = desc.vertexLayout.stride,
             .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
         };
 
         std::vector<VkVertexInputAttributeDescription> attributeDescriptions{};
-        for (size_t i = 0; i < desc.vertexLayout.Attributes.size(); i++) {
-			const BufferAttribute attr = desc.vertexLayout.Attributes[i];
+        for (size_t i = 0; i < desc.vertexLayout.attributes.size(); i++) {
+			const BufferAttribute attr = desc.vertexLayout.attributes[i];
 
             attributeDescriptions.push_back(VkVertexInputAttributeDescription{
                 .location = static_cast<uint32_t>(i),
                 .binding = 0,
-                .format = Utils::BufferDataTypeToVkFormat(attr.Type),
-				.offset = attr.Offset
+                .format = Utils::BufferDataTypeToVkFormat(attr.type),
+				.offset = attr.offset
             });
         }
 

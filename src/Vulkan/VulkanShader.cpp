@@ -80,9 +80,9 @@ namespace RealRHI {
 	bool VulkanShader::CheckSlangDiagnostics(const Slang::ComPtr<slang::IBlob> diagnostics) const {
 		if (diagnostics) {
 			DebugMessage message{
-				.Severity = DebugSeverity::Error,
-				.Type = DebugMessageType::ShaderCompilation,
-				.Message = static_cast<const char*>(diagnostics->getBufferPointer())
+				.severity = DebugSeverity::Error,
+				.type = DebugMessageType::ShaderCompilation,
+				.message = static_cast<const char*>(diagnostics->getBufferPointer())
 			};
 			m_Device->GetDebugCallback()(message);
 			return true;

@@ -12,74 +12,74 @@ namespace RealRHI {
 
     inline uint8_t ElementCount(DataType type) {
         switch (type) {
-        case DataType::Float:
-        case DataType::Uint:
-        case DataType::Int:   return 1;
+            case DataType::Float:
+            case DataType::Uint:
+            case DataType::Int:   return 1;
 
-        case DataType::Float2:
-        case DataType::Uint2:
-        case DataType::Int2:  return 2;
+            case DataType::Float2:
+            case DataType::Uint2:
+            case DataType::Int2:  return 2;
 
-        case DataType::Float3:
-        case DataType::Uint3:
-        case DataType::Int3:  return 3;
+            case DataType::Float3:
+            case DataType::Uint3:
+            case DataType::Int3:  return 3;
 
-        case DataType::Float4:
-        case DataType::Uint4:
-        case DataType::Int4:  return 4;
+            case DataType::Float4:
+            case DataType::Uint4:
+            case DataType::Int4:  return 4;
 
-        default: return 0;
+            default: return 0;
         }
     }
 
     inline uint8_t BaseSize(DataType type) {
         switch (type) {
-        case DataType::Float:
-        case DataType::Float2:
-        case DataType::Float3:
-        case DataType::Float4:
-            return sizeof(float);
+            case DataType::Float:
+            case DataType::Float2:
+            case DataType::Float3:
+            case DataType::Float4:
+                return sizeof(float);
 
-        case DataType::Uint:
-        case DataType::Uint2:
-        case DataType::Uint3:
-        case DataType::Uint4:
-            return sizeof(uint32_t);
+            case DataType::Uint:
+            case DataType::Uint2:
+            case DataType::Uint3:
+            case DataType::Uint4:
+                return sizeof(uint32_t);
 
-        case DataType::Int:
-        case DataType::Int2:
-        case DataType::Int3:
-        case DataType::Int4:
-            return sizeof(int32_t);
+            case DataType::Int:
+            case DataType::Int2:
+            case DataType::Int3:
+            case DataType::Int4:
+                return sizeof(int32_t);
 
-        default: return 0;
+            default: return 0;
         }
     }
 
     struct BufferAttribute {
-        DataType Type;
-        uint32_t InstanceDivisor = 0;
-        uint32_t Offset = 0;
+        DataType type;
+        uint32_t instanceDivisor = 0;
+        uint32_t offset = 0;
 
         BufferAttribute(DataType type, uint32_t divisor = 0)
-            : Type(type), InstanceDivisor(divisor) {
+            : type(type), instanceDivisor(divisor) {
         }
     };
 
     struct BufferAttributes {
-        std::vector<BufferAttribute> Attributes;
-        uint32_t Stride = 0;
+        std::vector<BufferAttribute> attributes;
+        uint32_t stride = 0;
 
         BufferAttributes(std::initializer_list<BufferAttribute> types)
-            : Attributes(types) {
+            : attributes(types) {
             uint32_t offset = 0;
 
-            for (auto& attr : Attributes) {
-                attr.Offset = offset;
-                offset += ElementCount(attr.Type) * BaseSize(attr.Type);
+            for (auto& attr : attributes) {
+                attr.offset = offset;
+                offset += ElementCount(attr.type) * BaseSize(attr.type);
             }
 
-            Stride = offset;
+            stride = offset;
         }
     };
 }

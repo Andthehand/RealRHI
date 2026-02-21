@@ -19,7 +19,7 @@ namespace RealRHI {
 		VulkanSwapchain(const VulkanDevice* device, const SwapchainDesc& desc);
 		~VulkanSwapchain();
 
-		TextureFormat GetSwapchainImageFormat() const override { return m_SwapchainImageFormat; }
+		TextureFormat GetBackBufferFormat() const override { return m_SwapchainImageFormat; }
 
 		// TODO: Remove these getters
 		VkSurfaceKHR GetSurface() const { return m_Surface; }

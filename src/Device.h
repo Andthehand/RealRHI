@@ -32,8 +32,6 @@ namespace RealRHI {
 		virtual std::unique_ptr<Window> CreateWindow(const WindowDesc& desc) = 0;
 		virtual std::unique_ptr<Shader> CreateShader(const char* moduleName) = 0;
 		virtual std::unique_ptr<Pipeline> CreateGraphicsPipeline(const PipelineDesc& desc) = 0;
-        virtual Buffer* CreateBuffer(const BufferDesc& desc) = 0;
-        virtual CommandList* CreateCommandList() = 0;
         virtual std::unique_ptr<Swapchain> CreateSwapchain(const SwapchainDesc& desc) = 0;
     };
 }

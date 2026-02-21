@@ -6,7 +6,7 @@ namespace RealRHI {
     public:
 		virtual ~Swapchain() = default;
 
-        virtual TextureFormat GetSwapchainImageFormat() const = 0;
+        virtual TextureFormat GetBackBufferFormat() const = 0;
 
         virtual void BeginFrame() = 0;
         virtual void Present() = 0;

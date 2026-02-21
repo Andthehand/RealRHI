@@ -7,7 +7,7 @@
 namespace RealRHI {
     VulkanSwapchain::VulkanSwapchain(const VulkanDevice* device, const SwapchainDesc& desc)
         : m_Device(device) {
-        m_Window = static_cast<VulkanWindow*>(desc.WindowPtr);
+        m_Window = static_cast<VulkanWindow*>(desc.window);
         m_Window->CreateVulkanSurface(*device, &m_Surface);
 
         CreateSwapchain(VkExtent2D{ .width = (uint32_t)m_Window->GetWidth(), .height = m_Window->GetHeight()});
