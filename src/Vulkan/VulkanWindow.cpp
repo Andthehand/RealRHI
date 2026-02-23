@@ -3,7 +3,7 @@
 namespace RealRHI {
 	VulkanWindow::VulkanWindow(const WindowDesc& desc) 
         : m_Width(desc.Width), m_Height(desc.Height) {
-        m_Window = SDL_CreateWindow("RealRHI Triangle Example", desc.Width, desc.Height, SDL_WINDOW_VULKAN);
+        m_Window = SDL_CreateWindow(desc.Title, desc.Width, desc.Height, SDL_WINDOW_VULKAN);
         if (!m_Window) {
 			return; // TODO: Handle this error properly
         }

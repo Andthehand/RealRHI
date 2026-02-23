@@ -55,7 +55,11 @@ std::unique_ptr<RealRHI::VulkanDevice> device;
 void CreateSwapChain() {
 	int width, height;
 
-	window = device->CreateWindow({ WIDTH, HEIGHT });
+	window = device->CreateWindow({
+		.Title = "RealRHI Triangle Example",
+		.Width = WIDTH, 
+        .Height = HEIGHT 
+    });
 	RealRHI::SwapchainDesc swapchainDesc {
         .window = window.get(),
     };
