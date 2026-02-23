@@ -34,7 +34,7 @@ namespace RealRHI {
 		uint32_t GetPresentQueueFamily() const { return m_PresentQueueFamily; }
 
 		//Allocator
-		VmaAllocator* GetAllocator() { return &m_Allocator; }
+		VmaAllocator GetAllocator() const { return m_Allocator; }
 
 		std::filesystem::path GetShaderDirectory() const override { return m_ShaderDirectory; }
 		DebugCallback GetDebugCallback() const override { return m_DebugCallback; }
@@ -44,6 +44,7 @@ namespace RealRHI {
 		std::unique_ptr<Shader> CreateShader(const ShaderDesc& desc) override;
 		std::unique_ptr<Pipeline> CreateGraphicsPipeline(const PipelineDesc& desc) override;
 		std::unique_ptr<Swapchain> CreateSwapchain(const SwapchainDesc& desc) override;
+		std::unique_ptr<Buffer> CreateBuffer(const BufferDesc& desc) override;
 	private:
 		bool CreateInstance(const char* appName, bool enableValidationLayer);
 		bool SetupDebugMessenger();

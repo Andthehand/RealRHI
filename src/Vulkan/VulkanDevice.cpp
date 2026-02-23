@@ -6,6 +6,7 @@
 #include "VulkanSwapchain.h"
 #include "VulkanShader.h"
 #include "VulkanPipeline.h"
+#include "VulkanBuffer.h"
 
 #include <set>
 #include <iostream>
@@ -86,6 +87,10 @@ namespace RealRHI {
 
     std::unique_ptr<Swapchain> VulkanDevice::CreateSwapchain(const SwapchainDesc& desc) {
         return std::make_unique<VulkanSwapchain>((const VulkanDevice*)this, desc);
+    }
+
+    std::unique_ptr<Buffer> VulkanDevice::CreateBuffer(const BufferDesc& desc) {
+        return std::make_unique<VulkanBuffer>((const VulkanDevice*)this, desc);
     }
 
     bool VulkanDevice::CreateInstance(const char* appName, bool enableValidationLayer) {
@@ -320,7 +325,6 @@ namespace RealRHI {
             .vkCreateImage = vkCreateImage 
         };
         VmaAllocatorCreateInfo allocatorCI{ 
-            .flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT, 
             .physicalDevice = m_PhysicalDevice, 
             .device = m_Device, 
             .pVulkanFunctions = &vkFunctions, 

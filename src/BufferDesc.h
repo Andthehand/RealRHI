@@ -13,6 +13,24 @@ namespace RealRHI {
         Indirect = 1 << 6,
     };
 
+    constexpr BufferUsage operator|(BufferUsage a, BufferUsage b) {
+        return static_cast<BufferUsage>(
+            static_cast<uint32_t>(a) | static_cast<uint32_t>(b)
+            );
+    }
+    constexpr BufferUsage operator&(BufferUsage a, BufferUsage b) {
+        return static_cast<BufferUsage>(
+            static_cast<uint32_t>(a) & static_cast<uint32_t>(b)
+            );
+    }
+    constexpr BufferUsage& operator|=(BufferUsage& a, BufferUsage b) {
+        a = a | b;
+        return a;
+    }
+    constexpr bool Any(BufferUsage v) {
+        return static_cast<uint32_t>(v) != 0;
+    }
+
     enum class MemoryUsage {
         GPUOnly,        // Device local
         CPUToGPU,       // Upload buffer
@@ -20,7 +38,7 @@ namespace RealRHI {
     };
 
     struct BufferDesc {
-        uint64_t size = 0;
+		uint64_t size = 0; // Size of the buffer in bytes
 
         BufferUsage usage = BufferUsage::None;
         MemoryUsage memoryUsage = MemoryUsage::GPUOnly;

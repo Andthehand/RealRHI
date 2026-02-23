@@ -6,6 +6,7 @@
 #include "Vulkan/VulkanShader.h"
 #include "Vulkan/VulkanPipeline.h"
 #include "Vulkan/VulkanConvertions.h"
+#include "Vulkan/VulkanBuffer.h"
 
 #include <iostream>
 #include <vector>
@@ -38,8 +39,8 @@ std::vector<VkImageView> swapchainImageViews;
 std::unique_ptr<RealRHI::Pipeline> basePipeline;
 RealRHI::VulkanPipeline* pipeline = nullptr; //TODO: Remove jank
 
-VkBuffer vertexBuffer = VK_NULL_HANDLE;
-VkDeviceMemory vertexBufferMemory = VK_NULL_HANDLE;
+std::unique_ptr<RealRHI::Buffer> baseVertexBuffer;
+RealRHI::VulkanBuffer* vertexBuffer = nullptr; //TODO: Remove jank
 
 std::vector<VkCommandBuffer> commandBuffers;
 VkCommandPool commandPool = VK_NULL_HANDLE;
@@ -148,35 +149,15 @@ uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
 }
 
 void CreateVertexBuffer() {
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = sizeof(vertices[0]) * vertices.size();
-    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    RealRHI::BufferDesc bufferDesc{
+        .size = sizeof(vertices[0]) * vertices.size(),
+        .usage = RealRHI::BufferUsage::Vertex,
+        .memoryUsage = RealRHI::MemoryUsage::CPUToGPU,
+        .initialData = vertices.data(),
+    };
 
-    if (vkCreateBuffer(device->GetDevice(), &bufferInfo, nullptr, &vertexBuffer) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create vertex buffer!");
-    }
-
-    VkMemoryRequirements memRequirements;
-    vkGetBufferMemoryRequirements(device->GetDevice(), vertexBuffer, &memRequirements);
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, 
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-    if (vkAllocateMemory(device->GetDevice(), &allocInfo, nullptr, &vertexBufferMemory) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to allocate vertex buffer memory!");
-    }
-
-    vkBindBufferMemory(device->GetDevice(), vertexBuffer, vertexBufferMemory, 0);
-
-    void* data;
-    vkMapMemory(device->GetDevice(), vertexBufferMemory, 0, bufferInfo.size, 0, &data);
-    memcpy(data, vertices.data(), (size_t) bufferInfo.size);
-    vkUnmapMemory(device->GetDevice(), vertexBufferMemory);
+	baseVertexBuffer = device->CreateBuffer(bufferDesc);
+	vertexBuffer = static_cast<RealRHI::VulkanBuffer*>(baseVertexBuffer.get()); //TODO: Remove jank
 }
 
 void CreateCommandPool() {
@@ -283,7 +264,7 @@ void RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
 	vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
 	vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-    VkBuffer vertexBuffers[] = {vertexBuffer};
+    VkBuffer vertexBuffers[] = {vertexBuffer->GetBuffer()};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
@@ -423,9 +404,7 @@ void Cleanup() {
         vkDestroyImageView(device->GetDevice(), imageView, nullptr);
     }
 
-    vkDestroyBuffer(device->GetDevice(), vertexBuffer, nullptr);
-    vkFreeMemory(device->GetDevice(), vertexBufferMemory, nullptr);
-
+	baseVertexBuffer.reset();
 	baseSwapchain.reset();
     device.reset();
 }

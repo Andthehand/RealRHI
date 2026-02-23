@@ -7,6 +7,39 @@
 #include <Vulkan/vulkan.h>
 
 namespace RealRHI::Utils {
+    // ---------------------- BufferDesc -------------------
+    constexpr VkBufferUsageFlags BufferUsageToVkBufferUsage(BufferUsage usage) {
+        VkBufferUsageFlags flags = 0;
+        if (Any(usage & BufferUsage::Vertex)) flags |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        if (Any(usage & BufferUsage::Index)) flags |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+        if (Any(usage & BufferUsage::Uniform)) flags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        if (Any(usage & BufferUsage::Storage)) flags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        if (Any(usage & BufferUsage::TransferSrc)) flags |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        if (Any(usage & BufferUsage::TransferDst)) flags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        if (Any(usage & BufferUsage::Indirect)) flags |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+        return flags;
+	}
+
+    constexpr VmaAllocationCreateInfo MemoryUsageToVmaAllocationCreateInfo(MemoryUsage usage) {
+        VmaAllocationCreateInfo allocInfo{
+            .usage = VMA_MEMORY_USAGE_AUTO,
+        };
+
+        switch (usage) {
+            case MemoryUsage::GPUOnly:
+                allocInfo.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+                break;
+            case MemoryUsage::CPUToGPU:
+                allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+                break;
+            case MemoryUsage::GPUToCPU:
+                allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+                break;
+        }
+        return allocInfo;
+    }
+    // ---------------------- BufferDesc -------------------
+
     // ---------------------- ShaderStage ------------------
     constexpr VkShaderStageFlagBits ShaderStageToVkShaderStage(ShaderStage stage) {
         switch (stage) {
