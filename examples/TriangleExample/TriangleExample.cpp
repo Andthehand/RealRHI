@@ -9,6 +9,7 @@
 #include "Vulkan/VulkanBuffer.h"
 #include "Vulkan/VulkanTexture.h"
 #include "Vulkan/VulkanTextureView.h"
+#include "Vulkan/VulkanCommandList.h"
 
 #include <iostream>
 #include <vector>
@@ -44,8 +45,7 @@ RealRHI::VulkanPipeline* pipeline = nullptr; //TODO: Remove jank
 std::unique_ptr<RealRHI::Buffer> baseVertexBuffer;
 RealRHI::VulkanBuffer* vertexBuffer = nullptr; //TODO: Remove jank
 
-std::vector<VkCommandBuffer> commandBuffers;
-VkCommandPool commandPool = VK_NULL_HANDLE;
+std::vector<std::unique_ptr<RealRHI::VulkanCommandList>> commandLists;
 
 std::vector<VkSemaphore> imageAvailableSemaphores; // GPU->GPU synchronization
 std::vector<VkSemaphore> renderFinishedSemaphores; // GPU->GPU synchronization
@@ -142,116 +142,89 @@ void CreateVertexBuffer() {
 	vertexBuffer = static_cast<RealRHI::VulkanBuffer*>(baseVertexBuffer.get()); //TODO: Remove jank
 }
 
-void CreateCommandPool() {
-    VkCommandPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    poolInfo.queueFamilyIndex = device->GetGraphicsQueueFamily();
-
-    if (vkCreateCommandPool(device->GetDevice(), &poolInfo, nullptr, &commandPool) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create command pool!");
-    }
+void CreateCommandLists() {
+	commandLists.resize(MAX_FRAMES_IN_FLIGHT);
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+		commandLists[i] = std::make_unique<RealRHI::VulkanCommandList>(device.get());
+	}
 }
 
-void CreateCommandBuffers() {
-    commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+void RecordCommandBuffer(RealRHI::VulkanCommandList* commandList, uint32_t imageIndex) {
+	commandList->Begin();
 
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool = commandPool;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = (uint32_t) commandBuffers.size();
+	VkCommandBuffer commandBuffer = commandList->GetCommandBuffer();
 
-    if (vkAllocateCommandBuffers(device->GetDevice(), &allocInfo, commandBuffers.data()) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to allocate command buffers!");
-    }
-}
-
-void RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-    if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to begin recording command buffer!");
-    }
-
-    constexpr VkImageSubresourceRange subresourceRange {
-        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-        .baseMipLevel = 0,
-        .levelCount = 1,
-        .baseArrayLayer = 0,
-        .layerCount = 1
+	constexpr VkImageSubresourceRange subresourceRange {
+		.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+		.baseMipLevel = 0,
+		.levelCount = 1,
+		.baseArrayLayer = 0,
+		.layerCount = 1
 	};
 
-    VkImageMemoryBarrier2 imageBarrierToRender{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
-        .srcAccessMask = VK_ACCESS_2_NONE,
-        .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = swapchain->GetSwapchainImages()[imageIndex].GetImage(),
-        .subresourceRange = subresourceRange
-    };
-
-    VkDependencyInfo depInfoToRender{
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &imageBarrierToRender
-    };
-
-    vkCmdPipelineBarrier2(commandBuffer, &depInfoToRender);
-
-    VkClearValue clearColor = { {{0.0f, 0.0f, 0.0f, 1.0f}} };
-    VkRenderingAttachmentInfo colorAttachmentInfo {
-		.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-		.imageView = swapchainImageViews[imageIndex]->GetImageView(),
-		.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-		.resolveMode = VK_RESOLVE_MODE_NONE,
-		.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-		.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-		.clearValue = clearColor
-    };
-
-	VkRect2D renderArea {
-        .offset = {0, 0},
-        .extent = swapchain->GetSwapchainExtent()
+	VkImageMemoryBarrier2 imageBarrierToRender{
+		.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+		.srcStageMask = VK_PIPELINE_STAGE_2_NONE,
+		.srcAccessMask = VK_ACCESS_2_NONE,
+		.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+		.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+		.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+		.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image = swapchain->GetSwapchainImages()[imageIndex].GetImage(),
+		.subresourceRange = subresourceRange
 	};
 
-    VkRenderingInfo renderPassInfo{
-        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-        .renderArea = renderArea,
-		.layerCount = 1,
-		.colorAttachmentCount = 1,
-		.pColorAttachments = &colorAttachmentInfo
-    };
-
-	vkCmdBeginRendering(commandBuffer, &renderPassInfo);
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->GetPipeline());
-
-	// Dynamic Viewport and Scissor
-    VkViewport viewport{
-        .width = static_cast<float>(swapchain->GetSwapchainExtent().width),
-        .height = static_cast<float>(swapchain->GetSwapchainExtent().height),
-        .minDepth = 0.0f,
-        .maxDepth = 1.0f,
+	VkDependencyInfo depInfoToRender{
+		.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+		.imageMemoryBarrierCount = 1,
+		.pImageMemoryBarriers = &imageBarrierToRender
 	};
-    VkRect2D scissor{
-        .offset = {0, 0},
-        .extent = swapchain->GetSwapchainExtent(),
+
+	vkCmdPipelineBarrier2(commandBuffer, &depInfoToRender);
+
+	RealRHI::RenderingInfo renderingInfo{
+		.colorAttachments = {
+			{
+				.target = const_cast<RealRHI::VulkanTextureView*>(swapchainImageViews[imageIndex]),
+				.loadOp = RealRHI::LoadOp::Clear,
+				.storeOp = RealRHI::StoreOp::Store,
+				.clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
+			}
+		},
+		.renderArea = {
+			.x = 0,
+			.y = 0,
+			.width = swapchain->GetSwapchainExtent().width,
+			.height = swapchain->GetSwapchainExtent().height
+		}
 	};
-	vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-	vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-    VkBuffer vertexBuffers[] = {vertexBuffer->GetBuffer()};
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+	commandList->BeginRendering(renderingInfo);
+	commandList->BindPipeline(pipeline);
 
-    vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
-	vkCmdEndRendering(commandBuffer);
+	RealRHI::Viewport viewport{
+		.x = 0.0f,
+		.y = 0.0f,
+		.width = static_cast<float>(swapchain->GetSwapchainExtent().width),
+		.height = static_cast<float>(swapchain->GetSwapchainExtent().height),
+		.minDepth = 0.0f,
+		.maxDepth = 1.0f,
+	};
+	commandList->SetViewport(viewport);
+
+	RealRHI::Rect scissor{
+		.x = 0,
+		.y = 0,
+		.width = swapchain->GetSwapchainExtent().width,
+		.height = swapchain->GetSwapchainExtent().height,
+	};
+	commandList->SetScissor(scissor);
+
+	commandList->BindVertexBuffer(vertexBuffer);
+	commandList->Draw(static_cast<uint32_t>(vertices.size()));
+	commandList->EndRenderPass();
 
     VkImageMemoryBarrier2 imageBarrierToPresent{
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -275,9 +248,7 @@ void RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
 
     vkCmdPipelineBarrier2(commandBuffer, &depInfoToPresent);
 
-    if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
-        throw std::runtime_error("Failed to record command buffer!");
-    }
+    commandList->End();
 }
 
 void CreateSyncObjects() {
@@ -316,8 +287,7 @@ void DrawFrame() {
     vkAcquireNextImageKHR(device->GetDevice(), swapchain->GetSwapchain(), UINT64_MAX,
         imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
 
-    vkResetCommandBuffer(commandBuffers[currentFrame], 0);
-    RecordCommandBuffer(commandBuffers[currentFrame], imageIndex);
+    RecordCommandBuffer(commandLists[currentFrame].get(), imageIndex);
 
     VkSemaphoreSubmitInfo waitSemaphoreInfo{
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
@@ -333,7 +303,7 @@ void DrawFrame() {
 
     VkCommandBufferSubmitInfo cmdBufferInfo{
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-        .commandBuffer = commandBuffers[currentFrame],
+        .commandBuffer = commandLists[currentFrame]->GetCommandBuffer(),
     };
 
     VkSubmitInfo2 submitInfo{
@@ -375,14 +345,13 @@ void Cleanup() {
 
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         vkDestroySemaphore(device->GetDevice(), imageAvailableSemaphores[i], nullptr);
-        vkDestroyFence(device->GetDevice(), inFlightFences[i], nullptr);
-    }
-
-    vkDestroyCommandPool(device->GetDevice(), commandPool, nullptr);
+		vkDestroyFence(device->GetDevice(), inFlightFences[i], nullptr);
+	}
 
 	basePipeline.reset();
 
 	baseVertexBuffer.reset();
+	commandLists.clear();
 	baseSwapchain.reset();
     device.reset();
 }
@@ -413,14 +382,11 @@ int main() {
     CreateGraphicsPipeline();
     std::cout << " Graphics pipeline created" << std::endl;
 
-    CreateCommandPool();
-    std::cout << " Command pool created" << std::endl;
-
     CreateVertexBuffer();
     std::cout << " Vertex buffer created" << std::endl;
 
-    CreateCommandBuffers();
-    std::cout << " Command buffers created" << std::endl;
+    CreateCommandLists();
+    std::cout << " Command lists created" << std::endl;
 
     CreateSyncObjects();
     std::cout << " Sync objects created" << std::endl;

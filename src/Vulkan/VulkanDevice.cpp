@@ -7,6 +7,7 @@
 #include "VulkanShader.h"
 #include "VulkanPipeline.h"
 #include "VulkanBuffer.h"
+#include "VulkanCommandList.h"
 
 #include <set>
 #include <iostream>
@@ -91,6 +92,10 @@ namespace RealRHI {
 
     std::unique_ptr<Buffer> VulkanDevice::CreateBuffer(const BufferDesc& desc) {
         return std::make_unique<VulkanBuffer>((const VulkanDevice*)this, desc);
+    }
+
+    std::unique_ptr<CommandList> VulkanDevice::CreateCommandList() {
+		return std::make_unique<VulkanCommandList>((const VulkanDevice*)this);
     }
 
     bool VulkanDevice::CreateInstance(const char* appName, bool enableValidationLayer) {

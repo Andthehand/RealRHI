@@ -45,6 +45,7 @@ namespace RealRHI {
 		std::unique_ptr<Pipeline> CreateGraphicsPipeline(const PipelineDesc& desc) override;
 		std::unique_ptr<Swapchain> CreateSwapchain(const SwapchainDesc& desc) override;
 		std::unique_ptr<Buffer> CreateBuffer(const BufferDesc& desc) override;
+		std::unique_ptr<CommandList> CreateCommandList() override;
 	private:
 		bool CreateInstance(const char* appName, bool enableValidationLayer);
 		bool SetupDebugMessenger();

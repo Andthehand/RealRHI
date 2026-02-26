@@ -35,5 +35,6 @@ namespace RealRHI {
 		virtual std::unique_ptr<Pipeline> CreateGraphicsPipeline(const PipelineDesc& desc) = 0;
         virtual std::unique_ptr<Swapchain> CreateSwapchain(const SwapchainDesc& desc) = 0;
 		virtual std::unique_ptr<Buffer> CreateBuffer(const BufferDesc& desc) = 0;
+		virtual std::unique_ptr<CommandList> CreateCommandList() = 0;
     };
 }

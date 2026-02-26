@@ -15,7 +15,6 @@ namespace RealRHI {
 		VulkanTextureView(const VulkanDevice* device, const TextureViewDesc& desc);
 		~VulkanTextureView();
 
-		//TODO: Remove jank
 		VkImageView GetImageView() const { return m_ImageView; }
 	private:
 		const VulkanDevice* m_Device = nullptr;

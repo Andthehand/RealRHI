@@ -1,5 +1,5 @@
 #pragma once
-#include "Texture.h"
+#include "TextureView.h"
 
 #include <vector>
 
@@ -28,14 +28,14 @@ namespace RealRHI {
 	};
 
 	struct ColorAttachment {
-		Texture* target = nullptr;      // direction: switch to TextureView* later
+		TextureView* target = nullptr;
 		LoadOp loadOp = LoadOp::Clear;
 		StoreOp storeOp = StoreOp::Store;
 		ClearColorValue clearColor{};
 	};
 
 	struct DepthStencilAttachment {
-		Texture* target = nullptr;      // direction: switch to TextureView* later
+		TextureView* target = nullptr;
 		LoadOp depthLoadOp = LoadOp::Clear;
 		StoreOp depthStoreOp = StoreOp::Store;
 		ClearDepthStencilValue clear{};
@@ -64,7 +64,6 @@ namespace RealRHI {
 		bool hasDepth = false;
 		DepthStencilAttachment depthAttachment{};
 
-		bool hasScissor = false;
-		Rect scissor{};
+		Rect renderArea{};
 	};
 }
