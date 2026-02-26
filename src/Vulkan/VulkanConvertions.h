@@ -3,10 +3,44 @@
 #include "TextureDesc.h"
 #include "PipelineDesc.h"
 #include "BufferAttributes.h"
+#include "TextureViewDesc.h"
 
 #include <Vulkan/vulkan.h>
 
 namespace RealRHI::Utils {
+    // ---------------------- TextureView ------------------
+    constexpr VkImageViewType TextureViewTypeToVkImageViewType(TextureViewType type) {
+        switch (type) {
+            case RealRHI::TextureViewType::View1D: return VK_IMAGE_VIEW_TYPE_1D;
+            case RealRHI::TextureViewType::View2D: return VK_IMAGE_VIEW_TYPE_2D;
+            case RealRHI::TextureViewType::View2DArray: return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+            case RealRHI::TextureViewType::View3D: return VK_IMAGE_VIEW_TYPE_3D;
+            case RealRHI::TextureViewType::Cube: return VK_IMAGE_VIEW_TYPE_CUBE;
+            case RealRHI::TextureViewType::CubeArray: return VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
+            default: return VK_IMAGE_VIEW_TYPE_MAX_ENUM;
+        }
+    }
+    // ---------------------- TextureView ------------------
+
+    // ---------------------- RenderingInfo ----------------
+    constexpr VkAttachmentLoadOp LoadOpToVkLoadOp(LoadOp loadOp) {
+        switch (loadOp) {
+            case RealRHI::LoadOp::Load: return VK_ATTACHMENT_LOAD_OP_LOAD;
+            case RealRHI::LoadOp::Clear: return VK_ATTACHMENT_LOAD_OP_CLEAR;
+            case RealRHI::LoadOp::DontCare: return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+            default: return VK_ATTACHMENT_LOAD_OP_MAX_ENUM;
+        }
+	}
+
+    constexpr VkAttachmentStoreOp StoreOpToVkStoreOp(StoreOp storeOp) {
+        switch (storeOp) {
+            case RealRHI::StoreOp::Store: return VK_ATTACHMENT_STORE_OP_STORE;
+            case RealRHI::StoreOp::DontCare: return VK_ATTACHMENT_STORE_OP_DONT_CARE;
+            default: return VK_ATTACHMENT_STORE_OP_MAX_ENUM;
+        }
+    }
+    // ---------------------- RenderingInfo ---------------
+
     // ---------------------- BufferDesc -------------------
     constexpr VkBufferUsageFlags BufferUsageToVkBufferUsage(BufferUsage usage) {
         VkBufferUsageFlags flags = 0;

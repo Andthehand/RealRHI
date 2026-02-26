@@ -7,6 +7,8 @@
 #include "Vulkan/VulkanPipeline.h"
 #include "Vulkan/VulkanConvertions.h"
 #include "Vulkan/VulkanBuffer.h"
+#include "Vulkan/VulkanTexture.h"
+#include "Vulkan/VulkanTextureView.h"
 
 #include <iostream>
 #include <vector>
@@ -34,7 +36,7 @@ const std::vector<Vertex> vertices = {
 std::unique_ptr<RealRHI::Window> window;
 std::unique_ptr<RealRHI::Swapchain> baseSwapchain;
 RealRHI::VulkanSwapchain* swapchain = nullptr;
-std::vector<VkImageView> swapchainImageViews;
+std::vector<const RealRHI::VulkanTextureView*> swapchainImageViews;
 
 std::unique_ptr<RealRHI::Pipeline> basePipeline;
 RealRHI::VulkanPipeline* pipeline = nullptr; //TODO: Remove jank
@@ -69,34 +71,10 @@ void CreateSwapChain() {
 }
 
 void CreateImageViews() {
-    swapchainImageViews.resize(swapchain->GetSwapchainImages().size());
-
-    for (size_t i = 0; i < swapchain->GetSwapchainImages().size(); i++) {
-        constexpr VkComponentMapping componentMapping{
-            .r = VK_COMPONENT_SWIZZLE_IDENTITY,
-            .g = VK_COMPONENT_SWIZZLE_IDENTITY,
-            .b = VK_COMPONENT_SWIZZLE_IDENTITY,
-            .a = VK_COMPONENT_SWIZZLE_IDENTITY,
-		};
-        constexpr VkImageSubresourceRange subresourceRange{
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-		};
-        VkImageViewCreateInfo createInfo{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = swapchain->GetSwapchainImages()[i],
-            .viewType = VK_IMAGE_VIEW_TYPE_2D,
-            .format = RealRHI::Utils::TextureFormatToVkFormat(baseSwapchain->GetBackBufferFormat()),
-            .components = componentMapping,
-            .subresourceRange = subresourceRange,
-        };
-
-        if (vkCreateImageView(device->GetDevice(), &createInfo, nullptr, &swapchainImageViews[i]) != VK_SUCCESS) {
-            throw std::runtime_error("Failed to create image views!");
-        }
+    swapchainImageViews.reserve(swapchain->GetSwapchainImages().size());
+	auto& swapchainImages = swapchain->GetSwapchainImages();
+    for (auto& image : swapchainImages) {
+        swapchainImageViews.push_back(static_cast<const RealRHI::VulkanTextureView*>(image.GetTextureView()));
     }
 }
 
@@ -215,7 +193,7 @@ void RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
         .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = swapchain->GetSwapchainImages()[imageIndex],
+        .image = swapchain->GetSwapchainImages()[imageIndex].GetImage(),
         .subresourceRange = subresourceRange
     };
 
@@ -230,7 +208,7 @@ void RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
     VkClearValue clearColor = { {{0.0f, 0.0f, 0.0f, 1.0f}} };
     VkRenderingAttachmentInfo colorAttachmentInfo {
 		.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-		.imageView = swapchainImageViews[imageIndex],
+		.imageView = swapchainImageViews[imageIndex]->GetImageView(),
 		.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 		.resolveMode = VK_RESOLVE_MODE_NONE,
 		.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
@@ -285,7 +263,7 @@ void RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
         .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = swapchain->GetSwapchainImages()[imageIndex],
+        .image = swapchain->GetSwapchainImages()[imageIndex].GetImage(),
         .subresourceRange = subresourceRange,
     };
 
@@ -403,10 +381,6 @@ void Cleanup() {
     vkDestroyCommandPool(device->GetDevice(), commandPool, nullptr);
 
 	basePipeline.reset();
-
-    for (auto imageView : swapchainImageViews) {
-        vkDestroyImageView(device->GetDevice(), imageView, nullptr);
-    }
 
 	baseVertexBuffer.reset();
 	baseSwapchain.reset();

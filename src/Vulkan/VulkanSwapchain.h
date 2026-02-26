@@ -5,6 +5,8 @@
 #include "Swapchain.h"
 #include "SwapchainDesc.h"
 
+#include "VulkanTexture.h"
+
 #include <Vulkan/vulkan.h>
 
 namespace RealRHI {
@@ -24,13 +26,8 @@ namespace RealRHI {
 		// TODO: Remove these getters
 		VkSurfaceKHR GetSurface() const { return m_Surface; }
 		VkSwapchainKHR GetSwapchain() const { return m_Swapchain; }
-		std::vector<VkImage>& GetSwapchainImages() { return m_SwapchainImages; }
+		std::vector<VulkanTexture>& GetSwapchainImages() { return m_SwapchainImages; }
 		VkExtent2D GetSwapchainExtent() const { return m_SwapchainExtent; }
-
-		// TODO: Implement these functions
-		void BeginFrame() override;
-		void Present() override;
-		Texture* GetCurrentBackBuffer() override;
 	private:
 		SwapChainSupportDetails QuerySwapChainSupport();
 		VkSurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
@@ -43,7 +40,7 @@ namespace RealRHI {
 		VkSurfaceKHR m_Surface;
 		VkSwapchainKHR m_Swapchain;
 
-		std::vector<VkImage> m_SwapchainImages;
+		std::vector<VulkanTexture> m_SwapchainImages;
 		TextureFormat m_SwapchainImageFormat;
 		VkExtent2D m_SwapchainExtent;
 	};

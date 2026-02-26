@@ -18,16 +18,6 @@ namespace RealRHI {
 		m_Window->DestroyVulkanSurface(*m_Device, m_Surface);
     }
 
-    void VulkanSwapchain::BeginFrame() {
-    }
-
-    void VulkanSwapchain::Present() {
-    }
-
-    Texture* VulkanSwapchain::GetCurrentBackBuffer() {
-        return nullptr;
-    }
-
     SwapChainSupportDetails VulkanSwapchain::QuerySwapChainSupport() {
         SwapChainSupportDetails details;
 
@@ -121,8 +111,13 @@ namespace RealRHI {
         }
 
         vkGetSwapchainImagesKHR(m_Device->GetDevice(), m_Swapchain, &imageCount, nullptr);
-        m_SwapchainImages.resize(imageCount);
-        vkGetSwapchainImagesKHR(m_Device->GetDevice(), m_Swapchain, &imageCount, m_SwapchainImages.data());
+		std::vector<VkImage> swapchainVkImages(imageCount);
+        vkGetSwapchainImagesKHR(m_Device->GetDevice(), m_Swapchain, &imageCount, swapchainVkImages.data());
+
+        m_SwapchainImages.reserve(imageCount);
+		for (uint8_t i = 0; i < imageCount; i++) {
+            m_SwapchainImages.emplace_back(m_Device, surfaceFormat.format, swapchainVkImages[i]);
+        }
 
         m_SwapchainImageFormat = Utils::VkFormatToTextureFormat(surfaceFormat.format);
         m_SwapchainExtent = extent;
