@@ -18,8 +18,10 @@ namespace RealRHI {
 
         for (auto& sync : m_FrameSync) {
             vkDestroySemaphore(m_Device->GetDevice(), sync.imageAvailableSemaphore, nullptr);
-            vkDestroySemaphore(m_Device->GetDevice(), sync.renderFinishedSemaphore, nullptr);
             vkDestroyFence(m_Device->GetDevice(), sync.fence, nullptr);
+        }
+        for (auto semaphore : m_RenderFinishedSemaphores) {
+            vkDestroySemaphore(m_Device->GetDevice(), semaphore, nullptr);
         }
         if (m_TransitionPool != VK_NULL_HANDLE) {
             vkDestroyCommandPool(m_Device->GetDevice(), m_TransitionPool, nullptr);
@@ -170,9 +172,17 @@ namespace RealRHI {
             m_FrameSync[i].preCmdBuf = cmdBufs[i * 2];
             m_FrameSync[i].postCmdBuf = cmdBufs[i * 2 + 1];
             if (vkCreateSemaphore(m_Device->GetDevice(), &semInfo, nullptr, &m_FrameSync[i].imageAvailableSemaphore) != VK_SUCCESS ||
-                vkCreateSemaphore(m_Device->GetDevice(), &semInfo, nullptr, &m_FrameSync[i].renderFinishedSemaphore) != VK_SUCCESS ||
                 vkCreateFence(m_Device->GetDevice(), &fenceInfo, nullptr, &m_FrameSync[i].fence) != VK_SUCCESS) {
                 std::cerr << "Failed to create frame sync objects." << std::endl;
+                return true;
+            }
+        }
+
+        // Create per-image renderFinished semaphores
+        m_RenderFinishedSemaphores.resize(imageCount);
+        for (uint32_t i = 0; i < imageCount; i++) {
+            if (vkCreateSemaphore(m_Device->GetDevice(), &semInfo, nullptr, &m_RenderFinishedSemaphores[i]) != VK_SUCCESS) {
+                std::cerr << "Failed to create render finished semaphore." << std::endl;
                 return true;
             }
         }
@@ -205,7 +215,7 @@ namespace RealRHI {
 
     void VulkanSwapchain::Present(const FrameContext& frame) {
         const uint32_t imageIndex = frame.imageIndex;
-        VkSemaphore waitSemaphore = m_FrameSync[frame.frameIndex].renderFinishedSemaphore;
+        VkSemaphore waitSemaphore = m_RenderFinishedSemaphores[imageIndex];
 
         VkPresentInfoKHR presentInfo{
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
