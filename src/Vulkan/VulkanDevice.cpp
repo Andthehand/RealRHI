@@ -98,6 +98,54 @@ namespace RealRHI {
 		return std::make_unique<VulkanCommandList>((const VulkanDevice*)this);
     }
 
+    void VulkanDevice::Submit(CommandList* cmd, Swapchain* sc, const FrameContext& frame) {
+        auto* vkSC = static_cast<VulkanSwapchain*>(sc);
+        auto* vkCmd = static_cast<VulkanCommandList*>(cmd);
+
+        VkCommandBuffer preCmdBuf = vkSC->RecordPreTransitionCmd(frame.frameIndex, frame.imageIndex);
+        VkCommandBuffer postCmdBuf = vkSC->RecordPostTransitionCmd(frame.frameIndex, frame.imageIndex);
+
+        VkCommandBufferSubmitInfo cmdInfos[] = {
+            { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = preCmdBuf },
+            { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = vkCmd->GetCommandBuffer() },
+            { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = postCmdBuf },
+        };
+
+        VkSemaphoreSubmitInfo waitInfo{
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+            .semaphore = vkSC->GetImageAvailableSemaphore(frame.frameIndex),
+            .stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        };
+
+        VkSemaphoreSubmitInfo signalInfo{
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+            .semaphore = vkSC->GetRenderFinishedSemaphore(frame.frameIndex),
+            .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
+        };
+
+        VkSubmitInfo2 submitInfo{
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+            .waitSemaphoreInfoCount = 1,
+            .pWaitSemaphoreInfos = &waitInfo,
+            .commandBufferInfoCount = 3,
+            .pCommandBufferInfos = cmdInfos,
+            .signalSemaphoreInfoCount = 1,
+            .pSignalSemaphoreInfos = &signalInfo,
+        };
+
+        if (vkQueueSubmit2(m_GraphicsQueue, 1, &submitInfo, vkSC->GetFence(frame.frameIndex)) != VK_SUCCESS) {
+            std::cerr << "Failed to submit command buffer!" << std::endl;
+        }
+    }
+
+    void VulkanDevice::WaitIdle() {
+        vkDeviceWaitIdle(m_Device);
+    }
+
+    std::unique_ptr<Device> Device::Create(const DeviceDesc& desc) {
+        return std::make_unique<VulkanDevice>(desc);
+    }
+
     bool VulkanDevice::CreateInstance(const char* appName, bool enableValidationLayer) {
         VkApplicationInfo appInfo{
             .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,

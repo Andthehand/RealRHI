@@ -18,6 +18,8 @@
 #include "SwapchainDesc.h"
 #include "Swapchain.h"
 
+#include "FrameContext.h"
+
 #include <memory>
 #include <filesystem>
 
@@ -36,5 +38,10 @@ namespace RealRHI {
         virtual std::unique_ptr<Swapchain> CreateSwapchain(const SwapchainDesc& desc) = 0;
 		virtual std::unique_ptr<Buffer> CreateBuffer(const BufferDesc& desc) = 0;
 		virtual std::unique_ptr<CommandList> CreateCommandList() = 0;
+
+		virtual void Submit(CommandList* cmd, Swapchain* swapchain, const FrameContext& frame) = 0;
+		virtual void WaitIdle() = 0;
+
+		static std::unique_ptr<Device> Create(const DeviceDesc& desc);
     };
 }
