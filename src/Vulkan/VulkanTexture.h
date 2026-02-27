@@ -13,6 +13,10 @@ namespace RealRHI {
 		VulkanTexture(const VulkanDevice* device, const TextureDesc& desc);
 		~VulkanTexture();
 
+		TextureView* GetTextureView() override {
+			return &m_TextureView;
+		}
+
 		const TextureView* GetTextureView() const override {
 			return &m_TextureView;
 		}

@@ -23,6 +23,10 @@ namespace RealRHI {
 
 		TextureFormat GetBackBufferFormat() const override { return m_SwapchainImageFormat; }
 
+		TextureView* GetBackBufferView(uint32_t imageIndex);
+		void TransitionToColorAttachment(VkCommandBuffer cmdBuf, uint32_t imageIndex);
+		void TransitionToPresent(VkCommandBuffer cmdBuf, uint32_t imageIndex);
+
 		// TODO: Remove these getters
 		VkSurfaceKHR GetSurface() const { return m_Surface; }
 		VkSwapchainKHR GetSwapchain() const { return m_Swapchain; }
@@ -41,6 +45,7 @@ namespace RealRHI {
 		VkSwapchainKHR m_Swapchain;
 
 		std::vector<VulkanTexture> m_SwapchainImages;
+		std::vector<VkImageLayout> m_ImageLayouts;
 		TextureFormat m_SwapchainImageFormat;
 		VkExtent2D m_SwapchainExtent;
 	};
