@@ -119,7 +119,7 @@ namespace RealRHI {
 
         VkSemaphoreSubmitInfo signalInfo{
             .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-            .semaphore = vkSC->GetRenderFinishedSemaphore(frame.frameIndex),
+            .semaphore = vkSC->GetRenderFinishedSemaphore(frame.imageIndex),
             .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
         };
 

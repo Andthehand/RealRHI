@@ -8,6 +8,8 @@
 namespace RealRHI {
     class CommandList {
     public:
+        virtual ~CommandList() = default;
+
         virtual void Begin() = 0;
         virtual void End() = 0;
 
