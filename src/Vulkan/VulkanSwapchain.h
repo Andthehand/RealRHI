@@ -18,14 +18,25 @@ namespace RealRHI {
 
 	class VulkanSwapchain : public Swapchain {
 	public:
+		static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
+
 		VulkanSwapchain(const VulkanDevice* device, const SwapchainDesc& desc);
 		~VulkanSwapchain();
 
 		TextureFormat GetBackBufferFormat() const override { return m_SwapchainImageFormat; }
 
+		FrameContext BeginFrame() override;
+		void Present(const FrameContext& frame) override;
+		uint32_t GetMaxFramesInFlight() const override { return MAX_FRAMES_IN_FLIGHT; }
+
 		TextureView* GetBackBufferView(uint32_t imageIndex);
-		void TransitionToColorAttachment(VkCommandBuffer cmdBuf, uint32_t imageIndex);
-		void TransitionToPresent(VkCommandBuffer cmdBuf, uint32_t imageIndex);
+
+		// Internal methods used by VulkanDevice::Submit
+		VkCommandBuffer RecordPreTransitionCmd(uint32_t frameIndex, uint32_t imageIndex);
+		VkCommandBuffer RecordPostTransitionCmd(uint32_t frameIndex, uint32_t imageIndex);
+		VkSemaphore GetImageAvailableSemaphore(uint32_t frameIndex) const { return m_FrameSync[frameIndex].imageAvailableSemaphore; }
+		VkSemaphore GetRenderFinishedSemaphore(uint32_t frameIndex) const { return m_FrameSync[frameIndex].renderFinishedSemaphore; }
+		VkFence GetFence(uint32_t frameIndex) const { return m_FrameSync[frameIndex].fence; }
 
 		// TODO: Remove these getters
 		VkSurfaceKHR GetSurface() const { return m_Surface; }
@@ -38,7 +49,18 @@ namespace RealRHI {
 		VkPresentModeKHR ChooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
 		VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities, VkExtent2D requestedExtent);
 		bool CreateSwapchain(VkExtent2D requestedExtent);
+
+		void TransitionToColorAttachment(VkCommandBuffer cmdBuf, uint32_t imageIndex);
+		void TransitionToPresent(VkCommandBuffer cmdBuf, uint32_t imageIndex);
 	private:
+		struct FrameSync {
+			VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
+			VkSemaphore renderFinishedSemaphore = VK_NULL_HANDLE;
+			VkFence fence = VK_NULL_HANDLE;
+			VkCommandBuffer preCmdBuf = VK_NULL_HANDLE;
+			VkCommandBuffer postCmdBuf = VK_NULL_HANDLE;
+		};
+
 		const VulkanDevice* m_Device;
 		const VulkanWindow* m_Window;
 		VkSurfaceKHR m_Surface;
@@ -48,5 +70,9 @@ namespace RealRHI {
 		std::vector<VkImageLayout> m_ImageLayouts;
 		TextureFormat m_SwapchainImageFormat;
 		VkExtent2D m_SwapchainExtent;
+
+		std::vector<FrameSync> m_FrameSync;
+		VkCommandPool m_TransitionPool = VK_NULL_HANDLE;
+		uint32_t m_CurrentFrameIndex = 0;
 	};
 }

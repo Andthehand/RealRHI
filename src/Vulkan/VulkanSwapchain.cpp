@@ -14,6 +14,17 @@ namespace RealRHI {
 	}
 
     VulkanSwapchain::~VulkanSwapchain() {
+        vkDeviceWaitIdle(m_Device->GetDevice());
+
+        for (auto& sync : m_FrameSync) {
+            vkDestroySemaphore(m_Device->GetDevice(), sync.imageAvailableSemaphore, nullptr);
+            vkDestroySemaphore(m_Device->GetDevice(), sync.renderFinishedSemaphore, nullptr);
+            vkDestroyFence(m_Device->GetDevice(), sync.fence, nullptr);
+        }
+        if (m_TransitionPool != VK_NULL_HANDLE) {
+            vkDestroyCommandPool(m_Device->GetDevice(), m_TransitionPool, nullptr);
+        }
+
         vkDestroySwapchainKHR(m_Device->GetDevice(), m_Swapchain, nullptr);
 		m_Window->DestroyVulkanSurface(*m_Device, m_Surface);
     }
@@ -124,11 +135,109 @@ namespace RealRHI {
 
         m_ImageLayouts.assign(imageCount, VK_IMAGE_LAYOUT_UNDEFINED);
 
+        // Create command pool for transition command buffers
+        VkCommandPoolCreateInfo poolInfo{
+            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+            .queueFamilyIndex = m_Device->GetGraphicsQueueFamily(),
+        };
+        if (vkCreateCommandPool(m_Device->GetDevice(), &poolInfo, nullptr, &m_TransitionPool) != VK_SUCCESS) {
+            std::cerr << "Failed to create transition command pool." << std::endl;
+            return true;
+        }
+
+        // Allocate pre and post transition command buffers (2 per frame)
+        std::vector<VkCommandBuffer> cmdBufs(MAX_FRAMES_IN_FLIGHT * 2);
+        VkCommandBufferAllocateInfo allocInfo{
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .commandPool = m_TransitionPool,
+            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            .commandBufferCount = static_cast<uint32_t>(cmdBufs.size()),
+        };
+        if (vkAllocateCommandBuffers(m_Device->GetDevice(), &allocInfo, cmdBufs.data()) != VK_SUCCESS) {
+            std::cerr << "Failed to allocate transition command buffers." << std::endl;
+            return true;
+        }
+
+        // Create per-frame sync objects
+        m_FrameSync.resize(MAX_FRAMES_IN_FLIGHT);
+        VkSemaphoreCreateInfo semInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+        VkFenceCreateInfo fenceInfo{
+            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+            .flags = VK_FENCE_CREATE_SIGNALED_BIT,
+        };
+        for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            m_FrameSync[i].preCmdBuf = cmdBufs[i * 2];
+            m_FrameSync[i].postCmdBuf = cmdBufs[i * 2 + 1];
+            if (vkCreateSemaphore(m_Device->GetDevice(), &semInfo, nullptr, &m_FrameSync[i].imageAvailableSemaphore) != VK_SUCCESS ||
+                vkCreateSemaphore(m_Device->GetDevice(), &semInfo, nullptr, &m_FrameSync[i].renderFinishedSemaphore) != VK_SUCCESS ||
+                vkCreateFence(m_Device->GetDevice(), &fenceInfo, nullptr, &m_FrameSync[i].fence) != VK_SUCCESS) {
+                std::cerr << "Failed to create frame sync objects." << std::endl;
+                return true;
+            }
+        }
+
 		return false;
 	}
 
     TextureView* VulkanSwapchain::GetBackBufferView(uint32_t imageIndex) {
         return m_SwapchainImages[imageIndex].GetTextureView();
+    }
+
+    FrameContext VulkanSwapchain::BeginFrame() {
+        const uint32_t frameIdx = m_CurrentFrameIndex;
+
+        vkWaitForFences(m_Device->GetDevice(), 1, &m_FrameSync[frameIdx].fence, VK_TRUE, UINT64_MAX);
+        vkResetFences(m_Device->GetDevice(), 1, &m_FrameSync[frameIdx].fence);
+
+        uint32_t imageIndex = 0;
+        vkAcquireNextImageKHR(m_Device->GetDevice(), m_Swapchain, UINT64_MAX,
+            m_FrameSync[frameIdx].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+
+        return FrameContext{
+            .frameIndex = frameIdx,
+            .imageIndex = imageIndex,
+            .backBufferView = GetBackBufferView(imageIndex),
+            .width = m_SwapchainExtent.width,
+            .height = m_SwapchainExtent.height,
+        };
+    }
+
+    void VulkanSwapchain::Present(const FrameContext& frame) {
+        const uint32_t imageIndex = frame.imageIndex;
+        VkSemaphore waitSemaphore = m_FrameSync[frame.frameIndex].renderFinishedSemaphore;
+
+        VkPresentInfoKHR presentInfo{
+            .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+            .waitSemaphoreCount = 1,
+            .pWaitSemaphores = &waitSemaphore,
+            .swapchainCount = 1,
+            .pSwapchains = &m_Swapchain,
+            .pImageIndices = &imageIndex,
+        };
+
+        vkQueuePresentKHR(m_Device->GetPresentQueue(), &presentInfo);
+        m_CurrentFrameIndex = (m_CurrentFrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
+    }
+
+    VkCommandBuffer VulkanSwapchain::RecordPreTransitionCmd(uint32_t frameIndex, uint32_t imageIndex) {
+        VkCommandBuffer cmd = m_FrameSync[frameIndex].preCmdBuf;
+        vkResetCommandBuffer(cmd, 0);
+        VkCommandBufferBeginInfo beginInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+        vkBeginCommandBuffer(cmd, &beginInfo);
+        TransitionToColorAttachment(cmd, imageIndex);
+        vkEndCommandBuffer(cmd);
+        return cmd;
+    }
+
+    VkCommandBuffer VulkanSwapchain::RecordPostTransitionCmd(uint32_t frameIndex, uint32_t imageIndex) {
+        VkCommandBuffer cmd = m_FrameSync[frameIndex].postCmdBuf;
+        vkResetCommandBuffer(cmd, 0);
+        VkCommandBufferBeginInfo beginInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+        vkBeginCommandBuffer(cmd, &beginInfo);
+        TransitionToPresent(cmd, imageIndex);
+        vkEndCommandBuffer(cmd);
+        return cmd;
     }
 
     void VulkanSwapchain::TransitionToColorAttachment(VkCommandBuffer cmdBuf, uint32_t imageIndex) {
@@ -194,7 +303,6 @@ namespace RealRHI {
         };
 
         vkCmdPipelineBarrier2(cmdBuf, &depInfo);
-        // Reset to UNDEFINED so next acquisition always transitions from a known discard state
-        m_ImageLayouts[imageIndex] = VK_IMAGE_LAYOUT_UNDEFINED;
+        m_ImageLayouts[imageIndex] = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     }
 }
