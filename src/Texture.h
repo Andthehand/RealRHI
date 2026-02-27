@@ -7,6 +7,7 @@ namespace RealRHI {
     public:
         virtual ~Texture() = default;
 
+		virtual TextureView* GetTextureView() = 0;
 		virtual const TextureView* GetTextureView() const = 0;
     };
 }

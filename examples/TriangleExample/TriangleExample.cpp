@@ -8,7 +8,6 @@
 #include "Vulkan/VulkanConvertions.h"
 #include "Vulkan/VulkanBuffer.h"
 #include "Vulkan/VulkanTexture.h"
-#include "Vulkan/VulkanTextureView.h"
 #include "Vulkan/VulkanCommandList.h"
 
 #include <iostream>
@@ -37,7 +36,7 @@ const std::vector<Vertex> vertices = {
 std::unique_ptr<RealRHI::Window> window;
 std::unique_ptr<RealRHI::Swapchain> baseSwapchain;
 RealRHI::VulkanSwapchain* swapchain = nullptr;
-std::vector<const RealRHI::VulkanTextureView*> swapchainImageViews;
+std::vector<RealRHI::TextureView*> swapchainImageViews;
 
 std::unique_ptr<RealRHI::Pipeline> basePipeline;
 RealRHI::VulkanPipeline* pipeline = nullptr; //TODO: Remove jank
@@ -71,10 +70,10 @@ void CreateSwapChain() {
 }
 
 void CreateImageViews() {
-    swapchainImageViews.reserve(swapchain->GetSwapchainImages().size());
-	auto& swapchainImages = swapchain->GetSwapchainImages();
-    for (auto& image : swapchainImages) {
-        swapchainImageViews.push_back(static_cast<const RealRHI::VulkanTextureView*>(image.GetTextureView()));
+    const uint32_t count = static_cast<uint32_t>(swapchain->GetSwapchainImages().size());
+    swapchainImageViews.resize(count);
+    for (uint32_t i = 0; i < count; i++) {
+        swapchainImageViews[i] = swapchain->GetBackBufferView(i);
     }
 }
 
@@ -154,40 +153,12 @@ void RecordCommandBuffer(RealRHI::VulkanCommandList* commandList, uint32_t image
 
 	VkCommandBuffer commandBuffer = commandList->GetCommandBuffer();
 
-	constexpr VkImageSubresourceRange subresourceRange {
-		.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-		.baseMipLevel = 0,
-		.levelCount = 1,
-		.baseArrayLayer = 0,
-		.layerCount = 1
-	};
-
-	VkImageMemoryBarrier2 imageBarrierToRender{
-		.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-		.srcStageMask = VK_PIPELINE_STAGE_2_NONE,
-		.srcAccessMask = VK_ACCESS_2_NONE,
-		.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-		.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-		.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-		.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		.image = swapchain->GetSwapchainImages()[imageIndex].GetImage(),
-		.subresourceRange = subresourceRange
-	};
-
-	VkDependencyInfo depInfoToRender{
-		.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-		.imageMemoryBarrierCount = 1,
-		.pImageMemoryBarriers = &imageBarrierToRender
-	};
-
-	vkCmdPipelineBarrier2(commandBuffer, &depInfoToRender);
+	swapchain->TransitionToColorAttachment(commandBuffer, imageIndex);
 
 	RealRHI::RenderingInfo renderingInfo{
 		.colorAttachments = {
 			{
-				.target = const_cast<RealRHI::VulkanTextureView*>(swapchainImageViews[imageIndex]),
+				.target = swapchainImageViews[imageIndex],
 				.loadOp = RealRHI::LoadOp::Clear,
 				.storeOp = RealRHI::StoreOp::Store,
 				.clearColor = {0.0f, 0.0f, 0.0f, 1.0f}
@@ -226,27 +197,7 @@ void RecordCommandBuffer(RealRHI::VulkanCommandList* commandList, uint32_t image
 	commandList->Draw(static_cast<uint32_t>(vertices.size()));
 	commandList->EndRenderPass();
 
-    VkImageMemoryBarrier2 imageBarrierToPresent{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_NONE,
-        .dstAccessMask = VK_ACCESS_2_NONE,
-        .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = swapchain->GetSwapchainImages()[imageIndex].GetImage(),
-        .subresourceRange = subresourceRange,
-    };
-
-    VkDependencyInfo depInfoToPresent{
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &imageBarrierToPresent
-    };
-
-    vkCmdPipelineBarrier2(commandBuffer, &depInfoToPresent);
+	swapchain->TransitionToPresent(commandBuffer, imageIndex);
 
     commandList->End();
 }

@@ -122,6 +122,79 @@ namespace RealRHI {
         m_SwapchainImageFormat = Utils::VkFormatToTextureFormat(surfaceFormat.format);
         m_SwapchainExtent = extent;
 
+        m_ImageLayouts.assign(imageCount, VK_IMAGE_LAYOUT_UNDEFINED);
+
 		return false;
 	}
+
+    TextureView* VulkanSwapchain::GetBackBufferView(uint32_t imageIndex) {
+        return m_SwapchainImages[imageIndex].GetTextureView();
+    }
+
+    void VulkanSwapchain::TransitionToColorAttachment(VkCommandBuffer cmdBuf, uint32_t imageIndex) {
+        constexpr VkImageSubresourceRange subresourceRange{
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        };
+
+        VkImageMemoryBarrier2 barrier{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_NONE,
+            .srcAccessMask = VK_ACCESS_2_NONE,
+            .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            .oldLayout = m_ImageLayouts[imageIndex],
+            .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = m_SwapchainImages[imageIndex].GetImage(),
+            .subresourceRange = subresourceRange,
+        };
+
+        VkDependencyInfo depInfo{
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &barrier,
+        };
+
+        vkCmdPipelineBarrier2(cmdBuf, &depInfo);
+        m_ImageLayouts[imageIndex] = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    }
+
+    void VulkanSwapchain::TransitionToPresent(VkCommandBuffer cmdBuf, uint32_t imageIndex) {
+        constexpr VkImageSubresourceRange subresourceRange{
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        };
+
+        VkImageMemoryBarrier2 barrier{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_2_NONE,
+            .dstAccessMask = VK_ACCESS_2_NONE,
+            .oldLayout = m_ImageLayouts[imageIndex],
+            .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = m_SwapchainImages[imageIndex].GetImage(),
+            .subresourceRange = subresourceRange,
+        };
+
+        VkDependencyInfo depInfo{
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &barrier,
+        };
+
+        vkCmdPipelineBarrier2(cmdBuf, &depInfo);
+        // Reset to UNDEFINED so next acquisition always transitions from a known discard state
+        m_ImageLayouts[imageIndex] = VK_IMAGE_LAYOUT_UNDEFINED;
+    }
 }
