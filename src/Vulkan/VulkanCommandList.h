@@ -14,7 +14,7 @@ namespace RealRHI {
 		void End() override;
 		
 		void BeginRendering(const RenderingInfo& renderingInfo) override;
-		void EndRenderPass() override;
+		void EndRendering() override;
 
 		void SetViewport(const Viewport& vp);
 		void SetScissor(const Rect& rect);

@@ -135,7 +135,7 @@ void RecordCommandBuffer(RealRHI::CommandList* cmd, const RealRHI::FrameContext&
 
     cmd->BindVertexBuffer(vertexBuffer.get());
     cmd->Draw(static_cast<uint32_t>(vertices.size()));
-    cmd->EndRenderPass();
+    cmd->EndRendering();
 
     cmd->End();
 }

@@ -14,7 +14,7 @@ namespace RealRHI {
         virtual void End() = 0;
 
         virtual void BeginRendering(const RenderingInfo& renderingInfo) = 0;
-        virtual void EndRenderPass() = 0;
+        virtual void EndRendering() = 0;
 
         virtual void SetViewport(const Viewport& vp) = 0;
         virtual void SetScissor(const Rect& rect) = 0;

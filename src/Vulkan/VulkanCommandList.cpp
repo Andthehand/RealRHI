@@ -92,7 +92,7 @@ namespace RealRHI {
 		vkCmdBeginRendering(m_CommandBuffer, &renderPassInfo);
 	}
 
-    void VulkanCommandList::EndRenderPass() {
+    void VulkanCommandList::EndRendering() {
 		vkCmdEndRendering(m_CommandBuffer);
     }
 
