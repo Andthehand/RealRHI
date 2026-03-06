@@ -1,7 +1,8 @@
 #pragma once
+#include "RefCounted.h"
 
 namespace RealRHI {
-	class Buffer {
+	class Buffer : public RefCounted {
 	public:
 		virtual ~Buffer() = default;
 	};

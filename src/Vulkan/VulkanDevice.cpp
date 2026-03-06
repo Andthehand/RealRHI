@@ -1,4 +1,3 @@
-#include "Device.h"
 #define VMA_IMPLEMENTATION
 #include "VulkanDevice.h"
 
@@ -74,28 +73,28 @@ namespace RealRHI {
 		SDL_Quit();
     }
 
-    std::unique_ptr<Window> VulkanDevice::CreateWindow(const WindowDesc& desc) {
-        return std::make_unique<VulkanWindow>(desc);
+    Ref<Window> VulkanDevice::CreateWindow(const WindowDesc& desc) {
+        return Ref<VulkanWindow>::Create(desc);
     }
 
-    std::unique_ptr<Shader> VulkanDevice::CreateShader(const ShaderDesc& desc) {
-        return std::make_unique<VulkanShader>((const VulkanDevice*)this, desc);
+    Ref<Shader> VulkanDevice::CreateShader(const ShaderDesc& desc) {
+        return Ref<VulkanShader>::Create(this, desc);
     }
 
-    std::unique_ptr<Pipeline> VulkanDevice::CreateGraphicsPipeline(const PipelineDesc& desc) {
-        return std::make_unique<VulkanPipeline>((const VulkanDevice*)this, desc);
+    Ref<Pipeline> VulkanDevice::CreateGraphicsPipeline(const PipelineDesc& desc) {
+        return Ref<VulkanPipeline>::Create(this, desc);
     }
 
-    std::unique_ptr<Swapchain> VulkanDevice::CreateSwapchain(const SwapchainDesc& desc) {
-        return std::make_unique<VulkanSwapchain>((const VulkanDevice*)this, desc);
+    Ref<Swapchain> VulkanDevice::CreateSwapchain(const SwapchainDesc& desc) {
+        return Ref<VulkanSwapchain>::Create(this, desc);
     }
 
-    std::unique_ptr<Buffer> VulkanDevice::CreateBuffer(const BufferDesc& desc) {
-        return std::make_unique<VulkanBuffer>((const VulkanDevice*)this, desc);
+    Ref<Buffer> VulkanDevice::CreateBuffer(const BufferDesc& desc) {
+        return Ref<VulkanBuffer>::Create(this, desc);
     }
 
-    std::unique_ptr<CommandList> VulkanDevice::CreateCommandList() {
-		return std::make_unique<VulkanCommandList>((const VulkanDevice*)this);
+    Ref<CommandList> VulkanDevice::CreateCommandList() {
+		return Ref<VulkanCommandList>::Create(this);
     }
 
     void VulkanDevice::Submit(CommandList* cmd, Swapchain* sc, const FrameContext& frame) {

@@ -1,4 +1,6 @@
 #pragma once
+#include "RefCounted.h"
+
 #include "Texture.h"
 #include "Pipeline.h"
 #include "Buffer.h"
@@ -6,7 +8,7 @@
 #include "RenderingInfo.h"
 
 namespace RealRHI {
-    class CommandList {
+    class CommandList : public RefCounted {
     public:
         virtual ~CommandList() = default;
 

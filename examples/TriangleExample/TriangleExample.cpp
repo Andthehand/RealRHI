@@ -21,11 +21,11 @@ const std::vector<Vertex> vertices = {
 };
 
 std::unique_ptr<RealRHI::Device> device;
-std::unique_ptr<RealRHI::Window> window;
-std::unique_ptr<RealRHI::Swapchain> swapchain;
-std::unique_ptr<RealRHI::Pipeline> pipeline;
-std::unique_ptr<RealRHI::Buffer> vertexBuffer;
-std::vector<std::unique_ptr<RealRHI::CommandList>> commandLists;
+RealRHI::Ref<RealRHI::Window> window;
+RealRHI::Ref<RealRHI::Swapchain> swapchain;
+RealRHI::Ref<RealRHI::Pipeline> pipeline;
+RealRHI::Ref<RealRHI::Buffer> vertexBuffer;
+std::vector<RealRHI::Ref<RealRHI::CommandList>> commandLists;
 
 void CreateSwapChain() {
     window = device->CreateWindow({
@@ -34,7 +34,7 @@ void CreateSwapChain() {
         .Height = HEIGHT
     });
     swapchain = device->CreateSwapchain({
-        .window = window.get(),
+        .window = window.Raw(),
     });
 }
 
@@ -49,7 +49,7 @@ void CreateGraphicsPipeline() {
     auto shader = device->CreateShader(shaderDesc);
 
     RealRHI::PipelineDesc desc{
-        .shader = shader.get(),
+        .shader = shader.Raw(),
         .vertexLayout = {
             RealRHI::DataType::Float2, // pos
             RealRHI::DataType::Float3, // color
@@ -113,7 +113,7 @@ void RecordCommandBuffer(RealRHI::CommandList* cmd, const RealRHI::FrameContext&
     };
 
     cmd->BeginRendering(renderingInfo);
-    cmd->BindPipeline(pipeline.get());
+    cmd->BindPipeline(pipeline.Raw());
 
     RealRHI::Viewport viewport{
         .x = 0.0f,
@@ -133,7 +133,7 @@ void RecordCommandBuffer(RealRHI::CommandList* cmd, const RealRHI::FrameContext&
     };
     cmd->SetScissor(scissor);
 
-    cmd->BindVertexBuffer(vertexBuffer.get());
+    cmd->BindVertexBuffer(vertexBuffer.Raw());
     cmd->Draw(static_cast<uint32_t>(vertices.size()));
     cmd->EndRendering();
 
@@ -143,20 +143,20 @@ void RecordCommandBuffer(RealRHI::CommandList* cmd, const RealRHI::FrameContext&
 void DrawFrame() {
     RealRHI::FrameContext frame = swapchain->BeginFrame();
 
-    auto* cmd = commandLists[frame.frameIndex].get();
+    auto* cmd = commandLists[frame.frameIndex].Raw();
     RecordCommandBuffer(cmd, frame);
 
-    device->Submit(cmd, swapchain.get(), frame);
+    device->Submit(cmd, swapchain.Raw(), frame);
     swapchain->Present(frame);
 }
 
 void Cleanup() {
     device->WaitIdle();
 
-    pipeline.reset();
-    vertexBuffer.reset();
+    pipeline.Reset();
+    vertexBuffer.Reset();
     commandLists.clear();
-    swapchain.reset();
+    swapchain.Reset();
     device.reset();
 }
 

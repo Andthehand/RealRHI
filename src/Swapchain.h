@@ -1,9 +1,11 @@
 #pragma once
+#include "RefCounted.h"
+
 #include "Texture.h"
 #include "FrameContext.h"
 
 namespace RealRHI {
-    class Swapchain {
+    class Swapchain : public RefCounted {
     public:
 		virtual ~Swapchain() = default;
 

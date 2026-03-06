@@ -1,8 +1,10 @@
 #pragma once
 #include <cstdint>
 
+#include "RefCounted.h"
+
 namespace RealRHI {
-	class Window {
+	class Window : public RefCounted {
 	public:
 		virtual ~Window() = default;
 
