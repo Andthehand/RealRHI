@@ -13,44 +13,49 @@
 
 namespace RealRHI {
     VulkanDevice::VulkanDevice(const DeviceDesc& desc) 
-        : m_EnableDebug(desc.enableDebug), m_ShaderDirectory(desc.shaderDirectory), m_DebugCallback(desc.debugCallback) {
+        : m_EnableDebug(desc.enableDebug), m_ShaderDirectory(desc.shaderDirectory), m_DebugCallback(desc.debugCallback),
+		  m_Instance(VK_NULL_HANDLE), m_DebugMessenger(VK_NULL_HANDLE), m_PhysicalDevice(VK_NULL_HANDLE), m_Device(VK_NULL_HANDLE), m_Allocator(VK_NULL_HANDLE) {
+	}
+
+	Result VulkanDevice::Init(const DeviceDesc& desc) {
         if (!SDL_Init(SDL_INIT_VIDEO)) {
-            // TODO: Actually handle this error
-            return;
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to init SDL video.");
+            return Result::Failed;
         }
         if (!SDL_Vulkan_LoadLibrary(nullptr)) {
-            // TODO: Actually handle this error
-            return;
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to load Vulkan library via SDL.");
+            return Result::Failed;
         }
 
         if (!CreateInstance(desc.applicationName, desc.enableValidationLayers)) {
-            // TODO: Actually handle this error
-            return;
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan instance.");
+            return Result::Failed;
         }
 
         if (desc.enableValidationLayers) {
             if (!SetupDebugMessenger()) {
-                // TODO: Actually handle this error
-                return;
+				SendDebugMessage(DebugSeverity::Error, DebugMessageType::Validation, "Failed to setup Vulkan debug messenger.");
+                return Result::Failed;
             }
         }
 
         if (!PickPhysicalDevice()) {
-            // TODO: Actually handle this error
-            return;
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to pick Vulkan physical device.");
+            return Result::Failed;
         }
 
         if (!CreateLogicalDevice()) {
-            // TODO: Actually handle this error
-            return;
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan logical device.");
+            return Result::Failed;
         }
 
         if (!CreateAllocator()) {
-            // TODO: Actually handle this error
-            return;
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan memory allocator.");
+            return Result::Failed;
         }
-    }
 
+		return Result::Success;
+	}
     VulkanDevice::~VulkanDevice() {
         if (m_Device != VK_NULL_HANDLE) {
 			vmaDestroyAllocator(m_Allocator);
@@ -141,8 +146,14 @@ namespace RealRHI {
         vkDeviceWaitIdle(m_Device);
     }
 
-    std::unique_ptr<Device> Device::Create(const DeviceDesc& desc) {
-        return std::make_unique<VulkanDevice>(desc);
+    Result Device::Create(const DeviceDesc& desc, std::unique_ptr<Device>& outDevice) {
+        auto device = std::make_unique<VulkanDevice>(desc);
+		Result res = device->Init(desc);
+		if (res != Result::Success) {
+			return res;
+		}
+		outDevice = std::move(device);
+		return Result::Success;
     }
 
     bool VulkanDevice::CreateInstance(const char* appName, bool enableValidationLayer) {
@@ -382,7 +393,8 @@ namespace RealRHI {
             .pVulkanFunctions = &vkFunctions, 
             .instance = m_Instance 
         };
-        return vmaCreateAllocator(&allocatorCI, &m_Allocator);
+
+        return vmaCreateAllocator(&allocatorCI, &m_Allocator) == VK_SUCCESS;
     }
 
     VKAPI_ATTR VkBool32 VulkanDevice::VulkanDebugCallback(

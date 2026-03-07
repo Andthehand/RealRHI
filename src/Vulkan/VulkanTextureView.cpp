@@ -4,8 +4,12 @@
 #include "VulkanConvertions.h"
 
 namespace RealRHI {
-	VulkanTextureView::VulkanTextureView(const VulkanDevice* device, const TextureViewDesc& desc) 
-		: m_Device(device), m_Texture(static_cast<const VulkanTexture*>(desc.texture)) {
+	VulkanTextureView::VulkanTextureView(const VulkanDevice* device) 
+		: m_Device(device), m_Texture(nullptr), m_ImageView(VK_NULL_HANDLE) {
+	}
+
+	Result VulkanTextureView::Init(const TextureViewDesc& desc) {
+		m_Texture = static_cast<const VulkanTexture*>(desc.texture);
         constexpr VkComponentMapping componentMapping{
             .r = VK_COMPONENT_SWIZZLE_IDENTITY,
             .g = VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -28,9 +32,12 @@ namespace RealRHI {
             .subresourceRange = subresourceRange,
         };
 
-        if (vkCreateImageView(device->GetDevice(), &createInfo, nullptr, &m_ImageView) != VK_SUCCESS) {
-			return; // TODO: Handle error
+        if (vkCreateImageView(m_Device->GetDevice(), &createInfo, nullptr, &m_ImageView) != VK_SUCCESS) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan texture view.");
+			return Result::Failed;
         }
+
+		return Result::Success;
 	}
 
 	VulkanTextureView::~VulkanTextureView() {

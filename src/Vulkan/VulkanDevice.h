@@ -22,6 +22,7 @@ namespace RealRHI {
 	class VulkanDevice : public Device {
 	public:
 		VulkanDevice(const DeviceDesc& desc);
+		Result Init(const DeviceDesc& desc);
 		~VulkanDevice();
 
 		//TODO: Remove
@@ -37,8 +38,8 @@ namespace RealRHI {
 		VmaAllocator GetAllocator() const { return m_Allocator; }
 
 		std::filesystem::path GetShaderDirectory() const override { return m_ShaderDirectory; }
-		DebugCallback GetDebugCallback() const override { return m_DebugCallback; }
 		bool IsDebugEnabled() const override { return m_EnableDebug; }
+		void SendDebugMessage(DebugSeverity severity, DebugMessageType type, const char* message) const { if (m_DebugCallback) m_DebugCallback({ .severity = severity, .type = type, .message = message }); }
 
 		Result CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) override;
 		Result CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) override;

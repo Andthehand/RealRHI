@@ -9,6 +9,7 @@ namespace RealRHI {
         auto* window = static_cast<const VulkanWindow*>(desc.window);
         VkSurfaceKHR surface;
         if (!window->CreateVulkanSurface(*device, &surface)) {
+			device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan surface for swapchain.");
             return Result::Failed;
         }
 
@@ -133,7 +134,7 @@ namespace RealRHI {
         };
 
         if (vkCreateSwapchainKHR(m_Device->GetDevice(), &createInfo, nullptr, &m_Swapchain) != VK_SUCCESS) {
-			std::cerr << "Failed to create swapchain." << std::endl;
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan swapchain.");
             return Result::Failed;
         }
 
@@ -144,6 +145,9 @@ namespace RealRHI {
         m_SwapchainImages.reserve(imageCount);
 		for (uint8_t i = 0; i < imageCount; i++) {
             m_SwapchainImages.emplace_back(m_Device, surfaceFormat.format, swapchainVkImages[i]);
+			if (m_SwapchainImages.back().Init() != Result::Success) {
+				return Result::Failed;
+			}
         }
 
         m_SwapchainImageFormat = Utils::VkFormatToTextureFormat(surfaceFormat.format);
@@ -158,7 +162,7 @@ namespace RealRHI {
             .queueFamilyIndex = m_Device->GetGraphicsQueueFamily(),
         };
         if (vkCreateCommandPool(m_Device->GetDevice(), &poolInfo, nullptr, &m_TransitionPool) != VK_SUCCESS) {
-            std::cerr << "Failed to create transition command pool." << std::endl;
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan transition command pool for swapchain.");
             return Result::Failed;
         }
 
@@ -171,7 +175,7 @@ namespace RealRHI {
             .commandBufferCount = static_cast<uint32_t>(cmdBufs.size()),
         };
         if (vkAllocateCommandBuffers(m_Device->GetDevice(), &allocInfo, cmdBufs.data()) != VK_SUCCESS) {
-            std::cerr << "Failed to allocate transition command buffers." << std::endl;
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to allocate Vulkan transition command buffers for swapchain.");
             return Result::Failed;
         }
 
@@ -187,7 +191,7 @@ namespace RealRHI {
             m_FrameSync[i].postCmdBuf = cmdBufs[i * 2 + 1];
             if (vkCreateSemaphore(m_Device->GetDevice(), &semInfo, nullptr, &m_FrameSync[i].imageAvailableSemaphore) != VK_SUCCESS ||
                 vkCreateFence(m_Device->GetDevice(), &fenceInfo, nullptr, &m_FrameSync[i].fence) != VK_SUCCESS) {
-                std::cerr << "Failed to create frame sync objects." << std::endl;
+				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan frame sync objects for swapchain.");
                 return Result::Failed;
             }
         }
@@ -196,7 +200,7 @@ namespace RealRHI {
         m_RenderFinishedSemaphores.resize(imageCount);
         for (uint32_t i = 0; i < imageCount; i++) {
             if (vkCreateSemaphore(m_Device->GetDevice(), &semInfo, nullptr, &m_RenderFinishedSemaphores[i]) != VK_SUCCESS) {
-                std::cerr << "Failed to create render finished semaphore." << std::endl;
+				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan render finished semaphore for swapchain.");
                 return Result::Failed;
             }
         }

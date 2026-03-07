@@ -4,6 +4,7 @@ namespace RealRHI {
 	Result VulkanWindow::Create(const WindowDesc& desc, Ref<Window>& outWindow) {
         SDL_Window* window = SDL_CreateWindow(desc.Title, desc.Width, desc.Height, SDL_WINDOW_VULKAN);
         if (!window) {
+            // Note: Window creation doesn't take a Device in the create method, so we cannot call DebugCallback here.
 			return Result::Failed;
         }
 		outWindow = Ref<Window>(new VulkanWindow(window, desc.Width, desc.Height));

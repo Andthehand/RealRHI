@@ -113,6 +113,7 @@ namespace RealRHI {
 
         VkPipelineLayout pipelineLayout;
         if (vkCreatePipelineLayout(device->GetDevice(), &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
+			device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan pipeline layout.");
             return Result::Failed;
         }
 
@@ -148,6 +149,7 @@ namespace RealRHI {
 
         VkPipeline pipeline;
         if (vkCreateGraphicsPipelines(device->GetDevice(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline) != VK_SUCCESS) {
+			device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan graphics pipelines.");
 			vkDestroyPipelineLayout(device->GetDevice(), pipelineLayout, nullptr);
             return Result::Failed;
         }

@@ -12,7 +12,8 @@ namespace RealRHI {
 	class VulkanTextureView : public TextureView {
 	public:
 		VulkanTextureView() = default;
-		VulkanTextureView(const VulkanDevice* device, const TextureViewDesc& desc);
+		VulkanTextureView(const VulkanDevice* device);
+		Result Init(const TextureViewDesc& desc);
 		~VulkanTextureView();
 
 		VkImageView GetImageView() const { return m_ImageView; }

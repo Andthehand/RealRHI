@@ -114,7 +114,10 @@ void CreateCommandLists() {
 }
 
 void RecordCommandBuffer(RealRHI::CommandList* cmd, const RealRHI::FrameContext& frame) {
-    cmd->Begin();
+    if (cmd->Begin() != RealRHI::Result::Success) {
+		std::cerr << "Failed to begin command list" << std::endl;
+        return;
+	}
 
     RealRHI::RenderingInfo renderingInfo{
         .colorAttachments = {
@@ -158,7 +161,9 @@ void RecordCommandBuffer(RealRHI::CommandList* cmd, const RealRHI::FrameContext&
     cmd->Draw(static_cast<uint32_t>(vertices.size()));
     cmd->EndRendering();
 
-    cmd->End();
+    if (cmd->End() != RealRHI::Result::Success) {
+        std::cerr << "Failed to end command list" << std::endl;
+    }
 }
 
 void DrawFrame() {
@@ -192,7 +197,11 @@ int main() {
         .enableValidationLayers = true,
     };
 
-    device = RealRHI::Device::Create(createInfo);
+    RealRHI::Result result = RealRHI::Device::Create(createInfo, device);
+    if (result != RealRHI::Result::Success) {
+		std::cerr << " Failed to create device" << std::endl;
+        return -1;
+	}
     std::cout << " Device created successfully" << std::endl;
 
     CreateSwapChain();

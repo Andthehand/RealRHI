@@ -11,8 +11,8 @@ namespace RealRHI {
 		static Result Create(const VulkanDevice* device, Ref<CommandList>& outCommandList);
 		~VulkanCommandList();
 
-		void Begin() override;
-		void End() override;
+		Result Begin() override;
+		Result End() override;
 		
 		void BeginRendering(const RenderingInfo& renderingInfo) override;
 		void EndRendering() override;

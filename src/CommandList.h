@@ -1,5 +1,6 @@
 #pragma once
 #include "RefCounted.h"
+#include "Result.h"
 
 #include "Texture.h"
 #include "Pipeline.h"
@@ -12,8 +13,8 @@ namespace RealRHI {
     public:
         virtual ~CommandList() = default;
 
-        virtual void Begin() = 0;
-        virtual void End() = 0;
+        virtual Result Begin() = 0;
+        virtual Result End() = 0;
 
         virtual void BeginRendering(const RenderingInfo& renderingInfo) = 0;
         virtual void EndRendering() = 0;

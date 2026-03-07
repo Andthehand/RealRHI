@@ -33,7 +33,6 @@ namespace RealRHI {
         virtual ~Device() = default;
 
 		virtual std::filesystem::path GetShaderDirectory() const = 0;
-		virtual DebugCallback GetDebugCallback() const = 0;
 		virtual bool IsDebugEnabled() const = 0;
 
 		virtual Result CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) = 0;
@@ -46,6 +45,6 @@ namespace RealRHI {
 		virtual void Submit(CommandList* cmd, Swapchain* swapchain, const FrameContext& frame) = 0;
 		virtual void WaitIdle() = 0;
 
-		static std::unique_ptr<Device> Create(const DeviceDesc& desc);
+		static Result Create(const DeviceDesc& desc, std::unique_ptr<Device>& outDevice);
     };
 }

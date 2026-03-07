@@ -16,6 +16,7 @@ namespace RealRHI {
 		VkBuffer buffer;
 		VmaAllocation allocation;
 		if (vmaCreateBuffer(device->GetAllocator(), &bufferInfo, &vmaAllocCreateInfo, &buffer, &allocation, &vmaAllocInfo) != VK_SUCCESS) {
+			device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan buffer.");
             return Result::Failed;
         }
 

@@ -11,6 +11,7 @@ namespace RealRHI {
 	public:
 		VulkanTexture(const VulkanDevice* device, VkFormat format, VkImage image); // For swapchain images
 		VulkanTexture(const VulkanDevice* device, const TextureDesc& desc);
+		Result Init();
 		~VulkanTexture();
 
 		TextureView* GetTextureView() override {

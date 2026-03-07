@@ -30,6 +30,7 @@ namespace RealRHI {
 
 		VkShaderModule shaderModule;
 		if (vkCreateShaderModule(device->GetDevice(), &shaderModuleCI, nullptr, &shaderModule) != VK_SUCCESS) {
+			device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan shader module.");
 			return Result::Failed;
 		}
 
@@ -85,12 +86,8 @@ namespace RealRHI {
 
 	bool VulkanShader::CheckSlangDiagnostics(const VulkanDevice* device, const Slang::ComPtr<slang::IBlob>& diagnostics) {
 		if (diagnostics) {
-			DebugMessage message{
-				.severity = DebugSeverity::Error,
-				.type = DebugMessageType::ShaderCompilation,
-				.message = static_cast<const char*>(diagnostics->getBufferPointer())
-			};
-			device->GetDebugCallback()(message);
+			device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::ShaderCompilation,
+				static_cast<const char*>(diagnostics->getBufferPointer()));
 			return true;
 		}
 

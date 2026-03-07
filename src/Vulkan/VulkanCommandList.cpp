@@ -16,6 +16,7 @@ namespace RealRHI {
 
 		VkCommandPool commandPool;
 		if (vkCreateCommandPool(device->GetDevice(), &poolInfo, nullptr, &commandPool) != VK_SUCCESS) {
+			device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan command pool.");
 			return Result::Failed;
 		}
 
@@ -28,6 +29,7 @@ namespace RealRHI {
 
 		VkCommandBuffer commandBuffer;
 		if (vkAllocateCommandBuffers(device->GetDevice(), &allocInfo, &commandBuffer) != VK_SUCCESS) {
+			device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to allocate Vulkan command buffer.");
 			vkDestroyCommandPool(device->GetDevice(), commandPool, nullptr);
 			return Result::Failed;
 		}
@@ -44,21 +46,25 @@ namespace RealRHI {
 		vkDestroyCommandPool(m_Device->GetDevice(), m_CommandPool, nullptr);
     }
 
-    void VulkanCommandList::Begin() {
+    Result VulkanCommandList::Begin() {
 		vkResetCommandBuffer(m_CommandBuffer, 0);
 
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
         if (vkBeginCommandBuffer(m_CommandBuffer, &beginInfo) != VK_SUCCESS) {
-			return; // TODO: Handle error
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to begin Vulkan command buffer.");
+			return Result::Failed;
         }
+		return Result::Success;
     }
 
-    void VulkanCommandList::End() {
+    Result VulkanCommandList::End() {
         if (vkEndCommandBuffer(m_CommandBuffer) != VK_SUCCESS) {
-            return; // TODO: Handle error
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to end Vulkan command buffer.");
+            return Result::Failed;
         }
+		return Result::Success;
     }
 
     void VulkanCommandList::BeginRendering(const RenderingInfo& renderingInfo) {
