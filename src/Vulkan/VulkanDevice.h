@@ -40,12 +40,12 @@ namespace RealRHI {
 		DebugCallback GetDebugCallback() const override { return m_DebugCallback; }
 		bool IsDebugEnabled() const override { return m_EnableDebug; }
 
-		Ref<Window> CreateWindow(const WindowDesc& desc) override;
-		Ref<Shader> CreateShader(const ShaderDesc& desc) override;
-		Ref<Pipeline> CreateGraphicsPipeline(const PipelineDesc& desc) override;
-		Ref<Swapchain> CreateSwapchain(const SwapchainDesc& desc) override;
-		Ref<Buffer> CreateBuffer(const BufferDesc& desc) override;
-		Ref<CommandList> CreateCommandList() override;
+		Result CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) override;
+		Result CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) override;
+		Result CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) override;
+		Result CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) override;
+		Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) override;
+		Result CreateCommandList(Ref<CommandList>& outCommandList) override;
 
 		void Submit(CommandList* cmd, Swapchain* swapchain, const FrameContext& frame) override;
 		void WaitIdle() override;

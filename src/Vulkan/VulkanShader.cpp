@@ -3,21 +3,20 @@
 
 
 namespace RealRHI {
-	VulkanShader::VulkanShader(const VulkanDevice* device, const ShaderDesc& desc)
-		: m_Device(device), m_EntryPoints(desc.entryPoints) {
-		InitializeSlang(m_Device->GetShaderDirectory().string().c_str(), device->IsDebugEnabled());
+	Result VulkanShader::Create(const VulkanDevice* device, const ShaderDesc& desc, Ref<Shader>& outShader) {
+		InitializeSlang(device->GetShaderDirectory().string().c_str(), device->IsDebugEnabled());
 
 		Slang::ComPtr<slang::IBlob> diagnostics;
-		m_SlangModule = s_SlangSession->loadModule(desc.moduleName, diagnostics.writeRef());
-		if(CheckSlangDiagnostics(diagnostics)) {
-			return;
+		Slang::ComPtr<slang::IModule> slangModule(s_SlangSession->loadModule(desc.moduleName, diagnostics.writeRef()));
+		if(CheckSlangDiagnostics(device, diagnostics)) {
+			return Result::Failed;
 		}
 
 		Slang::ComPtr<slang::IComponentType> linkedProgram;
 		Slang::ComPtr<slang::IBlob> diagnosticBlob;
-		m_SlangModule->link(linkedProgram.writeRef(), diagnosticBlob.writeRef());
-		if (CheckSlangDiagnostics(diagnostics)) {
-			return;
+		slangModule->link(linkedProgram.writeRef(), diagnosticBlob.writeRef());
+		if (CheckSlangDiagnostics(device, diagnosticBlob)) {
+			return Result::Failed;
 		}
 
 		Slang::ComPtr<slang::IBlob> spirv;
@@ -29,10 +28,17 @@ namespace RealRHI {
 			.pCode = (uint32_t*)spirv->getBufferPointer() 
 		};
 
-		if (vkCreateShaderModule(m_Device->GetDevice(), &shaderModuleCI, nullptr, &m_ShaderModule) != VK_SUCCESS) {
-			// TODO: Actually handle this error
-			return;
+		VkShaderModule shaderModule;
+		if (vkCreateShaderModule(device->GetDevice(), &shaderModuleCI, nullptr, &shaderModule) != VK_SUCCESS) {
+			return Result::Failed;
 		}
+
+		outShader = Ref<Shader>(new VulkanShader(device, slangModule, shaderModule, desc.entryPoints));
+		return Result::Success;
+	}
+
+	VulkanShader::VulkanShader(const VulkanDevice* device, Slang::ComPtr<slang::IModule> slangModule, VkShaderModule shaderModule, std::vector<EntryPoint> entryPoints)
+		: m_Device(device), m_SlangModule(slangModule), m_ShaderModule(shaderModule), m_EntryPoints(std::move(entryPoints)) {
 	}
 
 	VulkanShader::~VulkanShader() {
@@ -77,14 +83,14 @@ namespace RealRHI {
 		}
 	}
 
-	bool VulkanShader::CheckSlangDiagnostics(const Slang::ComPtr<slang::IBlob> diagnostics) const {
+	bool VulkanShader::CheckSlangDiagnostics(const VulkanDevice* device, const Slang::ComPtr<slang::IBlob>& diagnostics) {
 		if (diagnostics) {
 			DebugMessage message{
 				.severity = DebugSeverity::Error,
 				.type = DebugMessageType::ShaderCompilation,
 				.message = static_cast<const char*>(diagnostics->getBufferPointer())
 			};
-			m_Device->GetDebugCallback()(message);
+			device->GetDebugCallback()(message);
 			return true;
 		}
 

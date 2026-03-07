@@ -7,27 +7,37 @@
 #include "VulkanConvertions.h"
 
 namespace RealRHI {
-	VulkanCommandList::VulkanCommandList(const VulkanDevice* device) : m_Device(device) {
+	Result VulkanCommandList::Create(const VulkanDevice* device, Ref<CommandList>& outCommandList) {
 		VkCommandPoolCreateInfo poolInfo{
 			.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
 			.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
 			.queueFamilyIndex = device->GetGraphicsQueueFamily(),
 		};
 
-		if (vkCreateCommandPool(device->GetDevice(), &poolInfo, nullptr, &m_CommandPool) != VK_SUCCESS) {
-			return; // TODO: Handle error
+		VkCommandPool commandPool;
+		if (vkCreateCommandPool(device->GetDevice(), &poolInfo, nullptr, &commandPool) != VK_SUCCESS) {
+			return Result::Failed;
 		}
 
 		VkCommandBufferAllocateInfo allocInfo{
 			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-			.commandPool = m_CommandPool,
+			.commandPool = commandPool,
 			.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
 			.commandBufferCount = 1,
 		};
 
-		if (vkAllocateCommandBuffers(device->GetDevice(), &allocInfo, &m_CommandBuffer) != VK_SUCCESS) {
-			return; // TODO: Handle error
+		VkCommandBuffer commandBuffer;
+		if (vkAllocateCommandBuffers(device->GetDevice(), &allocInfo, &commandBuffer) != VK_SUCCESS) {
+			vkDestroyCommandPool(device->GetDevice(), commandPool, nullptr);
+			return Result::Failed;
 		}
+		
+		outCommandList = Ref<CommandList>(new VulkanCommandList(device, commandPool, commandBuffer));
+		return Result::Success;
+	}
+	
+	VulkanCommandList::VulkanCommandList(const VulkanDevice* device, VkCommandPool commandPool, VkCommandBuffer commandBuffer)
+		: m_Device(device), m_CommandPool(commandPool), m_CommandBuffer(commandBuffer) {
 	}
 
     VulkanCommandList::~VulkanCommandList() {

@@ -1,12 +1,17 @@
 #include "VulkanWindow.h"
 
 namespace RealRHI {
-	VulkanWindow::VulkanWindow(const WindowDesc& desc) 
-        : m_Width(desc.Width), m_Height(desc.Height) {
-        m_Window = SDL_CreateWindow(desc.Title, desc.Width, desc.Height, SDL_WINDOW_VULKAN);
-        if (!m_Window) {
-			return; // TODO: Handle this error properly
+	Result VulkanWindow::Create(const WindowDesc& desc, Ref<Window>& outWindow) {
+        SDL_Window* window = SDL_CreateWindow(desc.Title, desc.Width, desc.Height, SDL_WINDOW_VULKAN);
+        if (!window) {
+			return Result::Failed;
         }
+		outWindow = Ref<Window>(new VulkanWindow(window, desc.Width, desc.Height));
+		return Result::Success;
+	}
+
+	VulkanWindow::VulkanWindow(SDL_Window* window, uint32_t width, uint32_t height) 
+        : m_Window(window), m_Width(width), m_Height(height) {
 	}
 
     VulkanWindow::~VulkanWindow() {

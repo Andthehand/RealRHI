@@ -3,8 +3,7 @@
 #include "VulkanConvertions.h"
 
 namespace RealRHI {
-	VulkanBuffer::VulkanBuffer(const VulkanDevice* device, const BufferDesc& desc) 
-        : m_Device(device) {
+    Result VulkanBuffer::Create(const VulkanDevice* device, const BufferDesc& desc, Ref<Buffer>& outBuffer) {
         VkBufferCreateInfo bufferInfo{
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .size = desc.size,
@@ -14,13 +13,22 @@ namespace RealRHI {
 
 		VmaAllocationCreateInfo vmaAllocCreateInfo = Utils::MemoryUsageToVmaAllocationCreateInfo(desc.memoryUsage);
 		VmaAllocationInfo vmaAllocInfo;
-		if (vmaCreateBuffer(device->GetAllocator(), &bufferInfo, &vmaAllocCreateInfo, &m_Buffer, &m_BufferMemory, &vmaAllocInfo) != VK_SUCCESS) {
-            throw std::runtime_error("Failed to create vertex buffer!");
+		VkBuffer buffer;
+		VmaAllocation allocation;
+		if (vmaCreateBuffer(device->GetAllocator(), &bufferInfo, &vmaAllocCreateInfo, &buffer, &allocation, &vmaAllocInfo) != VK_SUCCESS) {
+            return Result::Failed;
         }
 
         if (desc.initialData) {
             memcpy(vmaAllocInfo.pMappedData, desc.initialData, (size_t)bufferInfo.size);
         }
+
+		outBuffer = Ref<Buffer>(new VulkanBuffer(device, buffer, allocation));
+		return Result::Success;
+	}
+
+	VulkanBuffer::VulkanBuffer(const VulkanDevice* device, VkBuffer buffer, VmaAllocation allocation) 
+        : m_Device(device), m_Buffer(buffer), m_BufferMemory(allocation) {
 	}
 
     VulkanBuffer::~VulkanBuffer() {

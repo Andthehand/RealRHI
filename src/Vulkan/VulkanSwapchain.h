@@ -1,6 +1,7 @@
 #pragma once
 #include "Vulkan/VulkanDevice.h"
 #include "Vulkan/VulkanWindow.h"
+#include "Result.h"
 
 #include "Swapchain.h"
 #include "SwapchainDesc.h"
@@ -20,7 +21,7 @@ namespace RealRHI {
 	public:
 		static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
 
-		VulkanSwapchain(const VulkanDevice* device, const SwapchainDesc& desc);
+		static Result Create(const VulkanDevice* device, const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain);
 		~VulkanSwapchain();
 
 		TextureFormat GetBackBufferFormat() const override { return m_SwapchainImageFormat; }
@@ -48,7 +49,9 @@ namespace RealRHI {
 		VkSurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
 		VkPresentModeKHR ChooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
 		VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities, VkExtent2D requestedExtent);
-		bool CreateSwapchain(VkExtent2D requestedExtent);
+		
+		VulkanSwapchain(const VulkanDevice* device, const VulkanWindow* window, VkSurfaceKHR surface);
+		Result Init(VkExtent2D requestedExtent);
 
 		void TransitionToColorAttachment(VkCommandBuffer cmdBuf, uint32_t imageIndex);
 		void TransitionToPresent(VkCommandBuffer cmdBuf, uint32_t imageIndex);

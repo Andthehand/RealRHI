@@ -73,28 +73,28 @@ namespace RealRHI {
 		SDL_Quit();
     }
 
-    Ref<Window> VulkanDevice::CreateWindow(const WindowDesc& desc) {
-        return Ref<VulkanWindow>::Create(desc);
+    Result VulkanDevice::CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) {
+        return VulkanWindow::Create(desc, outWindow);
     }
 
-    Ref<Shader> VulkanDevice::CreateShader(const ShaderDesc& desc) {
-        return Ref<VulkanShader>::Create(this, desc);
+    Result VulkanDevice::CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) {
+        return VulkanShader::Create(this, desc, outShader);
     }
 
-    Ref<Pipeline> VulkanDevice::CreateGraphicsPipeline(const PipelineDesc& desc) {
-        return Ref<VulkanPipeline>::Create(this, desc);
+    Result VulkanDevice::CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) {
+        return VulkanPipeline::Create(this, desc, outPipeline);
     }
 
-    Ref<Swapchain> VulkanDevice::CreateSwapchain(const SwapchainDesc& desc) {
-        return Ref<VulkanSwapchain>::Create(this, desc);
+    Result VulkanDevice::CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) {
+        return VulkanSwapchain::Create(this, desc, outSwapchain);
     }
 
-    Ref<Buffer> VulkanDevice::CreateBuffer(const BufferDesc& desc) {
-        return Ref<VulkanBuffer>::Create(this, desc);
+    Result VulkanDevice::CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) {
+        return VulkanBuffer::Create(this, desc, outBuffer);
     }
 
-    Ref<CommandList> VulkanDevice::CreateCommandList() {
-		return Ref<VulkanCommandList>::Create(this);
+    Result VulkanDevice::CreateCommandList(Ref<CommandList>& outCommandList) {
+		return VulkanCommandList::Create(this, outCommandList);
     }
 
     void VulkanDevice::Submit(CommandList* cmd, Swapchain* sc, const FrameContext& frame) {

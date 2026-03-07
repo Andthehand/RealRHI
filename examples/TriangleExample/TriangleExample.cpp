@@ -28,14 +28,21 @@ RealRHI::Ref<RealRHI::Buffer> vertexBuffer;
 std::vector<RealRHI::Ref<RealRHI::CommandList>> commandLists;
 
 void CreateSwapChain() {
-    window = device->CreateWindow({
+    RealRHI::Result result = device->CreateWindow({
         .Title = "RealRHI Triangle Example",
         .Width = WIDTH,
         .Height = HEIGHT
-    });
-    swapchain = device->CreateSwapchain({
+    }, window);
+    if (result != RealRHI::Result::Success) {
+		std::cerr << "Failed to create window" << std::endl;
+    }
+    
+    result = device->CreateSwapchain({
         .window = window.Raw(),
-    });
+    }, swapchain);
+    if (result != RealRHI::Result::Success) {
+		std::cerr << "Failed to create swapchain" << std::endl;
+    }
 }
 
 void CreateGraphicsPipeline() {
@@ -46,7 +53,12 @@ void CreateGraphicsPipeline() {
             { .entryPoint = "main", .stage = RealRHI::ShaderStage::Fragment },
         }
     };
-    auto shader = device->CreateShader(shaderDesc);
+    
+    RealRHI::Ref<RealRHI::Shader> shader;
+    RealRHI::Result result = device->CreateShader(shaderDesc, shader);
+    if (result != RealRHI::Result::Success) {
+        std::cerr << "Failed to create shader" << std::endl;
+    }
 
     RealRHI::PipelineDesc desc{
         .shader = shader.Raw(),
@@ -73,22 +85,31 @@ void CreateGraphicsPipeline() {
         },
     };
 
-    pipeline = device->CreateGraphicsPipeline(desc);
+    result = device->CreateGraphicsPipeline(desc, pipeline);
+    if (result != RealRHI::Result::Success) {
+        std::cerr << "Failed to create pipeline" << std::endl;
+    }
 }
 
 void CreateVertexBuffer() {
-    vertexBuffer = device->CreateBuffer({
+    RealRHI::Result result = device->CreateBuffer({
         .size = sizeof(vertices[0]) * vertices.size(),
         .usage = RealRHI::BufferUsage::Vertex,
         .memoryUsage = RealRHI::MemoryUsage::CPUToGPU,
         .initialData = vertices.data(),
-    });
+    }, vertexBuffer);
+    if (result != RealRHI::Result::Success) {
+        std::cerr << "Failed to create vertex buffer" << std::endl;
+    }
 }
 
 void CreateCommandLists() {
     commandLists.resize(swapchain->GetMaxFramesInFlight());
     for (auto& cmd : commandLists) {
-        cmd = device->CreateCommandList();
+        RealRHI::Result result = device->CreateCommandList(cmd);
+        if (result != RealRHI::Result::Success) {
+            std::cerr << "Failed to create command list" << std::endl;
+        }
     }
 }
 

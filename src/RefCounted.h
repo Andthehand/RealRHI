@@ -145,6 +145,6 @@ namespace RealRHI {
 		template<class T2>
 		friend class Ref;
 
-		mutable T* m_Instance;
+		mutable T* m_Instance = nullptr;
 	};
 }

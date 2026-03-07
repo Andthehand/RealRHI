@@ -1,13 +1,14 @@
 #pragma once
 #include "CommandList.h"
 #include "VulkanDevice.h"
+#include "Result.h"
 
 #include <Vulkan/vulkan.h>
 
 namespace RealRHI {
 	class VulkanCommandList : public CommandList {
 	public:
-		VulkanCommandList(const VulkanDevice* device);
+		static Result Create(const VulkanDevice* device, Ref<CommandList>& outCommandList);
 		~VulkanCommandList();
 
 		void Begin() override;
@@ -26,6 +27,7 @@ namespace RealRHI {
 
 		VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
 	private:
+		VulkanCommandList(const VulkanDevice* device, VkCommandPool commandPool, VkCommandBuffer commandBuffer);
 		const VulkanDevice* m_Device;
 
 		VkCommandPool m_CommandPool;

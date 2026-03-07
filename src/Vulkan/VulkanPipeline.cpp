@@ -4,8 +4,7 @@
 #include "VulkanConvertions.h"
 
 namespace RealRHI {
-    VulkanPipeline::VulkanPipeline(const VulkanDevice* device, const PipelineDesc& desc) 
-        : m_Device(device) {
+    Result VulkanPipeline::Create(const VulkanDevice* device, const PipelineDesc& desc, Ref<Pipeline>& outPipeline) {
 		const VulkanShader* shader = static_cast<VulkanShader*>(desc.shader);
 		VkShaderModule shaderModule = shader->GetShaderModule();
 
@@ -112,9 +111,9 @@ namespace RealRHI {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         };
 
-        if (vkCreatePipelineLayout(device->GetDevice(), &pipelineLayoutInfo, nullptr, &m_PipelineLayout) != VK_SUCCESS) {
-			// TODO: Implement proper error handling
-            return;
+        VkPipelineLayout pipelineLayout;
+        if (vkCreatePipelineLayout(device->GetDevice(), &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
+            return Result::Failed;
         }
 
 		const RenderTargetFormats& formats = desc.renderTargetFormats;
@@ -143,13 +142,22 @@ namespace RealRHI {
 			.pDepthStencilState = &depthStencilState,
             .pColorBlendState = &colorBlending,
 			.pDynamicState = &dynamicState,
-            .layout = m_PipelineLayout,
+            .layout = pipelineLayout,
             .renderPass = nullptr, // We're using dynamic rendering, so no render pass
         };
 
-        if (vkCreateGraphicsPipelines(device->GetDevice(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_Pipeline) != VK_SUCCESS) {
-            throw std::runtime_error("Failed to create graphics pipeline!");
+        VkPipeline pipeline;
+        if (vkCreateGraphicsPipelines(device->GetDevice(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline) != VK_SUCCESS) {
+			vkDestroyPipelineLayout(device->GetDevice(), pipelineLayout, nullptr);
+            return Result::Failed;
         }
+
+		outPipeline = Ref<Pipeline>(new VulkanPipeline(device, pipeline, pipelineLayout));
+		return Result::Success;
+	}
+
+	VulkanPipeline::VulkanPipeline(const VulkanDevice* device, VkPipeline pipeline, VkPipelineLayout layout)
+		: m_Device(device), m_Pipeline(pipeline), m_PipelineLayout(layout) {
 	}
     
     VulkanPipeline::~VulkanPipeline() {

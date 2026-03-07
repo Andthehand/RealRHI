@@ -4,6 +4,8 @@
 #include "Window.h"
 #include "WindowDesc.h"
 
+#include "Result.h"
+
 #include "BufferDesc.h"
 #include "Buffer.h"
 
@@ -34,12 +36,12 @@ namespace RealRHI {
 		virtual DebugCallback GetDebugCallback() const = 0;
 		virtual bool IsDebugEnabled() const = 0;
 
-		virtual Ref<Window> CreateWindow(const WindowDesc& desc) = 0;
-		virtual Ref<Shader> CreateShader(const ShaderDesc& desc) = 0;
-		virtual Ref<Pipeline> CreateGraphicsPipeline(const PipelineDesc& desc) = 0;
-        virtual Ref<Swapchain> CreateSwapchain(const SwapchainDesc& desc) = 0;
-		virtual Ref<Buffer> CreateBuffer(const BufferDesc& desc) = 0;
-		virtual Ref<CommandList> CreateCommandList() = 0;
+		virtual Result CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) = 0;
+		virtual Result CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) = 0;
+		virtual Result CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) = 0;
+        virtual Result CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) = 0;
+		virtual Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) = 0;
+		virtual Result CreateCommandList(Ref<CommandList>& outCommandList) = 0;
 
 		virtual void Submit(CommandList* cmd, Swapchain* swapchain, const FrameContext& frame) = 0;
 		virtual void WaitIdle() = 0;

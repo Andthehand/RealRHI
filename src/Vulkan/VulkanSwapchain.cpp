@@ -5,12 +5,26 @@
 #include <algorithm>
 
 namespace RealRHI {
-    VulkanSwapchain::VulkanSwapchain(const VulkanDevice* device, const SwapchainDesc& desc)
-        : m_Device(device) {
-        m_Window = static_cast<VulkanWindow*>(desc.window);
-        m_Window->CreateVulkanSurface(*device, &m_Surface);
+    Result VulkanSwapchain::Create(const VulkanDevice* device, const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) {
+        auto* window = static_cast<const VulkanWindow*>(desc.window);
+        VkSurfaceKHR surface;
+        if (!window->CreateVulkanSurface(*device, &surface)) {
+            return Result::Failed;
+        }
 
-        CreateSwapchain(VkExtent2D{ .width = (uint32_t)m_Window->GetWidth(), .height = m_Window->GetHeight()});
+        auto* sc = new VulkanSwapchain(device, window, surface);
+        Result res = sc->Init(VkExtent2D{ .width = (uint32_t)window->GetWidth(), .height = window->GetHeight()});
+        if (res != Result::Success) {
+            delete sc;
+            return res;
+        }
+        
+        outSwapchain = Ref<Swapchain>(sc);
+        return Result::Success;
+	}
+
+    VulkanSwapchain::VulkanSwapchain(const VulkanDevice* device, const VulkanWindow* window, VkSurfaceKHR surface)
+        : m_Device(device), m_Window(window), m_Surface(surface), m_Swapchain(VK_NULL_HANDLE), m_TransitionPool(VK_NULL_HANDLE) {
 	}
 
     VulkanSwapchain::~VulkanSwapchain() {
@@ -88,7 +102,7 @@ namespace RealRHI {
         }
     }
 
-    bool VulkanSwapchain::CreateSwapchain(VkExtent2D requestedExtent) {
+    Result VulkanSwapchain::Init(VkExtent2D requestedExtent) {
         SwapChainSupportDetails swapChainSupport = QuerySwapChainSupport();
 
         VkSurfaceFormatKHR surfaceFormat = ChooseSwapSurfaceFormat(swapChainSupport.Formats);
@@ -120,7 +134,7 @@ namespace RealRHI {
 
         if (vkCreateSwapchainKHR(m_Device->GetDevice(), &createInfo, nullptr, &m_Swapchain) != VK_SUCCESS) {
 			std::cerr << "Failed to create swapchain." << std::endl;
-            return true;
+            return Result::Failed;
         }
 
         vkGetSwapchainImagesKHR(m_Device->GetDevice(), m_Swapchain, &imageCount, nullptr);
@@ -145,7 +159,7 @@ namespace RealRHI {
         };
         if (vkCreateCommandPool(m_Device->GetDevice(), &poolInfo, nullptr, &m_TransitionPool) != VK_SUCCESS) {
             std::cerr << "Failed to create transition command pool." << std::endl;
-            return true;
+            return Result::Failed;
         }
 
         // Allocate pre and post transition command buffers (2 per frame)
@@ -158,7 +172,7 @@ namespace RealRHI {
         };
         if (vkAllocateCommandBuffers(m_Device->GetDevice(), &allocInfo, cmdBufs.data()) != VK_SUCCESS) {
             std::cerr << "Failed to allocate transition command buffers." << std::endl;
-            return true;
+            return Result::Failed;
         }
 
         // Create per-frame sync objects
@@ -174,7 +188,7 @@ namespace RealRHI {
             if (vkCreateSemaphore(m_Device->GetDevice(), &semInfo, nullptr, &m_FrameSync[i].imageAvailableSemaphore) != VK_SUCCESS ||
                 vkCreateFence(m_Device->GetDevice(), &fenceInfo, nullptr, &m_FrameSync[i].fence) != VK_SUCCESS) {
                 std::cerr << "Failed to create frame sync objects." << std::endl;
-                return true;
+                return Result::Failed;
             }
         }
 
@@ -183,11 +197,11 @@ namespace RealRHI {
         for (uint32_t i = 0; i < imageCount; i++) {
             if (vkCreateSemaphore(m_Device->GetDevice(), &semInfo, nullptr, &m_RenderFinishedSemaphores[i]) != VK_SUCCESS) {
                 std::cerr << "Failed to create render finished semaphore." << std::endl;
-                return true;
+                return Result::Failed;
             }
         }
 
-		return false;
+		return Result::Success;
 	}
 
     TextureView* VulkanSwapchain::GetBackBufferView(uint32_t imageIndex) {
