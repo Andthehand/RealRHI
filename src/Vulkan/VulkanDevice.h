@@ -39,7 +39,7 @@ namespace RealRHI {
 
 		std::filesystem::path GetShaderDirectory() const override { return m_ShaderDirectory; }
 		bool IsDebugEnabled() const override { return m_EnableDebug; }
-		void SendDebugMessage(DebugSeverity severity, DebugMessageType type, const char* message) const { if (m_DebugCallback) m_DebugCallback({ .severity = severity, .type = type, .message = message }); }
+		void SendDebugMessage(DebugSeverity severity, DebugMessageType type, const char* message) const { m_DebugCallback({ .severity = severity, .type = type, .message = message }); }
 
 		Result CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) override;
 		Result CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) override;
