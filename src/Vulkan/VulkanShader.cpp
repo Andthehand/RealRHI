@@ -8,14 +8,14 @@ namespace RealRHI {
 
 		Slang::ComPtr<slang::IBlob> diagnostics;
 		Slang::ComPtr<slang::IModule> slangModule(s_SlangSession->loadModule(desc.moduleName, diagnostics.writeRef()));
-		if(CheckSlangDiagnostics(device, diagnostics)) {
+		if(!CheckSlangDiagnostics(device, diagnostics)) {
 			return Result::Failed;
 		}
 
 		Slang::ComPtr<slang::IComponentType> linkedProgram;
 		Slang::ComPtr<slang::IBlob> diagnosticBlob;
 		slangModule->link(linkedProgram.writeRef(), diagnosticBlob.writeRef());
-		if (CheckSlangDiagnostics(device, diagnosticBlob)) {
+		if (!CheckSlangDiagnostics(device, diagnosticBlob)) {
 			return Result::Failed;
 		}
 
@@ -88,9 +88,9 @@ namespace RealRHI {
 		if (diagnostics) {
 			device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::ShaderCompilation,
 				static_cast<const char*>(diagnostics->getBufferPointer()));
-			return true;
+			return false;
 		}
 
-		return false;
+		return true;
 	}
 }
