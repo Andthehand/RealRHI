@@ -4,10 +4,33 @@
 #include "PipelineDesc.h"
 #include "BufferAttributes.h"
 #include "TextureViewDesc.h"
+#include "Shader.h"
 
 #include <Vulkan/vulkan.h>
 
 namespace RealRHI::Utils {
+    // ---------------------- ShaderStage ------------------
+    constexpr VkShaderStageFlagBits ShaderStageToVkShaderStage(SlangStage stage) {
+        switch (stage) {
+            case SLANG_STAGE_VERTEX: return VK_SHADER_STAGE_VERTEX_BIT;
+            case SLANG_STAGE_HULL: return VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+            case SLANG_STAGE_DOMAIN: return VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+            case SLANG_STAGE_GEOMETRY: return VK_SHADER_STAGE_GEOMETRY_BIT;
+            case SLANG_STAGE_FRAGMENT: return VK_SHADER_STAGE_FRAGMENT_BIT;
+            case SLANG_STAGE_COMPUTE: return VK_SHADER_STAGE_COMPUTE_BIT;
+            case SLANG_STAGE_RAY_GENERATION: return VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+            case SLANG_STAGE_INTERSECTION: return VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
+            case SLANG_STAGE_ANY_HIT: return VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
+            case SLANG_STAGE_CLOSEST_HIT: return VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+            case SLANG_STAGE_MISS: return VK_SHADER_STAGE_MISS_BIT_KHR;
+            case SLANG_STAGE_CALLABLE: return VK_SHADER_STAGE_CALLABLE_BIT_KHR;
+            case SLANG_STAGE_MESH: return VK_SHADER_STAGE_MESH_BIT_EXT;
+            case SLANG_STAGE_AMPLIFICATION: return VK_SHADER_STAGE_TASK_BIT_EXT;
+			default: return static_cast<VkShaderStageFlagBits>(0);
+		}
+    }
+    // ---------------------- ShaderStage ------------------
+
     // ---------------------- TextureView ------------------
     constexpr VkImageViewType TextureViewTypeToVkImageViewType(TextureViewType type) {
         switch (type) {
@@ -73,17 +96,6 @@ namespace RealRHI::Utils {
         return allocInfo;
     }
     // ---------------------- BufferDesc -------------------
-
-    // ---------------------- ShaderStage ------------------
-    constexpr VkShaderStageFlagBits ShaderStageToVkShaderStage(ShaderStage stage) {
-        switch (stage) {
-            case RealRHI::ShaderStage::Vertex: return VK_SHADER_STAGE_VERTEX_BIT;
-            case RealRHI::ShaderStage::Fragment: return VK_SHADER_STAGE_FRAGMENT_BIT;
-            case RealRHI::ShaderStage::Compute: return VK_SHADER_STAGE_COMPUTE_BIT;
-            default: return VK_SHADER_STAGE_FLAG_BITS_MAX_ENUM;
-        }
-	}
-    // ---------------------- ShaderStage ------------------
 
 	// ---------------------- TextureFormat ----------------
     constexpr VkFormat TextureFormatToVkFormat(TextureFormat format) {

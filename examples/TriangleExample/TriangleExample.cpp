@@ -48,10 +48,6 @@ void CreateSwapChain() {
 void CreateGraphicsPipeline() {
     const RealRHI::ShaderDesc shaderDesc{
         .moduleName = "shader",
-        .entryPoints = {
-            { .entryPoint = "main", .stage = RealRHI::ShaderStage::Vertex },
-            { .entryPoint = "main", .stage = RealRHI::ShaderStage::Fragment },
-        }
     };
     
     RealRHI::Ref<RealRHI::Shader> shader;

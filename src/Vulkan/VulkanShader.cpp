@@ -12,10 +12,36 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
+		uint8_t entryPointCount = slangModule->getDefinedEntryPointCount();
+		std::vector<Slang::ComPtr<slang::IEntryPoint>> entryPoints(entryPointCount);
+		for (uint8_t i = 0; i < entryPointCount; i++) {
+			slangModule->getDefinedEntryPoint(i, entryPoints[i].writeRef());
+		}
+
+		Slang::ComPtr<slang::IComponentType> composedProgram;
+		s_SlangSession->createCompositeComponentType((slang::IComponentType**)entryPoints.data(), entryPoints.size(), composedProgram.writeRef(), diagnostics.writeRef());
+		if (!CheckSlangDiagnostics(device, diagnostics)) {
+			return Result::Failed;
+		}
+
+		// Reflect
+		slang::ProgramLayout* programLayout = composedProgram->getLayout(0, diagnostics.writeRef());
+		if (!CheckSlangDiagnostics(device, diagnostics)) {
+			return Result::Failed;
+		}
+
+		entryPointCount = programLayout->getEntryPointCount();
+		std::vector<EntryPoint> createEntryPoints(entryPointCount);
+		for (uint8_t i = 0; i < entryPointCount; i++) {
+			slang::EntryPointReflection* entryPointReflect = programLayout->getEntryPointByIndex(i);
+
+			createEntryPoints[i].stage = entryPointReflect->getStage();
+			createEntryPoints[i].entryPointName = entryPointReflect->getName();
+		}
+
 		Slang::ComPtr<slang::IComponentType> linkedProgram;
-		Slang::ComPtr<slang::IBlob> diagnosticBlob;
-		slangModule->link(linkedProgram.writeRef(), diagnosticBlob.writeRef());
-		if (!CheckSlangDiagnostics(device, diagnosticBlob)) {
+		slangModule->link(linkedProgram.writeRef(), diagnostics.writeRef());
+		if (!CheckSlangDiagnostics(device, diagnostics)) {
 			return Result::Failed;
 		}
 
@@ -34,7 +60,7 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
-		outShader = Ref<Shader>(new VulkanShader(device, slangModule, shaderModule, desc.entryPoints));
+		outShader = Ref<Shader>(new VulkanShader(device, slangModule, shaderModule, createEntryPoints));
 		return Result::Success;
 	}
 

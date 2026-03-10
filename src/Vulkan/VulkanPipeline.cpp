@@ -15,7 +15,7 @@ namespace RealRHI {
                 .sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                 .stage  = Utils::ShaderStageToVkShaderStage(entryPoints[i].stage),
                 .module = shaderModule,
-                .pName  = entryPoints[i].entryPoint
+                .pName  = entryPoints[i].entryPointName.c_str()
             };
         }
 

@@ -16,12 +16,12 @@ namespace RealRHI {
     constexpr BufferUsage operator|(BufferUsage a, BufferUsage b) {
         return static_cast<BufferUsage>(
             static_cast<uint32_t>(a) | static_cast<uint32_t>(b)
-            );
+        );
     }
     constexpr BufferUsage operator&(BufferUsage a, BufferUsage b) {
         return static_cast<BufferUsage>(
             static_cast<uint32_t>(a) & static_cast<uint32_t>(b)
-            );
+        );
     }
     constexpr BufferUsage& operator|=(BufferUsage& a, BufferUsage b) {
         a = a | b;

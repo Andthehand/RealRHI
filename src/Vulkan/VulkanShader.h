@@ -5,8 +5,6 @@
 #include "Result.h"
 
 #include <filesystem>
-#include <slang/slang.h>
-#include <slang/slang-com-ptr.h>
 
 namespace RealRHI {
 	class VulkanShader : public Shader {
@@ -27,7 +25,7 @@ namespace RealRHI {
 		Slang::ComPtr<slang::IModule> m_SlangModule;
 		VkShaderModule m_ShaderModule;
 
-		std::vector<EntryPoint> m_EntryPoints; // Used by the pipeline
+		std::vector<EntryPoint> m_EntryPoints;
 
 		inline static Slang::ComPtr<slang::IGlobalSession> s_SlangGlobalSession;
 		inline static Slang::ComPtr<slang::ISession> s_SlangSession;
