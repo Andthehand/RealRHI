@@ -1,75 +1,214 @@
 #include "VulkanShader.h"
 #include <array>
 
+#include "VulkanConvertions.h"
 
 namespace RealRHI {
-	Result VulkanShader::Create(const VulkanDevice* device, const ShaderDesc& desc, Ref<Shader>& outShader) {
+	Result VulkanShader::Create(
+		const VulkanDevice* device,
+		const ShaderDesc& desc,
+		Ref<Shader>& outShader) {
 		InitializeSlang(device->GetShaderDirectory().string().c_str(), device->IsDebugEnabled());
 
 		Slang::ComPtr<slang::IBlob> diagnostics;
-		Slang::ComPtr<slang::IModule> slangModule(s_SlangSession->loadModule(desc.moduleName, diagnostics.writeRef()));
-		if(!CheckSlangDiagnostics(device, diagnostics)) {
-			return Result::Failed;
-		}
 
-		uint8_t entryPointCount = slangModule->getDefinedEntryPointCount();
-		std::vector<Slang::ComPtr<slang::IEntryPoint>> entryPoints(entryPointCount);
-		for (uint8_t i = 0; i < entryPointCount; i++) {
-			slangModule->getDefinedEntryPoint(i, entryPoints[i].writeRef());
-		}
+		// 1. Load module
+		auto module = LoadModule(device, desc, diagnostics);
+		if (!module) return Result::Failed;
 
-		Slang::ComPtr<slang::IComponentType> composedProgram;
-		s_SlangSession->createCompositeComponentType((slang::IComponentType**)entryPoints.data(), entryPoints.size(), composedProgram.writeRef(), diagnostics.writeRef());
-		if (!CheckSlangDiagnostics(device, diagnostics)) {
-			return Result::Failed;
-		}
+		// 2. Compose program (entry points)
+		auto composedProgram = ComposeProgram(device, module, diagnostics);
+		if (!composedProgram) return Result::Failed;
 
-		// Reflect
-		slang::ProgramLayout* programLayout = composedProgram->getLayout(0, diagnostics.writeRef());
-		if (!CheckSlangDiagnostics(device, diagnostics)) {
-			return Result::Failed;
-		}
+		// 3. Reflect layout
+		std::vector<EntryPoint> entryPoints;
+		BufferLayout bufferLayout = ReflectLayout(device, composedProgram, entryPoints, diagnostics);
 
-		entryPointCount = programLayout->getEntryPointCount();
-		std::vector<EntryPoint> createEntryPoints(entryPointCount);
-		for (uint8_t i = 0; i < entryPointCount; i++) {
-			slang::EntryPointReflection* entryPointReflect = programLayout->getEntryPointByIndex(i);
+		// 4. Link program
+		auto linkedProgram = LinkProgram(device, module, diagnostics);
+		if (!linkedProgram) return Result::Failed;
 
-			createEntryPoints[i].stage = entryPointReflect->getStage();
-			createEntryPoints[i].entryPointName = entryPointReflect->getName();
-		}
+		// 5. Create Vulkan module
+		VkShaderModule shaderModule = CreateVkShaderModule(device, linkedProgram);
+		if (!shaderModule) return Result::Failed;
 
-		Slang::ComPtr<slang::IComponentType> linkedProgram;
-		slangModule->link(linkedProgram.writeRef(), diagnostics.writeRef());
-		if (!CheckSlangDiagnostics(device, diagnostics)) {
-			return Result::Failed;
-		}
+		outShader = Ref<Shader>(new VulkanShader(device, module, shaderModule, entryPoints, bufferLayout));
 
-		Slang::ComPtr<slang::IBlob> spirv;
-		linkedProgram->getTargetCode(0, spirv.writeRef());
-
-		VkShaderModuleCreateInfo shaderModuleCI{ 
-			.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, 
-			.codeSize = spirv->getBufferSize(), 
-			.pCode = (uint32_t*)spirv->getBufferPointer() 
-		};
-
-		VkShaderModule shaderModule;
-		if (vkCreateShaderModule(device->GetDevice(), &shaderModuleCI, nullptr, &shaderModule) != VK_SUCCESS) {
-			device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan shader module.");
-			return Result::Failed;
-		}
-
-		outShader = Ref<Shader>(new VulkanShader(device, slangModule, shaderModule, createEntryPoints));
 		return Result::Success;
 	}
 
-	VulkanShader::VulkanShader(const VulkanDevice* device, Slang::ComPtr<slang::IModule> slangModule, VkShaderModule shaderModule, std::vector<EntryPoint> entryPoints)
-		: m_Device(device), m_SlangModule(slangModule), m_ShaderModule(shaderModule), m_EntryPoints(std::move(entryPoints)) {
+	VulkanShader::VulkanShader(const VulkanDevice* device, Slang::ComPtr<slang::IModule> slangModule, VkShaderModule shaderModule, std::vector<EntryPoint>& entryPoints, BufferLayout& bufferLayout)
+		: m_Device(device), m_SlangModule(slangModule), m_ShaderModule(shaderModule), m_EntryPoints(entryPoints), m_BufferLayout(bufferLayout) {
 	}
 
 	VulkanShader::~VulkanShader() {
 		vkDestroyShaderModule(m_Device->GetDevice(), m_ShaderModule, nullptr);
+	}
+
+	Slang::ComPtr<slang::IModule> VulkanShader::LoadModule(
+			const VulkanDevice* device,
+			const ShaderDesc& desc,
+			Slang::ComPtr<slang::IBlob>& diagnostics) {
+		Slang::ComPtr<slang::IModule> module(
+			s_SlangSession->loadModule(
+				desc.moduleName,
+				diagnostics.writeRef()
+			)
+		);
+
+		if (!CheckSlangDiagnostics(device, diagnostics))
+			return nullptr;
+
+		return module;
+	}
+
+	Slang::ComPtr<slang::IComponentType>
+		VulkanShader::ComposeProgram(
+			const VulkanDevice* device,
+			slang::IModule* module,
+			Slang::ComPtr<slang::IBlob>& diagnostics) {
+		const uint32_t entryCount = module->getDefinedEntryPointCount();
+
+		std::vector<Slang::ComPtr<slang::IEntryPoint>> entryPoints(entryCount);
+
+		for (uint32_t i = 0; i < entryCount; ++i) {
+			module->getDefinedEntryPoint(
+				i,
+				entryPoints[i].writeRef());
+		}
+
+		Slang::ComPtr<slang::IComponentType> composedProgram;
+
+		s_SlangSession->createCompositeComponentType(
+			reinterpret_cast<slang::IComponentType**>(entryPoints.data()),
+			entryPoints.size(),
+			composedProgram.writeRef(),
+			diagnostics.writeRef());
+
+		if (!CheckSlangDiagnostics(device, diagnostics))
+			return nullptr;
+
+		return composedProgram;
+	}
+
+	BufferLayout VulkanShader::ReflectLayout(
+		const VulkanDevice* device,
+		slang::IComponentType* composedProgram,
+		std::vector<EntryPoint>& outEntryPoints,
+		Slang::ComPtr<slang::IBlob>& diagnostics) {
+		slang::ProgramLayout* programLayout = composedProgram->getLayout(0, diagnostics.writeRef());
+
+		if (!CheckSlangDiagnostics(device, diagnostics))
+			return {};
+
+		const uint32_t entryCount = programLayout->getEntryPointCount();
+		outEntryPoints.resize(entryCount);
+
+		BufferLayout bufferLayout;
+		for (uint32_t i = 0; i < entryCount; ++i) {
+			auto* entryReflect = programLayout->getEntryPointByIndex(i);
+
+			outEntryPoints[i].stage = entryReflect->getStage();
+
+			outEntryPoints[i].entryPointName = entryReflect->getName();
+
+			if (outEntryPoints[i].stage == SlangStage::SLANG_STAGE_VERTEX) {
+				const uint32_t parameterCount = entryReflect->getParameterCount();
+
+				for (uint32_t j = 0; j < parameterCount; ++j) {
+					auto* parameterReflect = entryReflect->getParameterByIndex(j)->getTypeLayout();
+
+					uint32_t offset = 0;
+					bufferLayout.attributes = CalculateCumulativeOffset(parameterReflect, &offset);
+
+					bufferLayout.stride = offset;
+				}
+			}
+		}
+
+		return bufferLayout;
+	}
+
+	Slang::ComPtr<slang::IComponentType>
+		VulkanShader::LinkProgram(
+			const VulkanDevice* device,
+			slang::IModule* module,
+			Slang::ComPtr<slang::IBlob>& diagnostics) {
+		Slang::ComPtr<slang::IComponentType> linkedProgram;
+
+		module->link(
+			linkedProgram.writeRef(),
+			diagnostics.writeRef()
+		);
+
+		if (!CheckSlangDiagnostics(device, diagnostics))
+			return nullptr;
+
+		return linkedProgram;
+	}
+
+	VkShaderModule VulkanShader::CreateVkShaderModule(const VulkanDevice* device, slang::IComponentType* linkedProgram) {
+		Slang::ComPtr<slang::IBlob> spirv;
+		linkedProgram->getTargetCode(0, spirv.writeRef());
+
+		VkShaderModuleCreateInfo ci{
+			.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+			.codeSize = spirv->getBufferSize(),
+			.pCode = reinterpret_cast<const uint32_t*>(spirv->getBufferPointer())
+		};
+
+		VkShaderModule shaderModule = VK_NULL_HANDLE;
+		if (vkCreateShaderModule(device->GetDevice(), &ci, nullptr, &shaderModule) != VK_SUCCESS) {
+			device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan shader module.");
+
+			return VK_NULL_HANDLE;
+		}
+
+		return shaderModule;
+	}
+
+	std::vector<BufferAttribute> VulkanShader::CalculateCumulativeOffset(slang::TypeLayoutReflection* typeReflection, uint32_t* offset) {
+		std::vector<BufferAttribute> attributes;
+		
+		uint8_t fieldCount = typeReflection->getFieldCount();
+		for (uint8_t i = 0; i < fieldCount; i++) {
+			auto fieldTypeLayout = typeReflection->getFieldByIndex(i)->getTypeLayout();
+
+			ScalarType fieldType = ScalarType::None; // float, int, uint, vec, etc...
+			slang::TypeReflection::Kind fieldKind = fieldTypeLayout->getKind(); // Struct, Array, Vector, etc...
+			uint8_t elementCount = 1; // Default to 1 for non-array/vector types
+			switch (fieldKind) {
+				case slang::TypeReflection::Kind::Struct: {
+					// Recursively calculate offsets for nested structs
+					std::vector<BufferAttribute> otherAttribs = CalculateCumulativeOffset(fieldTypeLayout, offset);
+					attributes.insert(attributes.end(), otherAttribs.begin(), otherAttribs.end());
+					continue;
+				}
+				case slang::TypeReflection::Kind::Array: {
+					// TODO: Fix.. Arrays are handled where each element is in a different location so we need to push a new BufferAttribute for every array element
+					fieldType = (ScalarType)fieldTypeLayout->getElementTypeLayout()->getScalarType();
+					elementCount = fieldTypeLayout->getElementCount(); // Usualy float[3]
+					break;
+				}
+				case slang::TypeReflection::Kind::Vector: {
+					elementCount = fieldTypeLayout->getElementCount(); // Usualy float3, float4, etc...
+					fieldType = Utils::SlangVectorToRealRHIScalarType(fieldTypeLayout->getElementTypeLayout()->getScalarType(), elementCount);
+					break;
+				}
+				case slang::TypeReflection::Kind::Scalar: {
+					fieldType = (ScalarType)fieldTypeLayout->getScalarType(); // This should always be a 1-1 mapping
+					break;
+				}
+			}
+
+			attributes.push_back(BufferAttribute{
+				.type = fieldType,
+				.offset = *offset
+			});
+			*offset += elementCount * Utils::ScalarTypeToSizeOf(fieldType);
+		}
+
+		return attributes;
 	}
 
 	void VulkanShader::InitializeSlang(const char* shaderDirectory, bool isDebugEnabled) {

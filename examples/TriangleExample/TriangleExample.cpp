@@ -58,10 +58,6 @@ void CreateGraphicsPipeline() {
 
     RealRHI::PipelineDesc desc{
         .shader = shader.Raw(),
-        .vertexLayout = {
-            RealRHI::DataType::Float2, // pos
-            RealRHI::DataType::Float3, // color
-        },
         .rasterState = {
             .cullMode = RealRHI::CullMode::Back,
             .fillMode = RealRHI::FillMode::Solid,

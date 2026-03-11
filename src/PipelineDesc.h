@@ -1,7 +1,6 @@
 #pragma once
 #include "Shader.h"
 #include "TextureFormat.h"
-#include "BufferAttributes.h"
 
 #include <cstdint>
 #include <vector>
@@ -53,9 +52,6 @@ namespace RealRHI {
 
     struct PipelineDesc {
         Shader* shader;
-
-		//TODO: Use shader reflection to get this information instead of hardcoding it in the pipeline desc
-        BufferAttributes vertexLayout;
 
         RasterState rasterState;
         DepthState depthState;

@@ -10,31 +10,34 @@ namespace RealRHI {
 
 		const std::vector<EntryPoint>& entryPoints = shader->GetEntryPoints();
         std::vector<VkPipelineShaderStageCreateInfo> shaderStages(entryPoints.size());
-		for (size_t i = 0; i < entryPoints.size(); i++) {
+		for (uint32_t i = 0; i < entryPoints.size(); i++) {
             shaderStages[i] = VkPipelineShaderStageCreateInfo{
                 .sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                .stage  = Utils::ShaderStageToVkShaderStage(entryPoints[i].stage),
+                .stage  = Utils::SlangStageToVkShaderStage(entryPoints[i].stage),
                 .module = shaderModule,
                 .pName  = entryPoints[i].entryPointName.c_str()
             };
         }
 
+		// Vertex input is taken from the shader reflection data
+        const BufferLayout& vertexLayout = shader->GetBufferLayout();
         VkVertexInputBindingDescription bindingDescription{
             .binding = 0,
-            .stride = desc.vertexLayout.stride,
+            .stride = vertexLayout.stride,
             .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
         };
 
-        std::vector<VkVertexInputAttributeDescription> attributeDescriptions{};
-        for (size_t i = 0; i < desc.vertexLayout.attributes.size(); i++) {
-			const BufferAttribute attr = desc.vertexLayout.attributes[i];
+		const std::vector<BufferAttribute>& vertexAttributes = vertexLayout.attributes;
+        std::vector<VkVertexInputAttributeDescription> attributeDescriptions(vertexAttributes.size());
+        for (uint32_t i = 0; i < vertexAttributes.size(); i++) {
+	        const BufferAttribute& attr = vertexAttributes[i];
 
-            attributeDescriptions.push_back(VkVertexInputAttributeDescription{
-                .location = static_cast<uint32_t>(i),
+            attributeDescriptions[i] = VkVertexInputAttributeDescription{
+                .location = i,
                 .binding = 0,
-                .format = Utils::BufferDataTypeToVkFormat(attr.type),
-				.offset = attr.offset
-            });
+                .format = Utils::ScalarTypeToVkFormat(attr.type),
+                .offset = attr.offset
+            };
         }
 
         VkPipelineVertexInputStateCreateInfo vertexInputInfo {
@@ -119,7 +122,7 @@ namespace RealRHI {
 
 		const RenderTargetFormats& formats = desc.renderTargetFormats;
 		std::vector<VkFormat> vkColorFormats(formats.colorFormats.size());
-        for (size_t i = 0; i < formats.colorFormats.size(); i++) {
+        for (uint32_t i = 0; i < formats.colorFormats.size(); i++) {
             vkColorFormats[i] = Utils::TextureFormatToVkFormat(formats.colorFormats[i]);
         }
 

@@ -14,18 +14,47 @@ namespace RealRHI {
 
 		VkShaderModule GetShaderModule() const { return m_ShaderModule; }
 		const std::vector<EntryPoint>& GetEntryPoints() const { return m_EntryPoints; }
+		const BufferLayout& GetBufferLayout() const { return m_BufferLayout; }
 	private:
+		static Slang::ComPtr<slang::IModule> LoadModule(
+			const VulkanDevice* device,
+			const ShaderDesc& desc,
+			Slang::ComPtr<slang::IBlob>& diagnostics);
+
+		static Slang::ComPtr<slang::IComponentType> ComposeProgram(
+			const VulkanDevice* device,
+			slang::IModule* module,
+			Slang::ComPtr<slang::IBlob>& diagnostics);
+
+		static BufferLayout ReflectLayout(
+			const VulkanDevice* device,
+			slang::IComponentType* composedProgram,
+			std::vector<EntryPoint>& outEntryPoints,
+			Slang::ComPtr<slang::IBlob>& diagnostics);
+
+		static Slang::ComPtr<slang::IComponentType> LinkProgram(
+			const VulkanDevice* device,
+			slang::IModule* module,
+			Slang::ComPtr<slang::IBlob>& diagnostics);
+
+		static VkShaderModule CreateVkShaderModule(
+			const VulkanDevice* device,
+			slang::IComponentType* linkedProgram);
+
+		static std::vector<BufferAttribute> CalculateCumulativeOffset(slang::TypeLayoutReflection* typeReflection, uint32_t* offset);
+
 		static void InitializeSlang(const char* shaderDirectory, bool isDebugEnabled);
 
 		static bool CheckSlangDiagnostics(const VulkanDevice* device, const Slang::ComPtr<slang::IBlob>& diagnostics);
 	private:
-		VulkanShader(const VulkanDevice* device, Slang::ComPtr<slang::IModule> slangModule, VkShaderModule shaderModule, std::vector<EntryPoint> entryPoints);
+		VulkanShader(const VulkanDevice* device, Slang::ComPtr<slang::IModule> slangModule, VkShaderModule shaderModule, std::vector<EntryPoint>& entryPoints, BufferLayout& bufferLayout);
 
 		const VulkanDevice* m_Device;
 		Slang::ComPtr<slang::IModule> m_SlangModule;
 		VkShaderModule m_ShaderModule;
 
 		std::vector<EntryPoint> m_EntryPoints;
+		BufferLayout m_BufferLayout;
 
 		inline static Slang::ComPtr<slang::IGlobalSession> s_SlangGlobalSession;
 		inline static Slang::ComPtr<slang::ISession> s_SlangSession;
