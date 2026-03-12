@@ -39,12 +39,6 @@ namespace RealRHI {
 		VkSemaphore GetImageAvailableSemaphore(uint32_t frameIndex) const { return m_FrameSync[frameIndex].imageAvailableSemaphore; }
 		VkSemaphore GetRenderFinishedSemaphore(uint32_t imageIndex) const { return m_RenderFinishedSemaphores[imageIndex]; }
 		VkFence GetFence(uint32_t frameIndex) const { return m_FrameSync[frameIndex].fence; }
-
-		// TODO: Remove these getters
-		VkSurfaceKHR GetSurface() const { return m_Surface; }
-		VkSwapchainKHR GetSwapchain() const { return m_Swapchain; }
-		std::vector<Ref<VulkanTexture>>& GetSwapchainImages() { return m_SwapchainImages; }
-		VkExtent2D GetSwapchainExtent() const { return m_SwapchainExtent; }
 	private:
 		SwapChainSupportDetails QuerySwapChainSupport();
 		VkSurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
