@@ -216,6 +216,9 @@ int main() {
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_EVENT_QUIT) {
                 running = false;
+            } else if (event.type == SDL_EVENT_WINDOW_RESIZED) {
+                swapchain->Resize(static_cast<uint32_t>(event.window.data1),
+                                  static_cast<uint32_t>(event.window.data2));
             }
         }
         DrawFrame();

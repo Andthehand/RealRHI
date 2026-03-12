@@ -19,6 +19,7 @@ namespace RealRHI {
 
 		uint32_t GetWidth() const override { return m_Width; }
 		uint32_t GetHeight() const override { return m_Height; }
+		void SetDimensions(uint32_t width, uint32_t height) { m_Width = width; m_Height = height; }
 	protected:
 		bool CreateVulkanSurface(VkSurfaceKHR* surface) const;
 		void DestroyVulkanSurface(VkSurfaceKHR surface) const;

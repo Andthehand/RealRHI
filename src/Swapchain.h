@@ -13,6 +13,7 @@ namespace RealRHI {
 
         virtual FrameContext BeginFrame() = 0;
         virtual void Present(const FrameContext& frame) = 0;
+        virtual void Resize(uint32_t width, uint32_t height) = 0;
         virtual uint32_t GetMaxFramesInFlight() const = 0;
     };
 }

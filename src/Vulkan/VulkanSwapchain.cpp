@@ -38,7 +38,7 @@ namespace RealRHI {
 	}
 
     Result VulkanSwapchain::Init(const SwapchainDesc& desc) {
-        m_Window = static_cast<const VulkanWindow*>(desc.window);
+        m_Window = static_cast<VulkanWindow*>(desc.window);
         if (!m_Window->CreateVulkanSurface(&m_Surface)) {
             m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan surface for swapchain.");
             return Result::Failed;
@@ -209,6 +209,86 @@ namespace RealRHI {
         return m_SwapchainImages[imageIndex]->GetTextureView();
     }
 
+    void VulkanSwapchain::RecreateSwapchain() {
+        vkDeviceWaitIdle(m_Device->GetDevice());
+
+        // Release existing swapchain images (ref-counted, cleared here)
+        m_SwapchainImages.clear();
+        m_ImageLayouts.clear();
+
+        SwapChainSupportDetails swapChainSupport = QuerySwapChainSupport();
+
+        VkSurfaceFormatKHR surfaceFormat = ChooseSwapSurfaceFormat(swapChainSupport.Formats);
+        VkPresentModeKHR presentMode = ChooseSwapPresentMode(swapChainSupport.PresentModes);
+        VkExtent2D requestedExtent = VkExtent2D{ .width = m_Window->GetWidth(), .height = m_Window->GetHeight() };
+        VkExtent2D extent = ChooseSwapExtent(swapChainSupport.Capabilities, requestedExtent);
+
+        uint32_t imageCount = swapChainSupport.Capabilities.minImageCount + 1;
+        if (swapChainSupport.Capabilities.maxImageCount > 0 &&
+            imageCount > swapChainSupport.Capabilities.maxImageCount) {
+            imageCount = swapChainSupport.Capabilities.maxImageCount;
+        }
+
+        VkSwapchainKHR oldSwapchain = m_Swapchain;
+
+        VkSwapchainCreateInfoKHR createInfo{
+            .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+            .surface = m_Surface,
+            .minImageCount = imageCount,
+            .imageFormat = surfaceFormat.format,
+            .imageColorSpace = surfaceFormat.colorSpace,
+            .imageExtent = extent,
+            .imageArrayLayers = 1,
+            .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+            .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            .preTransform = swapChainSupport.Capabilities.currentTransform,
+            .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+            .presentMode = presentMode,
+            .clipped = VK_TRUE,
+            .oldSwapchain = oldSwapchain,
+        };
+
+        if (vkCreateSwapchainKHR(m_Device->GetDevice(), &createInfo, nullptr, &m_Swapchain) != VK_SUCCESS) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to recreate Vulkan swapchain.");
+            m_Swapchain = oldSwapchain;
+            return;
+        }
+
+        vkDestroySwapchainKHR(m_Device->GetDevice(), oldSwapchain, nullptr);
+
+        vkGetSwapchainImagesKHR(m_Device->GetDevice(), m_Swapchain, &imageCount, nullptr);
+        std::vector<VkImage> swapchainVkImages(imageCount);
+        vkGetSwapchainImagesKHR(m_Device->GetDevice(), m_Swapchain, &imageCount, swapchainVkImages.data());
+
+        // Recreate per-image render-finished semaphores if the image count changed
+        if (static_cast<uint32_t>(m_RenderFinishedSemaphores.size()) != imageCount) {
+            for (auto semaphore : m_RenderFinishedSemaphores) {
+                vkDestroySemaphore(m_Device->GetDevice(), semaphore, nullptr);
+            }
+            m_RenderFinishedSemaphores.resize(imageCount);
+            VkSemaphoreCreateInfo semInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+            for (uint32_t i = 0; i < imageCount; i++) {
+                if (vkCreateSemaphore(m_Device->GetDevice(), &semInfo, nullptr, &m_RenderFinishedSemaphores[i]) != VK_SUCCESS) {
+                    m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan render finished semaphore during swapchain recreation.");
+                }
+            }
+        }
+
+        m_SwapchainImages.resize(imageCount);
+        for (uint32_t i = 0; i < imageCount; i++) {
+            VulkanTexture::CreateFromSwapChain(m_Device, surfaceFormat.format, swapchainVkImages[i], m_SwapchainImages[i]);
+        }
+
+        m_SwapchainImageFormat = Utils::VkFormatToTextureFormat(surfaceFormat.format);
+        m_SwapchainExtent = extent;
+        m_ImageLayouts.assign(imageCount, VK_IMAGE_LAYOUT_UNDEFINED);
+    }
+
+    void VulkanSwapchain::Resize(uint32_t width, uint32_t height) {
+        m_Window->SetDimensions(width, height);
+        RecreateSwapchain();
+    }
+
     FrameContext VulkanSwapchain::BeginFrame() {
         const uint32_t frameIdx = m_CurrentFrameIndex;
 
@@ -216,8 +296,16 @@ namespace RealRHI {
         vkResetFences(m_Device->GetDevice(), 1, &m_FrameSync[frameIdx].fence);
 
         uint32_t imageIndex = 0;
-        vkAcquireNextImageKHR(m_Device->GetDevice(), m_Swapchain, UINT64_MAX,
+        VkResult acquireResult = vkAcquireNextImageKHR(m_Device->GetDevice(), m_Swapchain, UINT64_MAX,
             m_FrameSync[frameIdx].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+
+        if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR) {
+            RecreateSwapchain();
+            acquireResult = vkAcquireNextImageKHR(m_Device->GetDevice(), m_Swapchain, UINT64_MAX,
+                m_FrameSync[frameIdx].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+        } else if (acquireResult == VK_SUBOPTIMAL_KHR) {
+            m_NeedsResize = true;
+        }
 
         return FrameContext{
             .frameIndex = frameIdx,
@@ -241,7 +329,12 @@ namespace RealRHI {
             .pImageIndices = &imageIndex,
         };
 
-        vkQueuePresentKHR(m_Device->GetPresentQueue(), &presentInfo);
+        VkResult presentResult = vkQueuePresentKHR(m_Device->GetPresentQueue(), &presentInfo);
+        if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR || m_NeedsResize) {
+            m_NeedsResize = false;
+            RecreateSwapchain();
+        }
+
         m_CurrentFrameIndex = (m_CurrentFrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 

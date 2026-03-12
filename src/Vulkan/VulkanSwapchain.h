@@ -29,6 +29,7 @@ namespace RealRHI {
 
 		FrameContext BeginFrame() override;
 		void Present(const FrameContext& frame) override;
+		void Resize(uint32_t width, uint32_t height) override;
 		uint32_t GetMaxFramesInFlight() const override { return MAX_FRAMES_IN_FLIGHT; }
 	protected:
 		friend class VulkanDevice;
@@ -48,6 +49,8 @@ namespace RealRHI {
 
 		void TransitionToColorAttachment(VkCommandBuffer cmdBuf, uint32_t imageIndex);
 		void TransitionToPresent(VkCommandBuffer cmdBuf, uint32_t imageIndex);
+
+		void RecreateSwapchain();
 	private:
 		struct FrameSync {
 			VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
@@ -58,7 +61,7 @@ namespace RealRHI {
 
 		static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
 		const VulkanDevice* m_Device = nullptr;
-		const VulkanWindow* m_Window = nullptr;
+		VulkanWindow* m_Window = nullptr;
 		VkSurfaceKHR m_Surface = VK_NULL_HANDLE;
 		VkSwapchainKHR m_Swapchain = VK_NULL_HANDLE;
 
@@ -71,5 +74,6 @@ namespace RealRHI {
 		std::vector<VkSemaphore> m_RenderFinishedSemaphores;
 		VkCommandPool m_TransitionPool = VK_NULL_HANDLE;
 		uint32_t m_CurrentFrameIndex = 0;
+		bool m_NeedsResize = false;
 	};
 }
