@@ -16,7 +16,8 @@ namespace RealRHI {
 		static Result Create(const VulkanDevice* device, const PipelineDesc& desc, Ref<Pipeline>& outPipeline);
 		Result Init(const PipelineDesc& desc);
 
-		//TODO: Remove
+	protected:
+		friend class VulkanCommandList;
 		VkPipeline GetPipeline() const { return m_Pipeline; }
 	private:
 		const VulkanDevice* m_Device = nullptr;

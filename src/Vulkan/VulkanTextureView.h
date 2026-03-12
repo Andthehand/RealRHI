@@ -18,6 +18,8 @@ namespace RealRHI {
 		// counted pointer because this is coupled to the lifetime of the texture
 		Result Init(const VulkanDevice* device, const TextureViewDesc& desc);
 
+	protected:
+		friend class VulkanCommandList;
 		VkImageView GetImageView() const { return m_ImageView; }
 	private:
 		const VulkanDevice* m_Device = nullptr;

@@ -23,10 +23,12 @@ namespace RealRHI {
 			return &m_TextureView;
 		}
 
-		// TODO: make this protected
+	protected:
+		friend class VulkanSwapchain;
+		friend class VulkanTextureView;
 		VkImage GetImage() const { return m_Image; }
 		VkFormat GetFormat() const { return m_Format; }
-	protected:
+
 		static Result CreateFromSwapChain(const VulkanDevice* device, VkFormat format, VkImage image, Ref<VulkanTexture>& outTexture);
 
 		Result InitSwapChainTexture(VkFormat format, VkImage image);
@@ -41,7 +43,5 @@ namespace RealRHI {
 		// This need to be at the end because of weird c++ rules
 		// https://stackoverflow.com/questions/6308915/member-fields-order-of-construction
 		VulkanTextureView m_TextureView; 
-
-		friend class VulkanSwapchain;
 	};
 }

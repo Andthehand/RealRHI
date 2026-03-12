@@ -14,7 +14,8 @@ namespace RealRHI {
 		static Result Create(const VulkanDevice* device, const BufferDesc& desc, Ref<Buffer>& outBuffer);
 		Result Init(const BufferDesc& desc);
 
-		// TODO: Remove this jank
+	protected:
+		friend class VulkanCommandList;
 		VkBuffer GetBuffer() const { return m_Buffer; }
 	private:
 		const VulkanDevice* m_Device = nullptr;
