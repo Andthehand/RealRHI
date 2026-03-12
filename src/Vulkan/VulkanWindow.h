@@ -20,6 +20,8 @@ namespace RealRHI {
 		uint32_t GetWidth() const override { return m_Width; }
 		uint32_t GetHeight() const override { return m_Height; }
 	protected:
+		friend class VulkanSwapchain;
+
 		bool CreateVulkanSurface(VkSurfaceKHR* surface) const;
 		void DestroyVulkanSurface(VkSurfaceKHR surface) const;
 	private:
@@ -28,7 +30,5 @@ namespace RealRHI {
 
 		uint32_t m_Width = 0;
 		uint32_t m_Height = 0;
-
-		friend class VulkanSwapchain;
 	};
 }
