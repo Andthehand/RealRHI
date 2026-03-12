@@ -279,7 +279,8 @@ namespace RealRHI {
             VkPhysicalDeviceProperties props;
             vkGetPhysicalDeviceProperties(device, &props);
 
-            std::cout << "Found device: " << props.deviceName << std::endl;
+            std::string foundDevice = "Found device: " + std::string(props.deviceName);
+			SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, foundDevice.c_str());
 
             if (score > bestScore) {
                 bestScore = score;
@@ -294,7 +295,8 @@ namespace RealRHI {
 
         VkPhysicalDeviceProperties props;
         vkGetPhysicalDeviceProperties(m_PhysicalDevice, &props);
-        std::cout << "Selected device: " << props.deviceName << std::endl;
+		std::string selectedDevice = "Selected device: " + std::string(props.deviceName);
+		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, selectedDevice.c_str());
 
         return true;
     }
