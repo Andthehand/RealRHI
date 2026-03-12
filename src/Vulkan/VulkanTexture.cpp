@@ -52,6 +52,8 @@ namespace RealRHI {
             m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan image.");
             return Result::Failed;
         }
+
+		return Result::Success;
     }
 
     Result VulkanTexture::CreateFromSwapChain(const VulkanDevice* device, VkFormat format, VkImage image, Ref<VulkanTexture>& outTexture) {
