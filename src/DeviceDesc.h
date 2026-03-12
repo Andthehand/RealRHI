@@ -5,6 +5,7 @@
 
 namespace RealRHI {
     enum class DebugSeverity {
+        Trace,
         Info,
         Warning,
         Error

@@ -44,56 +44,7 @@ namespace RealRHI {
             return Result::Failed;
         }
 
-        SwapChainSupportDetails swapChainSupport = QuerySwapChainSupport();
-
-        VkSurfaceFormatKHR surfaceFormat = ChooseSwapSurfaceFormat(swapChainSupport.Formats);
-        VkPresentModeKHR presentMode = ChooseSwapPresentMode(swapChainSupport.PresentModes);
-        VkExtent2D requestedExtent = VkExtent2D{ .width = m_Window->GetWidth(), .height = m_Window->GetHeight() };
-        VkExtent2D extent = ChooseSwapExtent(swapChainSupport.Capabilities, requestedExtent);
-
-        uint32_t imageCount = swapChainSupport.Capabilities.minImageCount + 1;
-        if (swapChainSupport.Capabilities.maxImageCount > 0 &&
-            imageCount > swapChainSupport.Capabilities.maxImageCount) {
-            imageCount = swapChainSupport.Capabilities.maxImageCount;
-        }
-
-        VkSwapchainCreateInfoKHR createInfo{
-            .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
-            .surface = m_Surface,
-            .minImageCount = imageCount,
-            .imageFormat = surfaceFormat.format,
-            .imageColorSpace = surfaceFormat.colorSpace,
-            .imageExtent = extent,
-            .imageArrayLayers = 1,
-            .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-            .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-            .preTransform = swapChainSupport.Capabilities.currentTransform,
-            .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-            .presentMode = presentMode,
-            .clipped = VK_TRUE,
-            .oldSwapchain = VK_NULL_HANDLE,
-        };
-
-        if (vkCreateSwapchainKHR(m_Device->GetDevice(), &createInfo, nullptr, &m_Swapchain) != VK_SUCCESS) {
-            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan swapchain.");
-            return Result::Failed;
-        }
-
-        vkGetSwapchainImagesKHR(m_Device->GetDevice(), m_Swapchain, &imageCount, nullptr);
-        std::vector<VkImage> swapchainVkImages(imageCount);
-        vkGetSwapchainImagesKHR(m_Device->GetDevice(), m_Swapchain, &imageCount, swapchainVkImages.data());
-
-        m_SwapchainImages.resize(imageCount);
-        for (uint8_t i = 0; i < imageCount; i++) {
-            if (VulkanTexture::CreateFromSwapChain(m_Device, surfaceFormat.format, swapchainVkImages[i], m_SwapchainImages[i]) != Result::Success) {
-                return Result::Failed;
-            }
-        }
-
-        m_SwapchainImageFormat = Utils::VkFormatToTextureFormat(surfaceFormat.format);
-        m_SwapchainExtent = extent;
-
-        m_ImageLayouts.assign(imageCount, VK_IMAGE_LAYOUT_UNDEFINED);
+        RecreateSwapchain();
 
         // Create command pool for transition command buffers
         VkCommandPoolCreateInfo poolInfo{
@@ -126,21 +77,13 @@ namespace RealRHI {
             .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
             .flags = VK_FENCE_CREATE_SIGNALED_BIT,
         };
+
         for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             m_FrameSync[i].preCmdBuf = cmdBufs[i * 2];
             m_FrameSync[i].postCmdBuf = cmdBufs[i * 2 + 1];
             if (vkCreateSemaphore(m_Device->GetDevice(), &semInfo, nullptr, &m_FrameSync[i].imageAvailableSemaphore) != VK_SUCCESS ||
                 vkCreateFence(m_Device->GetDevice(), &fenceInfo, nullptr, &m_FrameSync[i].fence) != VK_SUCCESS) {
                 m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan frame sync objects for swapchain.");
-                return Result::Failed;
-            }
-        }
-
-        // Create per-image renderFinished semaphores
-        m_RenderFinishedSemaphores.resize(imageCount);
-        for (uint32_t i = 0; i < imageCount; i++) {
-            if (vkCreateSemaphore(m_Device->GetDevice(), &semInfo, nullptr, &m_RenderFinishedSemaphores[i]) != VK_SUCCESS) {
-                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan render finished semaphore for swapchain.");
                 return Result::Failed;
             }
         }
@@ -301,8 +244,10 @@ namespace RealRHI {
             m_FrameSync[frameIdx].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
         if (result == VK_ERROR_OUT_OF_DATE_KHR) {
             RecreateSwapchain();
-            result = vkAcquireNextImageKHR(m_Device->GetDevice(), m_Swapchain, UINT64_MAX,
-                m_FrameSync[frameIdx].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+            result = vkAcquireNextImageKHR(m_Device->GetDevice(), m_Swapchain, UINT64_MAX, m_FrameSync[frameIdx].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+            
+            m_Device->SendDebugMessage(DebugSeverity::Trace, DebugMessageType::General, "Swapchain was out of date during image acquisition, recreated swapchain and retried.");
+
             if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
                 m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to acquire swapchain image after recreation.");
             }
