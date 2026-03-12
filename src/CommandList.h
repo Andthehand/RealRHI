@@ -27,5 +27,6 @@ namespace RealRHI {
 		virtual void BindIndexBuffer(Buffer* indexBuffer) = 0;
 
         virtual void Draw(uint32_t vertexCount) = 0;
+		virtual void DrawIndexed(uint32_t indexCount) = 0;
     };
 }

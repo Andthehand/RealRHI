@@ -26,8 +26,9 @@ namespace RealRHI {
 		void BindPipeline(Pipeline* pipeline) override;
 		void BindVertexBuffer(Buffer* vertexBuffer) override;
 		void BindIndexBuffer(Buffer* indexBuffer) override;
-		void Draw(uint32_t vertexCount) override;
 
+		void Draw(uint32_t vertexCount) override;
+		void DrawIndexed(uint32_t indexCount) override;
 	protected:
 		friend class VulkanDevice;
 		VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
