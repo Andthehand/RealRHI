@@ -14,6 +14,24 @@ namespace RealRHI {
         TransferDst = 1 << 5,
     };
 
+    constexpr TextureUsage operator|(TextureUsage a, TextureUsage b) {
+        return static_cast<TextureUsage>(
+            static_cast<uint32_t>(a) | static_cast<uint32_t>(b)
+        );
+    }
+    constexpr TextureUsage operator&(TextureUsage a, TextureUsage b) {
+        return static_cast<TextureUsage>(
+            static_cast<uint32_t>(a) & static_cast<uint32_t>(b)
+        );
+    }
+    constexpr TextureUsage& operator|=(TextureUsage& a, TextureUsage b) {
+        a = a | b;
+        return a;
+    }
+    constexpr bool Any(TextureUsage v) {
+        return static_cast<uint32_t>(v) != 0;
+    }
+
     struct TextureDesc {
         uint32_t width;
         uint32_t height;

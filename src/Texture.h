@@ -1,9 +1,10 @@
 #pragma once
+#include "RefCounted.h"
 
 namespace RealRHI {
 	class TextureView;
 
-    class Texture {
+    class Texture : public RefCounted {
     public:
         virtual ~Texture() = default;
 

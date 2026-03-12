@@ -12,12 +12,33 @@
 #include <iostream>
 
 namespace RealRHI {
-    VulkanDevice::VulkanDevice(const DeviceDesc& desc) 
-        : m_EnableDebug(desc.enableDebug), m_ShaderDirectory(desc.shaderDirectory), m_DebugCallback(desc.debugCallback),
-		  m_Instance(VK_NULL_HANDLE), m_DebugMessenger(VK_NULL_HANDLE), m_PhysicalDevice(VK_NULL_HANDLE), m_Device(VK_NULL_HANDLE), m_Allocator(VK_NULL_HANDLE) {
-	}
+    VulkanDevice::~VulkanDevice() {
+        if (m_Device != VK_NULL_HANDLE) {
+            vmaDestroyAllocator(m_Allocator);
+            vkDestroyDevice(m_Device, nullptr);
+        }
+
+        if (m_DebugMessenger != VK_NULL_HANDLE) {
+            auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
+                m_Instance, "vkDestroyDebugUtilsMessengerEXT");
+            if (func != nullptr) {
+                func(m_Instance, m_DebugMessenger, nullptr);
+            }
+        }
+
+        if (m_Instance != VK_NULL_HANDLE) {
+            vkDestroyInstance(m_Instance, nullptr);
+        }
+
+        SDL_Vulkan_UnloadLibrary();
+        SDL_Quit();
+    }
 
 	Result VulkanDevice::Init(const DeviceDesc& desc) {
+		m_EnableDebug = desc.enableDebug;
+		m_ShaderDirectory = desc.shaderDirectory;
+		m_DebugCallback = desc.debugCallback;
+
         if (!SDL_Init(SDL_INIT_VIDEO)) {
 			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to init SDL video.");
             return Result::Failed;
@@ -56,30 +77,9 @@ namespace RealRHI {
 
 		return Result::Success;
 	}
-    VulkanDevice::~VulkanDevice() {
-        if (m_Device != VK_NULL_HANDLE) {
-			vmaDestroyAllocator(m_Allocator);
-            vkDestroyDevice(m_Device, nullptr);
-        }
-
-        if (m_DebugMessenger != VK_NULL_HANDLE) {
-            auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
-                m_Instance, "vkDestroyDebugUtilsMessengerEXT");
-            if (func != nullptr) {
-                func(m_Instance, m_DebugMessenger, nullptr);
-            }
-        }
-        
-        if (m_Instance != VK_NULL_HANDLE) {
-            vkDestroyInstance(m_Instance, nullptr);
-		}
-
-		SDL_Vulkan_UnloadLibrary();
-		SDL_Quit();
-    }
 
     Result VulkanDevice::CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) {
-        return VulkanWindow::Create(desc, outWindow);
+        return VulkanWindow::Create(this, desc, outWindow);
     }
 
     Result VulkanDevice::CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) {
@@ -96,6 +96,10 @@ namespace RealRHI {
 
     Result VulkanDevice::CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) {
         return VulkanBuffer::Create(this, desc, outBuffer);
+    }
+
+    Result VulkanDevice::CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) {
+        return VulkanTexture::Create(this, desc, outTexture);
     }
 
     Result VulkanDevice::CreateCommandList(Ref<CommandList>& outCommandList) {
@@ -147,11 +151,12 @@ namespace RealRHI {
     }
 
     Result Device::Create(const DeviceDesc& desc, std::unique_ptr<Device>& outDevice) {
-        auto device = std::make_unique<VulkanDevice>(desc);
+        std::unique_ptr<VulkanDevice> device = std::make_unique<VulkanDevice>();
 		Result res = device->Init(desc);
 		if (res != Result::Success) {
 			return res;
 		}
+
 		outDevice = std::move(device);
 		return Result::Success;
     }

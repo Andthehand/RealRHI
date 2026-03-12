@@ -10,16 +10,18 @@
 namespace RealRHI {
 	class VulkanPipeline : public Pipeline {
 	public:
-		static Result Create(const VulkanDevice* device, const PipelineDesc& desc, Ref<Pipeline>& outPipeline);
+		VulkanPipeline(const VulkanDevice* device);
 		~VulkanPipeline();
+
+		static Result Create(const VulkanDevice* device, const PipelineDesc& desc, Ref<Pipeline>& outPipeline);
+		Result Init(const PipelineDesc& desc);
 
 		//TODO: Remove
 		VkPipeline GetPipeline() const { return m_Pipeline; }
 	private:
-		VulkanPipeline(const VulkanDevice* device, VkPipeline pipeline, VkPipelineLayout layout);
-		
-		const VulkanDevice* m_Device;
-		VkPipelineLayout m_PipelineLayout;
-		VkPipeline m_Pipeline;
+		const VulkanDevice* m_Device = nullptr;
+
+		VkPipelineLayout m_PipelineLayout = VK_NULL_HANDLE;
+		VkPipeline m_Pipeline = VK_NULL_HANDLE;
 	};
 }

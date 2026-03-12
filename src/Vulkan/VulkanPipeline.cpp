@@ -4,22 +4,41 @@
 #include "VulkanConvertions.h"
 
 namespace RealRHI {
-    Result VulkanPipeline::Create(const VulkanDevice* device, const PipelineDesc& desc, Ref<Pipeline>& outPipeline) {
-		const VulkanShader* shader = static_cast<VulkanShader*>(desc.shader);
-		VkShaderModule shaderModule = shader->GetShaderModule();
+    VulkanPipeline::VulkanPipeline(const VulkanDevice* device) : m_Device(device) {
+    }
 
-		const std::vector<EntryPoint>& entryPoints = shader->GetEntryPoints();
+    VulkanPipeline::~VulkanPipeline() {
+        vkDestroyPipeline(m_Device->GetDevice(), m_Pipeline, nullptr);
+        vkDestroyPipelineLayout(m_Device->GetDevice(), m_PipelineLayout, nullptr);
+    }
+
+    Result VulkanPipeline::Create(const VulkanDevice* device, const PipelineDesc& desc, Ref<Pipeline>& outPipeline) {
+        Ref<VulkanPipeline> pipeline = Ref<VulkanPipeline>::Create(device);
+        Result res = pipeline->Init(desc);
+        if (res != Result::Success) {
+            return res;
+        }
+
+        outPipeline = Ref<Pipeline>(pipeline);
+        return Result::Success;
+	}
+
+    Result VulkanPipeline::Init(const PipelineDesc& desc) {
+        const VulkanShader* shader = static_cast<VulkanShader*>(desc.shader);
+        VkShaderModule shaderModule = shader->GetShaderModule();
+
+        const std::vector<EntryPoint>& entryPoints = shader->GetEntryPoints();
         std::vector<VkPipelineShaderStageCreateInfo> shaderStages(entryPoints.size());
-		for (uint32_t i = 0; i < entryPoints.size(); i++) {
+        for (uint32_t i = 0; i < entryPoints.size(); i++) {
             shaderStages[i] = VkPipelineShaderStageCreateInfo{
-                .sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                .stage  = Utils::SlangStageToVkShaderStage(entryPoints[i].stage),
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                .stage = Utils::SlangStageToVkShaderStage(entryPoints[i].stage),
                 .module = shaderModule,
-                .pName  = entryPoints[i].entryPointName.c_str()
+                .pName = entryPoints[i].entryPointName.c_str()
             };
         }
 
-		// Vertex input is taken from the shader reflection data
+        // Vertex input is taken from the shader reflection data
         const BufferLayout& vertexLayout = shader->GetBufferLayout();
         VkVertexInputBindingDescription bindingDescription{
             .binding = 0,
@@ -27,10 +46,10 @@ namespace RealRHI {
             .inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
         };
 
-		const std::vector<BufferAttribute>& vertexAttributes = vertexLayout.attributes;
+        const std::vector<BufferAttribute>& vertexAttributes = vertexLayout.attributes;
         std::vector<VkVertexInputAttributeDescription> attributeDescriptions(vertexAttributes.size());
         for (uint32_t i = 0; i < vertexAttributes.size(); i++) {
-	        const BufferAttribute& attr = vertexAttributes[i];
+            const BufferAttribute& attr = vertexAttributes[i];
 
             attributeDescriptions[i] = VkVertexInputAttributeDescription{
                 .location = i,
@@ -40,7 +59,7 @@ namespace RealRHI {
             };
         }
 
-        VkPipelineVertexInputStateCreateInfo vertexInputInfo {
+        VkPipelineVertexInputStateCreateInfo vertexInputInfo{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
             .vertexBindingDescriptionCount = 1,
             .pVertexBindingDescriptions = &bindingDescription,
@@ -48,26 +67,26 @@ namespace RealRHI {
             .pVertexAttributeDescriptions = attributeDescriptions.data(),
         };
 
-        VkPipelineInputAssemblyStateCreateInfo inputAssembly {
+        VkPipelineInputAssemblyStateCreateInfo inputAssembly{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
             .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
             .primitiveRestartEnable = VK_FALSE,
         };
 
-        std::array<VkDynamicState, 2> dynamicStates { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-        VkPipelineDynamicStateCreateInfo dynamicState { 
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, 
+        std::array<VkDynamicState, 2> dynamicStates{ VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+        VkPipelineDynamicStateCreateInfo dynamicState{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
             .dynamicStateCount = dynamicStates.size(),
             .pDynamicStates = dynamicStates.data()
         };
 
-        VkPipelineViewportStateCreateInfo viewportState {
+        VkPipelineViewportStateCreateInfo viewportState{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
             .viewportCount = 1,
             .scissorCount = 1,
         };
 
-        VkPipelineRasterizationStateCreateInfo rasterizer {
+        VkPipelineRasterizationStateCreateInfo rasterizer{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
             .depthClampEnable = VK_FALSE,
             .rasterizerDiscardEnable = VK_FALSE,
@@ -84,26 +103,26 @@ namespace RealRHI {
             .sampleShadingEnable = VK_FALSE,
         };
 
-        VkPipelineDepthStencilStateCreateInfo depthStencilState { 
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO, 
-            .depthTestEnable = desc.depthState.depthTestEnable, 
-            .depthWriteEnable = desc.depthState.depthWriteEnable, 
-			.depthCompareOp = Utils::CompareOpToVkCompareOp(desc.depthState.compareOp),
+        VkPipelineDepthStencilStateCreateInfo depthStencilState{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+            .depthTestEnable = desc.depthState.depthTestEnable,
+            .depthWriteEnable = desc.depthState.depthWriteEnable,
+            .depthCompareOp = Utils::CompareOpToVkCompareOp(desc.depthState.compareOp),
         };
 
-        VkPipelineColorBlendAttachmentState colorBlendAttachment {
+        VkPipelineColorBlendAttachmentState colorBlendAttachment{
             .blendEnable = desc.blendState.enable,
-			.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
-			.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-			.colorBlendOp = VK_BLEND_OP_ADD,
-			.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-			.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
-			.alphaBlendOp = VK_BLEND_OP_ADD,
+            .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+            .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+            .colorBlendOp = VK_BLEND_OP_ADD,
+            .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+            .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+            .alphaBlendOp = VK_BLEND_OP_ADD,
             .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                               VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
         };
 
-        VkPipelineColorBlendStateCreateInfo colorBlending {
+        VkPipelineColorBlendStateCreateInfo colorBlending{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
             .logicOpEnable = VK_FALSE,
             .attachmentCount = 1,
@@ -114,23 +133,22 @@ namespace RealRHI {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         };
 
-        VkPipelineLayout pipelineLayout;
-        if (vkCreatePipelineLayout(device->GetDevice(), &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
-			device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan pipeline layout.");
+        if (vkCreatePipelineLayout(m_Device->GetDevice(), &pipelineLayoutInfo, nullptr, &m_PipelineLayout) != VK_SUCCESS) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan pipeline layout.");
             return Result::Failed;
         }
 
-		const RenderTargetFormats& formats = desc.renderTargetFormats;
-		std::vector<VkFormat> vkColorFormats(formats.colorFormats.size());
+        const RenderTargetFormats& formats = desc.renderTargetFormats;
+        std::vector<VkFormat> vkColorFormats(formats.colorFormats.size());
         for (uint32_t i = 0; i < formats.colorFormats.size(); i++) {
             vkColorFormats[i] = Utils::TextureFormatToVkFormat(formats.colorFormats[i]);
         }
 
-        VkPipelineRenderingCreateInfo pipelineRenderingInfo {
+        VkPipelineRenderingCreateInfo pipelineRenderingInfo{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
             .colorAttachmentCount = (uint32_t)vkColorFormats.size(),
-			.pColorAttachmentFormats = vkColorFormats.data(),
-			.depthAttachmentFormat = Utils::TextureFormatToVkFormat(formats.depthFormat),
+            .pColorAttachmentFormats = vkColorFormats.data(),
+            .depthAttachmentFormat = Utils::TextureFormatToVkFormat(formats.depthFormat),
         };
 
         VkGraphicsPipelineCreateInfo pipelineInfo{
@@ -143,30 +161,18 @@ namespace RealRHI {
             .pViewportState = &viewportState,
             .pRasterizationState = &rasterizer,
             .pMultisampleState = &multisampling,
-			.pDepthStencilState = &depthStencilState,
+            .pDepthStencilState = &depthStencilState,
             .pColorBlendState = &colorBlending,
-			.pDynamicState = &dynamicState,
-            .layout = pipelineLayout,
+            .pDynamicState = &dynamicState,
+            .layout = m_PipelineLayout,
             .renderPass = nullptr, // We're using dynamic rendering, so no render pass
         };
 
-        VkPipeline pipeline;
-        if (vkCreateGraphicsPipelines(device->GetDevice(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline) != VK_SUCCESS) {
-			device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan graphics pipelines.");
-			vkDestroyPipelineLayout(device->GetDevice(), pipelineLayout, nullptr);
+        if (vkCreateGraphicsPipelines(m_Device->GetDevice(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_Pipeline) != VK_SUCCESS) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan graphics pipelines.");
             return Result::Failed;
         }
 
-		outPipeline = Ref<Pipeline>(new VulkanPipeline(device, pipeline, pipelineLayout));
-		return Result::Success;
-	}
-
-	VulkanPipeline::VulkanPipeline(const VulkanDevice* device, VkPipeline pipeline, VkPipelineLayout layout)
-		: m_Device(device), m_Pipeline(pipeline), m_PipelineLayout(layout) {
-	}
-    
-    VulkanPipeline::~VulkanPipeline() {
-        vkDestroyPipeline(m_Device->GetDevice(), m_Pipeline, nullptr);
-		vkDestroyPipelineLayout(m_Device->GetDevice(), m_PipelineLayout, nullptr);
+        return Result::Success;
     }
 }

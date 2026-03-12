@@ -4,45 +4,49 @@
 #include "VulkanConvertions.h"
 
 namespace RealRHI {
-	Result VulkanShader::Create(
-		const VulkanDevice* device,
-		const ShaderDesc& desc,
-		Ref<Shader>& outShader) {
-		InitializeSlang(device->GetShaderDirectory().string().c_str(), device->IsDebugEnabled());
-
-		Slang::ComPtr<slang::IBlob> diagnostics;
-
-		// 1. Load module
-		auto module = LoadModule(device, desc, diagnostics);
-		if (!module) return Result::Failed;
-
-		// 2. Compose program (entry points)
-		auto composedProgram = ComposeProgram(device, module, diagnostics);
-		if (!composedProgram) return Result::Failed;
-
-		// 3. Reflect layout
-		std::vector<EntryPoint> entryPoints;
-		BufferLayout bufferLayout = ReflectLayout(device, composedProgram, entryPoints, diagnostics);
-
-		// 4. Link program
-		auto linkedProgram = LinkProgram(device, module, diagnostics);
-		if (!linkedProgram) return Result::Failed;
-
-		// 5. Create Vulkan module
-		VkShaderModule shaderModule = CreateVkShaderModule(device, linkedProgram);
-		if (!shaderModule) return Result::Failed;
-
-		outShader = Ref<Shader>(new VulkanShader(device, module, shaderModule, entryPoints, bufferLayout));
-
-		return Result::Success;
-	}
-
-	VulkanShader::VulkanShader(const VulkanDevice* device, Slang::ComPtr<slang::IModule> slangModule, VkShaderModule shaderModule, std::vector<EntryPoint>& entryPoints, BufferLayout& bufferLayout)
-		: m_Device(device), m_SlangModule(slangModule), m_ShaderModule(shaderModule), m_EntryPoints(entryPoints), m_BufferLayout(bufferLayout) {
+	VulkanShader::VulkanShader(const VulkanDevice* device) : m_Device(device) {
 	}
 
 	VulkanShader::~VulkanShader() {
 		vkDestroyShaderModule(m_Device->GetDevice(), m_ShaderModule, nullptr);
+	}
+
+	Result VulkanShader::Create(const VulkanDevice* device, const ShaderDesc& desc, Ref<Shader>& outShader) {
+		Ref<VulkanShader> shader = Ref<VulkanShader>::Create(device);
+		Result res = shader->Init(desc);
+		if (res != Result::Success) {
+			return res;
+		}
+
+		outShader = Ref<Shader>(shader);
+		return Result::Success;
+	}
+
+	Result VulkanShader::Init(const ShaderDesc& desc) {
+		InitializeSlang(m_Device->GetShaderDirectory().string().c_str(), m_Device->IsDebugEnabled());
+
+		Slang::ComPtr<slang::IBlob> diagnostics;
+
+		// 1. Load module
+		m_SlangModule = LoadModule(m_Device, desc, diagnostics);
+		if (!m_SlangModule) return Result::Failed;
+
+		// 2. Compose program (entry points)
+		auto composedProgram = ComposeProgram(m_Device, m_SlangModule, diagnostics);
+		if (!composedProgram) return Result::Failed;
+
+		// 3. Reflect layout
+		m_BufferLayout = ReflectLayout(m_Device, composedProgram, m_EntryPoints, diagnostics);
+
+		// 4. Link program
+		auto linkedProgram = LinkProgram(m_Device, m_SlangModule, diagnostics);
+		if (!linkedProgram) return Result::Failed;
+
+		// 5. Create Vulkan module
+		m_ShaderModule = CreateVkShaderModule(m_Device, linkedProgram);
+		if (!m_ShaderModule) return Result::Failed;
+
+		return Result::Success;
 	}
 
 	Slang::ComPtr<slang::IModule> VulkanShader::LoadModule(
@@ -109,7 +113,6 @@ namespace RealRHI {
 			auto* entryReflect = programLayout->getEntryPointByIndex(i);
 
 			outEntryPoints[i].stage = entryReflect->getStage();
-
 			outEntryPoints[i].entryPointName = entryReflect->getName();
 
 			if (outEntryPoints[i].stage == SlangStage::SLANG_STAGE_VERTEX) {

@@ -21,9 +21,10 @@ namespace RealRHI {
 
 	class VulkanDevice : public Device {
 	public:
-		VulkanDevice(const DeviceDesc& desc);
-		Result Init(const DeviceDesc& desc);
+		VulkanDevice() = default;
 		~VulkanDevice();
+
+		Result Init(const DeviceDesc& desc);
 
 		//TODO: Remove
 		VkInstance GetInstance() const { return m_Instance; }
@@ -46,6 +47,7 @@ namespace RealRHI {
 		Result CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) override;
 		Result CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) override;
 		Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) override;
+		Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) override;
 		Result CreateCommandList(Ref<CommandList>& outCommandList) override;
 
 		void Submit(CommandList* cmd, Swapchain* swapchain, const FrameContext& frame) override;

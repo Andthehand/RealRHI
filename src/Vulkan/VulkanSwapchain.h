@@ -19,10 +19,11 @@ namespace RealRHI {
 
 	class VulkanSwapchain : public Swapchain {
 	public:
-		static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
+		VulkanSwapchain(const VulkanDevice* device);
+		~VulkanSwapchain();
 
 		static Result Create(const VulkanDevice* device, const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain);
-		~VulkanSwapchain();
+		Result Init(const SwapchainDesc& desc);
 
 		TextureFormat GetBackBufferFormat() const override { return m_SwapchainImageFormat; }
 
@@ -42,16 +43,13 @@ namespace RealRHI {
 		// TODO: Remove these getters
 		VkSurfaceKHR GetSurface() const { return m_Surface; }
 		VkSwapchainKHR GetSwapchain() const { return m_Swapchain; }
-		std::vector<VulkanTexture>& GetSwapchainImages() { return m_SwapchainImages; }
+		std::vector<Ref<VulkanTexture>>& GetSwapchainImages() { return m_SwapchainImages; }
 		VkExtent2D GetSwapchainExtent() const { return m_SwapchainExtent; }
 	private:
 		SwapChainSupportDetails QuerySwapChainSupport();
 		VkSurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
 		VkPresentModeKHR ChooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
 		VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities, VkExtent2D requestedExtent);
-		
-		VulkanSwapchain(const VulkanDevice* device, const VulkanWindow* window, VkSurfaceKHR surface);
-		Result Init(VkExtent2D requestedExtent);
 
 		void TransitionToColorAttachment(VkCommandBuffer cmdBuf, uint32_t imageIndex);
 		void TransitionToPresent(VkCommandBuffer cmdBuf, uint32_t imageIndex);
@@ -63,15 +61,16 @@ namespace RealRHI {
 			VkCommandBuffer postCmdBuf = VK_NULL_HANDLE;
 		};
 
-		const VulkanDevice* m_Device;
-		const VulkanWindow* m_Window;
-		VkSurfaceKHR m_Surface;
-		VkSwapchainKHR m_Swapchain;
+		static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
+		const VulkanDevice* m_Device = nullptr;
+		const VulkanWindow* m_Window = nullptr;
+		VkSurfaceKHR m_Surface = VK_NULL_HANDLE;
+		VkSwapchainKHR m_Swapchain = VK_NULL_HANDLE;
 
-		std::vector<VulkanTexture> m_SwapchainImages;
+		std::vector<Ref<VulkanTexture>> m_SwapchainImages;
 		std::vector<VkImageLayout> m_ImageLayouts;
-		TextureFormat m_SwapchainImageFormat;
-		VkExtent2D m_SwapchainExtent;
+		TextureFormat m_SwapchainImageFormat = TextureFormat::Unknown;
+		VkExtent2D m_SwapchainExtent = { .width = 0, .height = 0 };
 
 		std::vector<FrameSync> m_FrameSync;
 		std::vector<VkSemaphore> m_RenderFinishedSemaphores;

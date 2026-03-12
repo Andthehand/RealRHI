@@ -83,7 +83,8 @@ namespace RealRHI::Utils {
                     case 3: return ScalarType::Vec3;
                     case 4: return ScalarType::Vec4;
                 }
-                break;
+			default:
+				return ScalarType::None;
 		}
     }
     // ---------------------- ShaderStage ------------------
@@ -155,6 +156,23 @@ namespace RealRHI::Utils {
     // ---------------------- BufferDesc -------------------
 
 	// ---------------------- TextureFormat ----------------
+    constexpr VkImageUsageFlags TextureUsageToVkImageUsage(TextureUsage usage) {
+        VkImageUsageFlags flags = 0;
+        if (Any(usage & TextureUsage::ShaderResource)) flags |= VK_IMAGE_USAGE_SAMPLED_BIT;
+        if (Any(usage & TextureUsage::RenderTarget)) flags |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        if (Any(usage & TextureUsage::DepthStencil)) flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        if (Any(usage & TextureUsage::Storage)) flags |= VK_IMAGE_USAGE_STORAGE_BIT;
+        if (Any(usage & TextureUsage::TransferSrc)) flags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        if (Any(usage & TextureUsage::TransferDst)) flags |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        return flags;
+    }
+
+    constexpr VkImageType TextureDescToVkImageType(const TextureDesc& desc) {
+        if (desc.depth > 1) return VK_IMAGE_TYPE_3D;
+        if (desc.height > 1) return VK_IMAGE_TYPE_2D;
+        return VK_IMAGE_TYPE_1D;
+    }
+
     constexpr VkFormat TextureFormatToVkFormat(TextureFormat format) {
         switch (format) {
             case RealRHI::TextureFormat::RGBA8_UNorm: return VK_FORMAT_R8G8B8A8_UNORM;
@@ -216,6 +234,19 @@ namespace RealRHI::Utils {
             default: return VK_FORMAT_UNDEFINED;
         }
 	}
+
+    constexpr VkImageAspectFlags TextureFormatToVkImageAspect(TextureFormat format) {
+        switch (format) {
+            case TextureFormat::D32_Float:
+            case TextureFormat::D16_UNorm:
+                return VK_IMAGE_ASPECT_DEPTH_BIT;
+            case TextureFormat::D24_UNorm_S8_UInt:
+            case TextureFormat::D32_Float_S8_UInt:
+                return VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+            default:
+                return VK_IMAGE_ASPECT_COLOR_BIT;
+        }
+    }
 
     constexpr TextureFormat VkFormatToTextureFormat(VkFormat format) {
         switch (format) {

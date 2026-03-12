@@ -8,8 +8,11 @@
 namespace RealRHI {
 	class VulkanCommandList : public CommandList {
 	public:
-		static Result Create(const VulkanDevice* device, Ref<CommandList>& outCommandList);
+		VulkanCommandList(const VulkanDevice* device);
 		~VulkanCommandList();
+
+		static Result Create(const VulkanDevice* device, Ref<CommandList>& outCommandList);
+		Result Init();
 
 		Result Begin() override;
 		Result End() override;
@@ -27,7 +30,6 @@ namespace RealRHI {
 
 		VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
 	private:
-		VulkanCommandList(const VulkanDevice* device, VkCommandPool commandPool, VkCommandBuffer commandBuffer);
 		const VulkanDevice* m_Device;
 
 		VkCommandPool m_CommandPool;

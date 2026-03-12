@@ -9,8 +9,11 @@
 namespace RealRHI {
 	class VulkanShader : public Shader {
 	public:
+		VulkanShader(const VulkanDevice* device);
+		~VulkanShader();
+
 		static Result Create(const VulkanDevice* device, const ShaderDesc& desc, Ref<Shader>& outShader);
-		virtual ~VulkanShader();
+		Result Init(const ShaderDesc& desc);
 
 		VkShaderModule GetShaderModule() const { return m_ShaderModule; }
 		const std::vector<EntryPoint>& GetEntryPoints() const { return m_EntryPoints; }
@@ -47,11 +50,9 @@ namespace RealRHI {
 
 		static bool CheckSlangDiagnostics(const VulkanDevice* device, const Slang::ComPtr<slang::IBlob>& diagnostics);
 	private:
-		VulkanShader(const VulkanDevice* device, Slang::ComPtr<slang::IModule> slangModule, VkShaderModule shaderModule, std::vector<EntryPoint>& entryPoints, BufferLayout& bufferLayout);
-
-		const VulkanDevice* m_Device;
+		const VulkanDevice* m_Device = nullptr;
 		Slang::ComPtr<slang::IModule> m_SlangModule;
-		VkShaderModule m_ShaderModule;
+		VkShaderModule m_ShaderModule = VK_NULL_HANDLE;
 
 		std::vector<EntryPoint> m_EntryPoints;
 		BufferLayout m_BufferLayout;

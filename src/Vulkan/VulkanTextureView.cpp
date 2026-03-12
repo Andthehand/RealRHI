@@ -4,12 +4,16 @@
 #include "VulkanConvertions.h"
 
 namespace RealRHI {
-	VulkanTextureView::VulkanTextureView(const VulkanDevice* device) 
-		: m_Device(device), m_Texture(nullptr), m_ImageView(VK_NULL_HANDLE) {
-	}
+    VulkanTextureView::~VulkanTextureView() {
+        if (m_ImageView != VK_NULL_HANDLE) {
+            vkDestroyImageView(m_Device->GetDevice(), m_ImageView, nullptr);
+        }
+    }
 
-	Result VulkanTextureView::Init(const TextureViewDesc& desc) {
-		m_Texture = static_cast<const VulkanTexture*>(desc.texture);
+    Result VulkanTextureView::Init(const VulkanDevice* device, const TextureViewDesc& desc) {
+		m_Device = device;
+
+        m_Texture = static_cast<const VulkanTexture*>(desc.texture);
         constexpr VkComponentMapping componentMapping{
             .r = VK_COMPONENT_SWIZZLE_IDENTITY,
             .g = VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -17,7 +21,7 @@ namespace RealRHI {
             .a = VK_COMPONENT_SWIZZLE_IDENTITY,
         };
         VkImageSubresourceRange subresourceRange{
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .aspectMask = Utils::TextureFormatToVkImageAspect(Utils::VkFormatToTextureFormat(m_Texture->GetFormat())),
             .baseMipLevel = desc.baseMipLevel,
             .levelCount = desc.mipLevelCount,
             .baseArrayLayer = desc.baseArrayLayer,
@@ -33,16 +37,10 @@ namespace RealRHI {
         };
 
         if (vkCreateImageView(m_Device->GetDevice(), &createInfo, nullptr, &m_ImageView) != VK_SUCCESS) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan texture view.");
-			return Result::Failed;
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan texture view.");
+            return Result::Failed;
         }
 
-		return Result::Success;
-	}
-
-	VulkanTextureView::~VulkanTextureView() {
-        if (m_Texture) {
-            vkDestroyImageView(m_Device->GetDevice(), m_ImageView, nullptr);
-        }
-	}
+        return Result::Success;
+    }
 }

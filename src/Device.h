@@ -20,6 +20,9 @@
 #include "SwapchainDesc.h"
 #include "Swapchain.h"
 
+#include "TextureDesc.h"
+#include "Texture.h"
+
 #include "FrameContext.h"
 
 #include <memory>
@@ -40,6 +43,7 @@ namespace RealRHI {
 		virtual Result CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) = 0;
         virtual Result CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) = 0;
 		virtual Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) = 0;
+		virtual Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) = 0;
 		virtual Result CreateCommandList(Ref<CommandList>& outCommandList) = 0;
 
 		virtual void Submit(CommandList* cmd, Swapchain* swapchain, const FrameContext& frame) = 0;

@@ -8,17 +8,18 @@
 namespace RealRHI {
 	class VulkanBuffer : public Buffer {
 	public:
-	public:
-		static Result Create(const VulkanDevice* device, const BufferDesc& desc, Ref<Buffer>& outBuffer);
+		VulkanBuffer(const VulkanDevice* device);
 		~VulkanBuffer();
+
+		static Result Create(const VulkanDevice* device, const BufferDesc& desc, Ref<Buffer>& outBuffer);
+		Result Init(const BufferDesc& desc);
 
 		// TODO: Remove this jank
 		VkBuffer GetBuffer() const { return m_Buffer; }
 	private:
-		VulkanBuffer(const VulkanDevice* device, VkBuffer buffer, VmaAllocation allocation);
-		const VulkanDevice* m_Device;
+		const VulkanDevice* m_Device = nullptr;
 
-		VkBuffer m_Buffer;
-		VmaAllocation m_BufferMemory;
+		VkBuffer m_Buffer = VK_NULL_HANDLE;
+		VmaAllocation m_BufferMemory = VK_NULL_HANDLE;
 	};
 }
