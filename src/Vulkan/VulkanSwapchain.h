@@ -30,7 +30,8 @@ namespace RealRHI {
 		FrameContext BeginFrame() override;
 		void Present(const FrameContext& frame) override;
 		uint32_t GetMaxFramesInFlight() const override { return MAX_FRAMES_IN_FLIGHT; }
-
+	protected:
+		friend class VulkanDevice;
 		TextureView* GetBackBufferView(uint32_t imageIndex);
 
 		// Internal methods used by VulkanDevice::Submit

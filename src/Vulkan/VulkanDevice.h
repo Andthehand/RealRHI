@@ -26,7 +26,7 @@ namespace RealRHI {
 
 		Result Init(const DeviceDesc& desc);
 
-		//TODO: Remove
+		// Getters for Vulkan objects, used internally by other Vulkan classes
 		VkInstance GetInstance() const { return m_Instance; }
 		VkDevice GetDevice() const { return m_Device; }
 		VkPhysicalDevice GetPhysicalDevice() const { return m_PhysicalDevice; }

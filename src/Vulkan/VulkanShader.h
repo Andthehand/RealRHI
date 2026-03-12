@@ -15,6 +15,8 @@ namespace RealRHI {
 		static Result Create(const VulkanDevice* device, const ShaderDesc& desc, Ref<Shader>& outShader);
 		Result Init(const ShaderDesc& desc);
 
+	protected:
+		friend class VulkanPipeline;
 		VkShaderModule GetShaderModule() const { return m_ShaderModule; }
 		const std::vector<EntryPoint>& GetEntryPoints() const { return m_EntryPoints; }
 		const BufferLayout& GetBufferLayout() const { return m_BufferLayout; }

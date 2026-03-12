@@ -28,6 +28,8 @@ namespace RealRHI {
 		void BindIndexBuffer(Buffer* indexBuffer) override;
 		void Draw(uint32_t vertexCount) override;
 
+	protected:
+		friend class VulkanDevice;
 		VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
 	private:
 		const VulkanDevice* m_Device;
