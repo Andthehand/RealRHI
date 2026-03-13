@@ -11,14 +11,14 @@ namespace RealRHI {
 		vkDestroyShaderModule(m_Device->GetDevice(), m_ShaderModule, nullptr);
 	}
 
-	Result VulkanShader::Create(const VulkanDevice* device, const ShaderDesc& desc, Ref<Shader>& outShader) {
+	Result VulkanShader::Create(const VulkanDevice* device, const ShaderDesc& desc, Ref<VulkanShader>& outShader) {
 		Ref<VulkanShader> shader = Ref<VulkanShader>::Create(device);
 		Result res = shader->Init(desc);
 		if (res != Result::Success) {
 			return res;
 		}
 
-		outShader = Ref<Shader>(shader);
+		outShader = shader;
 		return Result::Success;
 	}
 

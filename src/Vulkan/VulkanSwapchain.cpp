@@ -26,14 +26,14 @@ namespace RealRHI {
         m_Window->DestroyVulkanSurface(m_Surface);
     }
 
-    Result VulkanSwapchain::Create(const VulkanDevice* device, const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) {
+    Result VulkanSwapchain::Create(const VulkanDevice* device, const SwapchainDesc& desc, Ref<VulkanSwapchain>& outSwapchain) {
 		Ref<VulkanSwapchain> swapchain = Ref<VulkanSwapchain>::Create(device);
         Result res = swapchain->Init(desc);
         if (res != Result::Success) {
             return res;
         }
         
-        outSwapchain = Ref<Swapchain>(swapchain);
+        outSwapchain = swapchain;
         return Result::Success;
 	}
 

@@ -11,14 +11,14 @@ namespace RealRHI {
         }
     }
 
-    Result VulkanTexture::Create(const VulkanDevice* device, const TextureDesc& desc, Ref<Texture>& outTexture) {
+    Result VulkanTexture::Create(const VulkanDevice* device, const TextureDesc& desc, Ref<VulkanTexture>& outTexture) {
         Ref<VulkanTexture> texture = Ref<VulkanTexture>::Create(device);
         Result res = texture->Init(desc);
         if (res != Result::Success) {
             return res;
         }
 
-        outTexture = Ref<Texture>(texture);
+        outTexture = texture;
         return Result::Success;
     }
 

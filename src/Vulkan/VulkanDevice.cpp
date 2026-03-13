@@ -79,31 +79,31 @@ namespace RealRHI {
 	}
 
     Result VulkanDevice::CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) {
-        return VulkanWindow::Create(this, desc, outWindow);
+        return VulkanWindow::Create(this, desc, (Ref<VulkanWindow>&)outWindow);
     }
 
     Result VulkanDevice::CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) {
-        return VulkanShader::Create(this, desc, outShader);
+        return VulkanShader::Create(this, desc, (Ref<VulkanShader>&)outShader);
     }
 
     Result VulkanDevice::CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) {
-        return VulkanPipeline::Create(this, desc, outPipeline);
+        return VulkanPipeline::Create(this, desc, (Ref<VulkanPipeline>&)outPipeline);
     }
 
     Result VulkanDevice::CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) {
-        return VulkanSwapchain::Create(this, desc, outSwapchain);
+        return VulkanSwapchain::Create(this, desc, (Ref<VulkanSwapchain>&)outSwapchain);
     }
 
     Result VulkanDevice::CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) {
-        return VulkanBuffer::Create(this, desc, outBuffer);
+        return VulkanBuffer::Create(this, desc, (Ref<VulkanBuffer>&)outBuffer);
     }
 
     Result VulkanDevice::CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) {
-        return VulkanTexture::Create(this, desc, outTexture);
+        return VulkanTexture::Create(this, desc, (Ref<VulkanTexture>&)outTexture);
     }
 
     Result VulkanDevice::CreateCommandList(Ref<CommandList>& outCommandList) {
-		return VulkanCommandList::Create(this, outCommandList);
+		return VulkanCommandList::Create(this, (Ref<VulkanCommandList>&)outCommandList);
     }
 
     void VulkanDevice::Submit(CommandList* cmd, Swapchain* sc, const FrameContext& frame) {

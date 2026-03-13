@@ -216,20 +216,6 @@ namespace RealRHI::Utils {
             case RealRHI::TextureFormat::D24_UNorm_S8_UInt: return VK_FORMAT_D24_UNORM_S8_UINT;
             case RealRHI::TextureFormat::D32_Float_S8_UInt: return VK_FORMAT_D32_SFLOAT_S8_UINT;
             case RealRHI::TextureFormat::D16_UNorm: return VK_FORMAT_D16_UNORM;
-            case RealRHI::TextureFormat::BC1_UNorm: return VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
-            case RealRHI::TextureFormat::BC1_SRGB: return VK_FORMAT_BC1_RGBA_SRGB_BLOCK;
-            case RealRHI::TextureFormat::BC2_UNorm: return VK_FORMAT_BC2_UNORM_BLOCK;
-            case RealRHI::TextureFormat::BC2_SRGB: return VK_FORMAT_BC2_SRGB_BLOCK;
-            case RealRHI::TextureFormat::BC3_UNorm: return VK_FORMAT_BC3_UNORM_BLOCK;
-            case RealRHI::TextureFormat::BC3_SRGB: return VK_FORMAT_BC3_SRGB_BLOCK;
-            case RealRHI::TextureFormat::BC4_UNorm: return VK_FORMAT_BC4_UNORM_BLOCK;
-            case RealRHI::TextureFormat::BC4_SNorm: return VK_FORMAT_BC4_SNORM_BLOCK;
-            case RealRHI::TextureFormat::BC5_UNorm: return VK_FORMAT_BC5_UNORM_BLOCK;
-            case RealRHI::TextureFormat::BC5_SNorm: return VK_FORMAT_BC5_SNORM_BLOCK;
-            case RealRHI::TextureFormat::BC6H_UFloat: return VK_FORMAT_BC6H_UFLOAT_BLOCK;
-            case RealRHI::TextureFormat::BC6H_SFloat: return VK_FORMAT_BC6H_SFLOAT_BLOCK;
-            case RealRHI::TextureFormat::BC7_UNorm: return VK_FORMAT_BC7_UNORM_BLOCK;
-            case RealRHI::TextureFormat::BC7_SRGB: return VK_FORMAT_BC7_SRGB_BLOCK;
             case RealRHI::TextureFormat::Unknown:
             default: return VK_FORMAT_UNDEFINED;
         }
@@ -291,20 +277,6 @@ namespace RealRHI::Utils {
             case VK_FORMAT_D24_UNORM_S8_UINT: return TextureFormat::D24_UNorm_S8_UInt;
             case VK_FORMAT_D32_SFLOAT_S8_UINT: return TextureFormat::D32_Float_S8_UInt;
             case VK_FORMAT_D16_UNORM: return TextureFormat::D16_UNorm;
-            case VK_FORMAT_BC1_RGBA_UNORM_BLOCK: return TextureFormat::BC1_UNorm;
-            case VK_FORMAT_BC1_RGBA_SRGB_BLOCK: return TextureFormat::BC1_SRGB;
-            case VK_FORMAT_BC2_UNORM_BLOCK: return TextureFormat::BC2_UNorm;
-            case VK_FORMAT_BC2_SRGB_BLOCK: return TextureFormat::BC2_SRGB;
-            case VK_FORMAT_BC3_UNORM_BLOCK: return TextureFormat::BC3_UNorm;
-            case VK_FORMAT_BC3_SRGB_BLOCK: return TextureFormat::BC3_SRGB;
-            case VK_FORMAT_BC4_UNORM_BLOCK: return TextureFormat::BC4_UNorm;
-            case VK_FORMAT_BC4_SNORM_BLOCK: return TextureFormat::BC4_SNorm;
-            case VK_FORMAT_BC5_UNORM_BLOCK: return TextureFormat::BC5_UNorm;
-            case VK_FORMAT_BC5_SNORM_BLOCK: return TextureFormat::BC5_SNorm;
-            case VK_FORMAT_BC6H_UFLOAT_BLOCK: return TextureFormat::BC6H_UFloat;
-            case VK_FORMAT_BC6H_SFLOAT_BLOCK: return TextureFormat::BC6H_SFloat;
-            case VK_FORMAT_BC7_UNORM_BLOCK: return TextureFormat::BC7_UNorm;
-            case VK_FORMAT_BC7_SRGB_BLOCK: return TextureFormat::BC7_SRGB;
             default: return TextureFormat::Unknown;
         }
 	}

@@ -12,7 +12,7 @@ namespace RealRHI {
 		VulkanShader(const VulkanDevice* device);
 		~VulkanShader();
 
-		static Result Create(const VulkanDevice* device, const ShaderDesc& desc, Ref<Shader>& outShader);
+		static Result Create(const VulkanDevice* device, const ShaderDesc& desc, Ref<VulkanShader>& outShader);
 		Result Init(const ShaderDesc& desc);
 
 	protected:

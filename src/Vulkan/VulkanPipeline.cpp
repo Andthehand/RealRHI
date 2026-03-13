@@ -12,14 +12,14 @@ namespace RealRHI {
         vkDestroyPipelineLayout(m_Device->GetDevice(), m_PipelineLayout, nullptr);
     }
 
-    Result VulkanPipeline::Create(const VulkanDevice* device, const PipelineDesc& desc, Ref<Pipeline>& outPipeline) {
+    Result VulkanPipeline::Create(const VulkanDevice* device, const PipelineDesc& desc, Ref<VulkanPipeline>& outPipeline) {
         Ref<VulkanPipeline> pipeline = Ref<VulkanPipeline>::Create(device);
         Result res = pipeline->Init(desc);
         if (res != Result::Success) {
             return res;
         }
 
-        outPipeline = Ref<Pipeline>(pipeline);
+        outPipeline = pipeline;
         return Result::Success;
 	}
 

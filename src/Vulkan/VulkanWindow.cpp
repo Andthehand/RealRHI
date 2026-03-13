@@ -10,14 +10,14 @@ namespace RealRHI {
         }
     }
 
-	Result VulkanWindow::Create(const VulkanDevice* device, const WindowDesc& desc, Ref<Window>& outWindow) {
+	Result VulkanWindow::Create(const VulkanDevice* device, const WindowDesc& desc, Ref<VulkanWindow>& outWindow) {
         Ref<VulkanWindow> window = Ref<VulkanWindow>::Create(device);
         Result res = window->Init(desc);
         if (res != Result::Success) {
             return res;
         }
 
-        outWindow = Ref<Window>(window);
+        outWindow = window;
         return Result::Success;
 	}
 

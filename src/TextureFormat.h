@@ -52,22 +52,6 @@ namespace RealRHI {
         D24_UNorm_S8_UInt,
         D32_Float_S8_UInt,
         D16_UNorm,
-        
-        // Compressed formats (BC)
-        BC1_UNorm,
-        BC1_SRGB,
-        BC2_UNorm,
-        BC2_SRGB,
-        BC3_UNorm,
-        BC3_SRGB,
-        BC4_UNorm,
-        BC4_SNorm,
-        BC5_UNorm,
-        BC5_SNorm,
-        BC6H_UFloat,
-        BC6H_SFloat,
-        BC7_UNorm,
-        BC7_SRGB,
 
         Unknown
     };

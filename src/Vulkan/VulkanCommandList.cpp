@@ -15,14 +15,14 @@ namespace RealRHI {
         vkDestroyCommandPool(m_Device->GetDevice(), m_CommandPool, nullptr);
     }
 
-	Result VulkanCommandList::Create(const VulkanDevice* device, Ref<CommandList>& outCommandList) {
+	Result VulkanCommandList::Create(const VulkanDevice* device, Ref<VulkanCommandList>& outCommandList) {
         Ref<VulkanCommandList> commandList = Ref<VulkanCommandList>::Create(device);
         Result res = commandList->Init();
         if (res != Result::Success) {
             return res;
         }
 
-        outCommandList = Ref<CommandList>(commandList);
+        outCommandList = commandList;
         return Result::Success;
 	}
 

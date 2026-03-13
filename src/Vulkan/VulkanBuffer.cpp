@@ -11,14 +11,14 @@ namespace RealRHI {
         vmaDestroyBuffer(m_Device->GetAllocator(), m_Buffer, m_BufferMemory);
     }
 
-    Result VulkanBuffer::Create(const VulkanDevice* device, const BufferDesc& desc, Ref<Buffer>& outBuffer) {
+    Result VulkanBuffer::Create(const VulkanDevice* device, const BufferDesc& desc, Ref<VulkanBuffer>& outBuffer) {
         Ref<VulkanBuffer> buffer = Ref<VulkanBuffer>::Create(device);
         Result res = buffer->Init(desc);
         if (res != Result::Success) {
             return res;
         }
 
-        outBuffer = Ref<Buffer>(buffer);
+        outBuffer = buffer;
         return Result::Success;
 	}
 

@@ -14,7 +14,7 @@ namespace RealRHI {
 		VulkanWindow(const VulkanDevice* device);
 		~VulkanWindow();
 
-		static Result Create(const VulkanDevice* device, const WindowDesc& desc, Ref<Window>& outWindow);
+		static Result Create(const VulkanDevice* device, const WindowDesc& desc, Ref<VulkanWindow>& outWindow);
 		Result Init(const WindowDesc& desc);
 
 		uint32_t GetWidth() const override { return m_Width; }

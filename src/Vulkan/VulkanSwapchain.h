@@ -22,7 +22,7 @@ namespace RealRHI {
 		VulkanSwapchain(const VulkanDevice* device);
 		~VulkanSwapchain();
 
-		static Result Create(const VulkanDevice* device, const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain);
+		static Result Create(const VulkanDevice* device, const SwapchainDesc& desc, Ref<VulkanSwapchain>& outSwapchain);
 		Result Init(const SwapchainDesc& desc);
 
 		TextureFormat GetBackBufferFormat() const override { return m_SwapchainImageFormat; }

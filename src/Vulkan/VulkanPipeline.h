@@ -13,7 +13,7 @@ namespace RealRHI {
 		VulkanPipeline(const VulkanDevice* device);
 		~VulkanPipeline();
 
-		static Result Create(const VulkanDevice* device, const PipelineDesc& desc, Ref<Pipeline>& outPipeline);
+		static Result Create(const VulkanDevice* device, const PipelineDesc& desc, Ref<VulkanPipeline>& outPipeline);
 		Result Init(const PipelineDesc& desc);
 
 	protected:

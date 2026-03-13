@@ -125,13 +125,13 @@ namespace RealRHI {
 			return !(*this == other);
 		}
 	private:
-		void IncRef() {
+		void IncRef() const {
 			if (m_Instance) {
 				m_Instance->IncRefCount();
 			}
 		}
 
-		void DecRef() {
+		void DecRef() const {
 			if (m_Instance) {
 				m_Instance->DecRefCount();
 				

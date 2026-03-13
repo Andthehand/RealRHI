@@ -33,7 +33,7 @@ namespace RealRHI {
 
     enum class MemoryUsage {
         GPUOnly,        // Device local
-        CPUToGPU,       // Upload buffer
+		CPUToGPU,       // Upload buffer/staging buffer
         GPUToCPU,       // Readback buffer
     };
 
