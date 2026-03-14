@@ -4,6 +4,15 @@
 #include <cstdint>
 
 namespace RealRHI {
+    enum class TextureLayout {
+        Undefined,
+        ColorAttachment,
+        ShaderRead,
+        TransferSrc,
+        TransferDst,
+        Present
+    };
+
     enum class TextureUsage : uint32_t {
         None = 0,
         ShaderResource = 1 << 0,

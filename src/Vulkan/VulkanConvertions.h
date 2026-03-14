@@ -89,20 +89,6 @@ namespace RealRHI::Utils {
     }
     // ---------------------- ShaderStage ------------------
 
-    // ---------------------- TextureView ------------------
-    constexpr VkImageViewType TextureViewTypeToVkImageViewType(TextureViewType type) {
-        switch (type) {
-            case RealRHI::TextureViewType::View1D: return VK_IMAGE_VIEW_TYPE_1D;
-            case RealRHI::TextureViewType::View2D: return VK_IMAGE_VIEW_TYPE_2D;
-            case RealRHI::TextureViewType::View2DArray: return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
-            case RealRHI::TextureViewType::View3D: return VK_IMAGE_VIEW_TYPE_3D;
-            case RealRHI::TextureViewType::Cube: return VK_IMAGE_VIEW_TYPE_CUBE;
-            case RealRHI::TextureViewType::CubeArray: return VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
-            default: return VK_IMAGE_VIEW_TYPE_MAX_ENUM;
-        }
-    }
-    // ---------------------- TextureView ------------------
-
     // ---------------------- RenderingInfo ----------------
     constexpr VkAttachmentLoadOp LoadOpToVkLoadOp(LoadOp loadOp) {
         switch (loadOp) {
@@ -154,6 +140,20 @@ namespace RealRHI::Utils {
         return allocInfo;
     }
     // ---------------------- BufferDesc -------------------
+
+    // ---------------------- TextureView ------------------
+    constexpr VkImageViewType TextureViewTypeToVkImageViewType(TextureViewType type) {
+        switch (type) {
+            case RealRHI::TextureViewType::View1D: return VK_IMAGE_VIEW_TYPE_1D;
+            case RealRHI::TextureViewType::View2D: return VK_IMAGE_VIEW_TYPE_2D;
+            case RealRHI::TextureViewType::View2DArray: return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+            case RealRHI::TextureViewType::View3D: return VK_IMAGE_VIEW_TYPE_3D;
+            case RealRHI::TextureViewType::Cube: return VK_IMAGE_VIEW_TYPE_CUBE;
+            case RealRHI::TextureViewType::CubeArray: return VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
+            default: return VK_IMAGE_VIEW_TYPE_MAX_ENUM;
+        }
+    }
+    // ---------------------- TextureView ------------------
 
 	// ---------------------- TextureFormat ----------------
     constexpr VkImageUsageFlags TextureUsageToVkImageUsage(TextureUsage usage) {
@@ -281,6 +281,44 @@ namespace RealRHI::Utils {
         }
 	}
 	// ---------------------- TextureFormat ----------------
+
+    // ---------------------- TextureLayout ----------------
+    constexpr VkImageLayout TextureLayoutToVkImageLayout(TextureLayout layout) {
+        switch (layout) {
+            case TextureLayout::Undefined: return VK_IMAGE_LAYOUT_UNDEFINED;
+            case TextureLayout::ColorAttachment: return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            case TextureLayout::ShaderRead: return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            case TextureLayout::TransferSrc: return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            case TextureLayout::TransferDst: return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            case TextureLayout::Present: return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+            default: return VK_IMAGE_LAYOUT_UNDEFINED;
+        }
+	}
+
+    constexpr VkAccessFlags2 TextureLayoutToVkAccessFlags(TextureLayout layout) {
+        switch (layout) {
+            case TextureLayout::Undefined: return 0;
+            case TextureLayout::ColorAttachment: return VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+            case TextureLayout::ShaderRead: return VK_ACCESS_2_SHADER_READ_BIT;
+            case TextureLayout::TransferSrc: return VK_ACCESS_2_TRANSFER_READ_BIT;
+            case TextureLayout::TransferDst: return VK_ACCESS_2_TRANSFER_WRITE_BIT;
+            case TextureLayout::Present: return VK_ACCESS_2_NONE;
+            default: return 0;
+        }
+    }
+
+    constexpr VkPipelineStageFlags2 TextureLayoutToVkPipelineStageFlags(TextureLayout layout) {
+        switch (layout) {
+            case TextureLayout::Undefined: return 0;
+            case TextureLayout::ColorAttachment: return VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+            case TextureLayout::ShaderRead: return VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+            case TextureLayout::TransferSrc:
+            case TextureLayout::TransferDst: return VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+            case TextureLayout::Present: return VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+            default: return 0;
+        }
+	}
+    // ---------------------- TextureLayout ----------------
 
     // ---------------------- DepthState ----------------------
     constexpr VkCompareOp CompareOpToVkCompareOp(CompareOp op) {

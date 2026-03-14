@@ -16,6 +16,7 @@ namespace RealRHI {
 
 	protected:
 		friend class VulkanCommandList;
+		friend class VulkanTexture;
 		VkBuffer GetBuffer() const { return m_Buffer; }
 	private:
 		const VulkanDevice* m_Device = nullptr;

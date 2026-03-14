@@ -31,6 +31,7 @@ namespace RealRHI {
 		void DrawIndexed(uint32_t indexCount) override;
 	protected:
 		friend class VulkanDevice;
+		friend class VulkanTexture;
 		VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
 	private:
 		const VulkanDevice* m_Device;
