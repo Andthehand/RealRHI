@@ -98,18 +98,21 @@ namespace RealRHI {
         return Result::Success;
     }
 
-    Result VulkanTexture::SetData(CommandList* cmd, const void* data, uint32_t size) {
-        VulkanCommandList* vkCmd = static_cast<VulkanCommandList*>(cmd);
-        ChangeLayout(cmd, TextureLayout::TransferDst);
+    Result VulkanTexture::UploadData(const void* data, uint32_t size) {
+        Ref<VulkanCommandList> commandList;
+        Result res = VulkanCommandList::Create(m_Device, commandList);
+
+        ChangeLayout(commandList.Raw(), TextureLayout::TransferDst);
 
         BufferDesc stagingBufferDesc{
             .size = size,
             .usage = BufferUsage::TransferSrc,
             .memoryUsage = MemoryUsage::CPUToGPU,
-		};
+            .initialData = data,
+        };
         Ref<VulkanBuffer> transferBuffer;
-        Result res = VulkanBuffer::Create(m_Device, stagingBufferDesc, transferBuffer);
-		if (res != Result::Success) {
+        res = VulkanBuffer::Create(m_Device, stagingBufferDesc, transferBuffer);
+        if (res != Result::Success) {
             return res;
         }
 
@@ -124,16 +127,15 @@ namespace RealRHI {
             .bufferOffset = 0,
             .bufferRowLength = 0,
             .bufferImageHeight = 0,
-			.imageSubresource = subresourceRange,
+            .imageSubresource = subresourceRange,
             .imageExtent = m_ImageExtent,
 
         };
 
-        vkCmdCopyBufferToImage(vkCmd->GetCommandBuffer(), transferBuffer->GetBuffer(), m_Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+        vkCmdCopyBufferToImage(commandList->GetCommandBuffer(), transferBuffer->GetBuffer(), m_Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+        ChangeLayout(commandList.Raw(), TextureLayout::ShaderRead);
 
-        ChangeLayout(cmd, TextureLayout::ShaderRead);
-
-        return Result::Success;
+        return m_Device->ImmediateSubmit(commandList.Raw());
     }
 
     Result VulkanTexture::CreateFromSwapChain(const VulkanDevice* device, VkFormat format, VkImage image, Ref<VulkanTexture>& outTexture) {

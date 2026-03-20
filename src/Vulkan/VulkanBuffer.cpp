@@ -31,16 +31,26 @@ namespace RealRHI {
         };
 
         VmaAllocationCreateInfo vmaAllocCreateInfo = Utils::MemoryUsageToVmaAllocationCreateInfo(desc.memoryUsage);
-        VmaAllocationInfo vmaAllocInfo;
-        if (vmaCreateBuffer(m_Device->GetAllocator(), &bufferInfo, &vmaAllocCreateInfo, &m_Buffer, &m_BufferMemory, &vmaAllocInfo) != VK_SUCCESS) {
+        if (vmaCreateBuffer(m_Device->GetAllocator(), &bufferInfo, &vmaAllocCreateInfo, &m_Buffer, &m_BufferMemory, &m_AllocInfo) != VK_SUCCESS) {
             m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan buffer.");
             return Result::Failed;
         }
 
         if (desc.initialData) {
-            memcpy(vmaAllocInfo.pMappedData, desc.initialData, (size_t)bufferInfo.size);
+            memcpy(m_AllocInfo.pMappedData, desc.initialData, (size_t)bufferInfo.size);
         }
         
         return Result::Success;
+    }
+
+    Result VulkanBuffer::WriteData(const void* data, uint64_t size, uint64_t offset) {
+        if (offset + size > m_AllocInfo.size) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Trying to write data outside of the buffer bounds.");
+            return Result::InvalidParameter;
+		}
+
+        memcpy((char*)m_AllocInfo.pMappedData + offset, data, (size_t)size);
+
+		return Result::Success;
     }
 }

@@ -16,7 +16,8 @@ namespace RealRHI {
 		Result Init(const TextureDesc& desc);
 
 		Result ChangeLayout(CommandList* cmd, TextureLayout newLayout);
-		Result SetData(CommandList* cmd, const void* data, uint32_t size);
+
+		Result UploadData(const void* data, uint32_t size);
 
 		TextureView* GetTextureView() override {
 			return &m_TextureView;

@@ -14,6 +14,7 @@ namespace RealRHI {
 		static Result Create(const VulkanDevice* device, const BufferDesc& desc, Ref<VulkanBuffer>& outBuffer);
 		Result Init(const BufferDesc& desc);
 
+		Result WriteData(const void* data, uint64_t size, uint64_t offset = 0) override;
 	protected:
 		friend class VulkanCommandList;
 		friend class VulkanTexture;
@@ -23,5 +24,6 @@ namespace RealRHI {
 
 		VkBuffer m_Buffer = VK_NULL_HANDLE;
 		VmaAllocation m_BufferMemory = VK_NULL_HANDLE;
+		VmaAllocationInfo m_AllocInfo;
 	};
 }

@@ -51,6 +51,7 @@ namespace RealRHI {
 		Result CreateCommandList(Ref<CommandList>& outCommandList) override;
 
 		void Submit(CommandList* cmd, Swapchain* swapchain, const FrameContext& frame) override;
+		Result ImmediateSubmit(CommandList* cmd) const override;
 		void WaitIdle() override;
 	private:
 		bool CreateInstance(const char* appName, bool enableValidationLayer);
