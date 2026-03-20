@@ -188,3 +188,14 @@ A complete rendering example using SDL3 that:
 - Implements a proper render loop with synchronization
 
 See `examples/TriangleExample/TriangleExample.cpp` for a complete, self-contained example of rendering with RealRHI.
+
+### TextureExample
+A rendering example using SDL3 that demonstrates texture creation and sampling:
+- Creates a procedurally generated checkerboard texture
+- Uploads pixel data to the GPU via a staging buffer
+- Creates a sampler with nearest-neighbor filtering
+- Creates a graphics pipeline with a descriptor set layout for a combined image sampler
+- Renders a textured quad using index buffer and texture coordinates
+- Demonstrates the `BindTexture` API for per-draw texture binding
+
+See `examples/TextureExample/TextureExample.cpp` for a complete, self-contained example of textured rendering with RealRHI.

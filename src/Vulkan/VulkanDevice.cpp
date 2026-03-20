@@ -7,6 +7,8 @@
 #include "VulkanPipeline.h"
 #include "VulkanBuffer.h"
 #include "VulkanCommandList.h"
+#include "VulkanTexture.h"
+#include "VulkanSampler.h"
 
 #include <set>
 #include <iostream>
@@ -14,6 +16,9 @@
 namespace RealRHI {
     VulkanDevice::~VulkanDevice() {
         if (m_Device != VK_NULL_HANDLE) {
+            if (m_DescriptorPool != VK_NULL_HANDLE) {
+                vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
+            }
             vmaDestroyAllocator(m_Allocator);
             vkDestroyDevice(m_Device, nullptr);
         }
@@ -75,6 +80,11 @@ namespace RealRHI {
             return Result::Failed;
         }
 
+        if (!CreateDescriptorPool()) {
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan descriptor pool.");
+            return Result::Failed;
+        }
+
 		return Result::Success;
 	}
 
@@ -100,6 +110,10 @@ namespace RealRHI {
 
     Result VulkanDevice::CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) {
         return VulkanTexture::Create(this, desc, (Ref<VulkanTexture>&)outTexture);
+    }
+
+    Result VulkanDevice::CreateSampler(const SamplerDesc& desc, Ref<Sampler>& outSampler) {
+        return VulkanSampler::Create(this, desc, (Ref<VulkanSampler>&)outSampler);
     }
 
     Result VulkanDevice::CreateCommandList(Ref<CommandList>& outCommandList) {
@@ -188,6 +202,58 @@ namespace RealRHI {
 
     void VulkanDevice::WaitIdle() {
         vkDeviceWaitIdle(m_Device);
+    }
+
+    VkDescriptorSet VulkanDevice::AllocateTextureDescriptorSet(VkDescriptorSetLayout layout) const {
+        VkDescriptorSetAllocateInfo allocInfo{
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .descriptorPool = m_DescriptorPool,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &layout,
+        };
+
+        VkDescriptorSet set = VK_NULL_HANDLE;
+        if (vkAllocateDescriptorSets(m_Device, &allocInfo, &set) != VK_SUCCESS) {
+            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to allocate Vulkan descriptor set.");
+        }
+        return set;
+    }
+
+    void VulkanDevice::WriteTextureDescriptor(VkDescriptorSet set, uint32_t binding, VkImageView imageView, VkSampler sampler) const {
+        VkDescriptorImageInfo imageInfo{
+            .sampler = sampler,
+            .imageView = imageView,
+            .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        };
+
+        VkWriteDescriptorSet write{
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = set,
+            .dstBinding = binding,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo = &imageInfo,
+        };
+
+        vkUpdateDescriptorSets(m_Device, 1, &write, 0, nullptr);
+    }
+
+    bool VulkanDevice::CreateDescriptorPool() {
+        VkDescriptorPoolSize poolSize{
+            .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 256,
+        };
+
+        VkDescriptorPoolCreateInfo poolInfo{
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+            .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+            .maxSets = 256,
+            .poolSizeCount = 1,
+            .pPoolSizes = &poolSize,
+        };
+
+        return vkCreateDescriptorPool(m_Device, &poolInfo, nullptr, &m_DescriptorPool) == VK_SUCCESS;
     }
 
     Result Device::Create(const DeviceDesc& desc, std::unique_ptr<Device>& outDevice) {

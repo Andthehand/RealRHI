@@ -13,3 +13,4 @@ endfunction()
 
 # Add example subdirectories
 add_subdirectory(TriangleExample)
+add_subdirectory(TextureExample)

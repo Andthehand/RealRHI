@@ -58,7 +58,7 @@ namespace RealRHI {
             return Result::Failed;
         }
 
-		return Result::Success;
+        return m_TextureView.Init(m_Device, TextureViewDesc{ .texture = this });
     }
 
     Result VulkanTexture::ChangeLayout(CommandList* cmd, TextureLayout newLayout) {
@@ -101,6 +101,14 @@ namespace RealRHI {
     Result VulkanTexture::UploadData(const void* data, uint32_t size) {
         Ref<VulkanCommandList> commandList;
         Result res = VulkanCommandList::Create(m_Device, commandList);
+        if (res != Result::Success) {
+            return res;
+        }
+
+        res = commandList->Begin();
+        if (res != Result::Success) {
+            return res;
+        }
 
         ChangeLayout(commandList.Raw(), TextureLayout::TransferDst);
 
@@ -134,6 +142,11 @@ namespace RealRHI {
 
         vkCmdCopyBufferToImage(commandList->GetCommandBuffer(), transferBuffer->GetBuffer(), m_Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
         ChangeLayout(commandList.Raw(), TextureLayout::ShaderRead);
+
+        res = commandList->End();
+        if (res != Result::Success) {
+            return res;
+        }
 
         return m_Device->ImmediateSubmit(commandList.Raw());
     }

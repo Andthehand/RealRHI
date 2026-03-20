@@ -3,6 +3,7 @@
 #include "Result.h"
 
 #include "Texture.h"
+#include "Sampler.h"
 #include "Pipeline.h"
 #include "Buffer.h"
 
@@ -25,6 +26,7 @@ namespace RealRHI {
         virtual void BindPipeline(Pipeline* pipeline) = 0;
         virtual void BindVertexBuffer(Buffer* vertexBuffer) = 0;
 		virtual void BindIndexBuffer(Buffer* indexBuffer) = 0;
+		virtual void BindTexture(uint32_t binding, Texture* texture, Sampler* sampler) = 0;
 
         virtual void Draw(uint32_t vertexCount) = 0;
 		virtual void DrawIndexed(uint32_t indexCount) = 0;

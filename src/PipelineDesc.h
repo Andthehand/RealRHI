@@ -50,6 +50,18 @@ namespace RealRHI {
         TextureFormat depthFormat = TextureFormat::Unknown;
     };
 
+    enum class DescriptorType {
+        CombinedImageSampler,
+        UniformBuffer,
+        StorageBuffer,
+    };
+
+    struct DescriptorBinding {
+        uint32_t binding;
+        DescriptorType type = DescriptorType::CombinedImageSampler;
+        uint32_t count = 1;
+    };
+
     struct PipelineDesc {
         Shader* shader;
 
@@ -58,5 +70,7 @@ namespace RealRHI {
         BlendState blendState;
 
         RenderTargetFormats renderTargetFormats;
+
+        std::vector<DescriptorBinding> descriptorBindings;
     };
 }
