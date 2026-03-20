@@ -4,6 +4,7 @@
 #include "PipelineDesc.h"
 #include "TextureViewDesc.h"
 #include "Shader.h"
+#include "SamplerDesc.h"
 
 #include <Vulkan/vulkan.h>
 
@@ -358,4 +359,35 @@ namespace RealRHI::Utils {
         return frontCounterClockwise ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE;
     }
     // ---------------------- RasterState ---------------------
+
+    // ---------------------- Sampler -------------------------
+    constexpr VkFilter SamplerFilterToVkFilter(SamplerFilter filter) {
+        switch (filter) {
+            case SamplerFilter::Linear: return VK_FILTER_LINEAR;
+            case SamplerFilter::Nearest: return VK_FILTER_NEAREST;
+            default: return VK_FILTER_LINEAR;
+        }
+    }
+
+    constexpr VkSamplerAddressMode SamplerAddressModeToVkAddressMode(SamplerAddressMode mode) {
+        switch (mode) {
+            case SamplerAddressMode::Repeat: return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+            case SamplerAddressMode::MirroredRepeat: return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+            case SamplerAddressMode::ClampToEdge: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+            case SamplerAddressMode::ClampToBorder: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+            default: return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        }
+    }
+    // ---------------------- Sampler -------------------------
+
+    // ---------------------- DescriptorType ------------------
+    constexpr VkDescriptorType DescriptorTypeToVkDescriptorType(DescriptorType type) {
+        switch (type) {
+            case DescriptorType::CombinedImageSampler: return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            case DescriptorType::UniformBuffer: return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            case DescriptorType::StorageBuffer: return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            default: return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        }
+    }
+    // ---------------------- DescriptorType ------------------
 }

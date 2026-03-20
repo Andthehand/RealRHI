@@ -48,11 +48,16 @@ namespace RealRHI {
 		Result CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) override;
 		Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) override;
 		Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) override;
+		Result CreateSampler(const SamplerDesc& desc, Ref<Sampler>& outSampler) override;
 		Result CreateCommandList(Ref<CommandList>& outCommandList) override;
 
 		void Submit(CommandList* cmd, Swapchain* swapchain, const FrameContext& frame) override;
 		Result ImmediateSubmit(CommandList* cmd) const override;
 		void WaitIdle() override;
+
+		VkDescriptorPool GetDescriptorPool() const { return m_DescriptorPool; }
+		VkDescriptorSet AllocateTextureDescriptorSet(VkDescriptorSetLayout layout) const;
+		void WriteTextureDescriptor(VkDescriptorSet set, uint32_t binding, VkImageView imageView, VkSampler sampler) const;
 	private:
 		bool CreateInstance(const char* appName, bool enableValidationLayer);
 		bool SetupDebugMessenger();
@@ -61,6 +66,7 @@ namespace RealRHI {
 		bool CreateLogicalDevice();
 		QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
 		bool CreateAllocator();
+		bool CreateDescriptorPool();
 
 		static VKAPI_ATTR VkBool32 VulkanDebugCallback(
 			VkDebugUtilsMessageSeverityFlagBitsEXT severity,
@@ -78,6 +84,8 @@ namespace RealRHI {
 			VkQueue m_PresentQueue;
 
 			VmaAllocator m_Allocator;
+
+			VkDescriptorPool m_DescriptorPool = VK_NULL_HANDLE;
 
 			std::filesystem::path m_ShaderDirectory;
 			DebugCallback m_DebugCallback;

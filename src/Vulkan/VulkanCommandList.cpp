@@ -3,6 +3,7 @@
 #include "VulkanTextureView.h"
 #include "VulkanPipeline.h"
 #include "VulkanBuffer.h"
+#include "VulkanSampler.h"
 
 #include "VulkanConvertions.h"
 
@@ -12,9 +13,17 @@ namespace RealRHI {
     }
 
     VulkanCommandList::~VulkanCommandList() {
+        if (!m_DescriptorSetCache.empty()) {
+            std::vector<VkDescriptorSet> setsToFree;
+            setsToFree.reserve(m_DescriptorSetCache.size());
+            for (auto& [key, set] : m_DescriptorSetCache) {
+                setsToFree.push_back(set);
+            }
+            vkFreeDescriptorSets(m_Device->GetDevice(), m_Device->GetDescriptorPool(),
+                static_cast<uint32_t>(setsToFree.size()), setsToFree.data());
+        }
         vkDestroyCommandPool(m_Device->GetDevice(), m_CommandPool, nullptr);
     }
-
 	Result VulkanCommandList::Create(const VulkanDevice* device, Ref<VulkanCommandList>& outCommandList) {
         Ref<VulkanCommandList> commandList = Ref<VulkanCommandList>::Create(device);
         Result res = commandList->Init();
@@ -147,7 +156,8 @@ namespace RealRHI {
     }
 
     void VulkanCommandList::BindPipeline(Pipeline* pipeline) {
-		vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, static_cast<VulkanPipeline*>(pipeline)->GetPipeline());
+		m_BoundPipeline = static_cast<VulkanPipeline*>(pipeline);
+		vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_BoundPipeline->GetPipeline());
     }
 
     void VulkanCommandList::BindVertexBuffer(Buffer* vertexBuffer) {
@@ -159,6 +169,33 @@ namespace RealRHI {
     void VulkanCommandList::BindIndexBuffer(Buffer* indexBuffer) {
         vkCmdBindIndexBuffer(m_CommandBuffer, static_cast<VulkanBuffer*>(indexBuffer)->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
 	}
+
+    void VulkanCommandList::BindTexture(uint32_t binding, Texture* texture, Sampler* sampler) {
+        if (!m_BoundPipeline || !m_BoundPipeline->HasDescriptors()) {
+            return;
+        }
+
+        auto* vkView = static_cast<VulkanTextureView*>(texture->GetTextureView());
+        auto* vkSampler = static_cast<VulkanSampler*>(sampler);
+
+        VkImageView imageView = vkView->GetImageView();
+        VkSampler vkSamplerHandle = vkSampler->GetSampler();
+
+        const DescriptorCacheKey cacheKey{ imageView, vkSamplerHandle };
+
+        auto it = m_DescriptorSetCache.find(cacheKey);
+        VkDescriptorSet set;
+        if (it == m_DescriptorSetCache.end()) {
+            set = m_Device->AllocateTextureDescriptorSet(m_BoundPipeline->GetDescriptorSetLayout());
+            m_Device->WriteTextureDescriptor(set, binding, imageView, vkSamplerHandle);
+            m_DescriptorSetCache[cacheKey] = set;
+        } else {
+            set = it->second;
+        }
+
+        vkCmdBindDescriptorSets(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            m_BoundPipeline->GetPipelineLayout(), 0, 1, &set, 0, nullptr);
+    }
 
     void VulkanCommandList::Draw(uint32_t vertexCount) {
         vkCmdDraw(m_CommandBuffer, vertexCount, 1, 0, 0);

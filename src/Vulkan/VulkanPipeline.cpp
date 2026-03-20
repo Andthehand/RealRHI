@@ -10,6 +10,9 @@ namespace RealRHI {
     VulkanPipeline::~VulkanPipeline() {
         vkDestroyPipeline(m_Device->GetDevice(), m_Pipeline, nullptr);
         vkDestroyPipelineLayout(m_Device->GetDevice(), m_PipelineLayout, nullptr);
+        if (m_DescriptorSetLayout != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(m_Device->GetDevice(), m_DescriptorSetLayout, nullptr);
+        }
     }
 
     Result VulkanPipeline::Create(const VulkanDevice* device, const PipelineDesc& desc, Ref<VulkanPipeline>& outPipeline) {
@@ -132,6 +135,33 @@ namespace RealRHI {
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         };
+
+        if (!desc.descriptorBindings.empty()) {
+            std::vector<VkDescriptorSetLayoutBinding> layoutBindings(desc.descriptorBindings.size());
+            for (uint32_t i = 0; i < desc.descriptorBindings.size(); i++) {
+                const auto& binding = desc.descriptorBindings[i];
+                layoutBindings[i] = VkDescriptorSetLayoutBinding{
+                    .binding = binding.binding,
+                    .descriptorType = Utils::DescriptorTypeToVkDescriptorType(binding.type),
+                    .descriptorCount = binding.count,
+                    .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS,
+                };
+            }
+
+            VkDescriptorSetLayoutCreateInfo layoutInfo{
+                .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                .bindingCount = static_cast<uint32_t>(layoutBindings.size()),
+                .pBindings = layoutBindings.data(),
+            };
+
+            if (vkCreateDescriptorSetLayout(m_Device->GetDevice(), &layoutInfo, nullptr, &m_DescriptorSetLayout) != VK_SUCCESS) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan descriptor set layout.");
+                return Result::Failed;
+            }
+
+            pipelineLayoutInfo.setLayoutCount = 1;
+            pipelineLayoutInfo.pSetLayouts = &m_DescriptorSetLayout;
+        }
 
         if (vkCreatePipelineLayout(m_Device->GetDevice(), &pipelineLayoutInfo, nullptr, &m_PipelineLayout) != VK_SUCCESS) {
             m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan pipeline layout.");
