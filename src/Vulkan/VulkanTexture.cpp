@@ -106,6 +106,7 @@ namespace RealRHI {
             .size = size,
             .usage = BufferUsage::TransferSrc,
             .memoryUsage = MemoryUsage::CPUToGPU,
+            .initialData = data,
 		};
         Ref<VulkanBuffer> transferBuffer;
         Result res = VulkanBuffer::Create(m_Device, stagingBufferDesc, transferBuffer);
@@ -134,6 +135,31 @@ namespace RealRHI {
         ChangeLayout(cmd, TextureLayout::ShaderRead);
 
         return Result::Success;
+    }
+
+    Result VulkanTexture::UploadData(const void* data, uint32_t size) {
+        Ref<VulkanCommandList> commandList;
+        Result res = VulkanCommandList::Create(m_Device, commandList);
+        if (res != Result::Success) {
+            return res;
+        }
+
+        res = commandList->Begin();
+        if (res != Result::Success) {
+            return res;
+        }
+
+        res = SetData(commandList.Raw(), data, size);
+        if (res != Result::Success) {
+            return res;
+        }
+
+        res = commandList->End();
+        if (res != Result::Success) {
+            return res;
+        }
+
+        return m_Device->ImmediateSubmit(commandList.Raw());
     }
 
     Result VulkanTexture::CreateFromSwapChain(const VulkanDevice* device, VkFormat format, VkImage image, Ref<VulkanTexture>& outTexture) {

@@ -146,6 +146,46 @@ namespace RealRHI {
         }
     }
 
+    Result VulkanDevice::ImmediateSubmit(CommandList* cmd) {
+        auto* vkCmd = static_cast<VulkanCommandList*>(cmd);
+
+        VkCommandBufferSubmitInfo cmdInfo{
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+            .commandBuffer = vkCmd->GetCommandBuffer(),
+        };
+
+        VkSubmitInfo2 submitInfo{
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
+            .commandBufferInfoCount = 1,
+            .pCommandBufferInfos = &cmdInfo,
+        };
+
+        VkFenceCreateInfo fenceInfo{
+            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+        };
+
+        VkFence fence;
+        if (vkCreateFence(m_Device, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
+            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create fence for immediate submit.");
+            return Result::Failed;
+        }
+
+        if (vkQueueSubmit2(m_GraphicsQueue, 1, &submitInfo, fence) != VK_SUCCESS) {
+            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to submit command buffer for immediate submit.");
+            vkDestroyFence(m_Device, fence, nullptr);
+            return Result::Failed;
+        }
+
+        if (vkWaitForFences(m_Device, 1, &fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to wait for fence during immediate submit.");
+            vkDestroyFence(m_Device, fence, nullptr);
+            return Result::Failed;
+        }
+
+        vkDestroyFence(m_Device, fence, nullptr);
+        return Result::Success;
+    }
+
     void VulkanDevice::WaitIdle() {
         vkDeviceWaitIdle(m_Device);
     }
