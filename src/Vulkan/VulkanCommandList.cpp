@@ -12,7 +12,7 @@ namespace RealRHI {
     }
 
     VulkanCommandList::~VulkanCommandList() {
-        vkDestroyCommandPool(m_Device->GetDevice(), m_CommandPool, nullptr);
+		vkFreeCommandBuffers(m_Device->GetDevice(), m_Device->GetCommandPool(), 1, &m_CommandBuffer);
     }
 
 	Result VulkanCommandList::Create(const VulkanDevice* device, Ref<VulkanCommandList>& outCommandList) {
@@ -27,27 +27,15 @@ namespace RealRHI {
 	}
 
     Result VulkanCommandList::Init() {
-        VkCommandPoolCreateInfo poolInfo{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-            .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-            .queueFamilyIndex = m_Device->GetGraphicsQueueFamily(),
-        };
-
-        if (vkCreateCommandPool(m_Device->GetDevice(), &poolInfo, nullptr, &m_CommandPool) != VK_SUCCESS) {
-            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan command pool.");
-            return Result::Failed;
-        }
-
         VkCommandBufferAllocateInfo allocInfo{
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-            .commandPool = m_CommandPool,
+            .commandPool = m_Device->GetCommandPool(),
             .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
             .commandBufferCount = 1,
         };
 
         if (vkAllocateCommandBuffers(m_Device->GetDevice(), &allocInfo, &m_CommandBuffer) != VK_SUCCESS) {
             m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to allocate Vulkan command buffer.");
-            vkDestroyCommandPool(m_Device->GetDevice(), m_CommandPool, nullptr);
             return Result::Failed;
         }
 

@@ -30,6 +30,8 @@
 
 #include "RefCounted.h"
 
+#undef CreateWindow // Windows.h defines a macro for CreateWindow, which conflicts with our Device::CreateWindow method
+
 namespace RealRHI {
     class Device {
     public:

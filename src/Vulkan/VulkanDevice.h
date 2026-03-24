@@ -7,7 +7,7 @@
 #include <array>
 #include <optional>
 
-#undef CreateWindow
+#undef CreateWindow // Windows.h defines a macro for CreateWindow, which conflicts with our Device::CreateWindow method
 
 namespace RealRHI {
 	struct QueueFamilyIndices {
@@ -34,6 +34,7 @@ namespace RealRHI {
 		VkQueue GetPresentQueue() const { return m_PresentQueue; }
 		uint32_t GetGraphicsQueueFamily() const { return m_GraphicsQueueFamily; }
 		uint32_t GetPresentQueueFamily() const { return m_PresentQueueFamily; }
+		VkCommandPool GetCommandPool() const { return m_CommandPool; }
 
 		//Allocator
 		VmaAllocator GetAllocator() const { return m_Allocator; }
@@ -61,6 +62,7 @@ namespace RealRHI {
 		bool CreateLogicalDevice();
 		QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
 		bool CreateAllocator();
+		Result CreateCommandPool();
 
 		static VKAPI_ATTR VkBool32 VulkanDebugCallback(
 			VkDebugUtilsMessageSeverityFlagBitsEXT severity,
@@ -76,6 +78,9 @@ namespace RealRHI {
 			uint32_t m_PresentQueueFamily;
 			VkQueue m_GraphicsQueue;
 			VkQueue m_PresentQueue;
+
+			// Command pool
+			VkCommandPool m_CommandPool;
 
 			VmaAllocator m_Allocator;
 

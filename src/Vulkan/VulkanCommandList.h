@@ -1,7 +1,6 @@
 #pragma once
 #include "CommandList.h"
 #include "VulkanDevice.h"
-#include "Result.h"
 
 #include <Vulkan/vulkan.h>
 
@@ -36,7 +35,6 @@ namespace RealRHI {
 	private:
 		const VulkanDevice* m_Device;
 
-		VkCommandPool m_CommandPool;
 		VkCommandBuffer m_CommandBuffer;
 	};
 }

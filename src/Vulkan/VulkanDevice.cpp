@@ -13,6 +13,10 @@
 
 namespace RealRHI {
     VulkanDevice::~VulkanDevice() {
+		if (m_CommandPool != VK_NULL_HANDLE) {
+            vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
+        }
+
         if (m_Device != VK_NULL_HANDLE) {
             vmaDestroyAllocator(m_Allocator);
             vkDestroyDevice(m_Device, nullptr);
@@ -72,6 +76,10 @@ namespace RealRHI {
 
         if (!CreateAllocator()) {
 			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan memory allocator.");
+            return Result::Failed;
+        }
+
+        if (CreateCommandPool() != Result::Success) {
             return Result::Failed;
         }
 
@@ -442,6 +450,21 @@ namespace RealRHI {
         };
 
         return vmaCreateAllocator(&allocatorCI, &m_Allocator) == VK_SUCCESS;
+    }
+
+    Result VulkanDevice::CreateCommandPool() {
+        VkCommandPoolCreateInfo poolInfo{
+            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+            .queueFamilyIndex = m_GraphicsQueueFamily,
+        };
+
+        if (vkCreateCommandPool(m_Device, &poolInfo, nullptr, &m_CommandPool) != VK_SUCCESS) {
+            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan command pool.");
+            return Result::Failed;
+        }
+
+		return Result::Success;
     }
 
     VKAPI_ATTR VkBool32 VulkanDevice::VulkanDebugCallback(
