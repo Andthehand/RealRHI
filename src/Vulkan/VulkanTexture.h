@@ -30,8 +30,10 @@ namespace RealRHI {
 	protected:
 		friend class VulkanSwapchain;
 		friend class VulkanTextureView;
+		friend class VulkanCommandList;
 		VkImage GetImage() const { return m_Image; }
 		VkFormat GetFormat() const { return m_Format; }
+		VkSampler GetSampler() const { return m_Sampler; }
 
 		static Result CreateFromSwapChain(const VulkanDevice* device, VkFormat format, VkImage image, Ref<VulkanTexture>& outTexture);
 		Result InitSwapChainTexture(VkFormat format, VkImage image);

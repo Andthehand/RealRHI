@@ -3,6 +3,7 @@
 #include "VulkanTextureView.h"
 #include "VulkanPipeline.h"
 #include "VulkanBuffer.h"
+#include "VulkanTexture.h"
 
 #include "VulkanConvertions.h"
 
@@ -135,7 +136,107 @@ namespace RealRHI {
     }
 
     void VulkanCommandList::BindPipeline(Pipeline* pipeline) {
-		vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, static_cast<VulkanPipeline*>(pipeline)->GetPipeline());
+		m_BoundPipeline = static_cast<VulkanPipeline*>(pipeline);
+		vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_BoundPipeline->GetPipeline());
+
+		const auto& descriptorSets = m_BoundPipeline->GetDescriptorSets();
+		if (!descriptorSets.empty()) {
+			vkCmdBindDescriptorSets(
+				m_CommandBuffer,
+				VK_PIPELINE_BIND_POINT_GRAPHICS,
+				m_BoundPipeline->GetPipelineLayout(),
+				0,
+				static_cast<uint32_t>(descriptorSets.size()),
+				descriptorSets.data(),
+				0,
+				nullptr);
+		}
+    }
+
+    Result VulkanCommandList::BindBuffer(const char* name, Buffer* buffer, uint64_t offset, uint64_t range) {
+		if (!m_BoundPipeline || !buffer) {
+			return Result::Failed;
+		}
+
+		const auto* reflectedBinding = m_BoundPipeline->FindBinding(name);
+		if (!reflectedBinding) {
+			return Result::Failed;
+		}
+
+		if (reflectedBinding->vkType != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER &&
+			reflectedBinding->vkType != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) {
+			return Result::Failed;
+		}
+
+		const auto& descriptorSets = m_BoundPipeline->GetDescriptorSets();
+		if (reflectedBinding->setIndex >= descriptorSets.size()) {
+			return Result::Failed;
+		}
+
+		VkDescriptorBufferInfo bufferInfo{
+			.buffer = static_cast<VulkanBuffer*>(buffer)->GetBuffer(),
+			.offset = offset,
+			.range = range
+		};
+
+		VkWriteDescriptorSet write{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.dstSet = descriptorSets[reflectedBinding->setIndex],
+			.dstBinding = reflectedBinding->binding,
+			.dstArrayElement = 0,
+			.descriptorCount = 1,
+			.descriptorType = reflectedBinding->vkType,
+			.pBufferInfo = &bufferInfo
+		};
+
+		vkUpdateDescriptorSets(m_Device->GetDevice(), 1, &write, 0, nullptr);
+		return Result::Success;
+    }
+
+    Result VulkanCommandList::BindTexture(const char* name, TextureView* textureView) {
+		if (!m_BoundPipeline || !textureView) {
+			return Result::Failed;
+		}
+
+		const auto* reflectedBinding = m_BoundPipeline->FindBinding(name);
+		if (!reflectedBinding) {
+			return Result::Failed;
+		}
+
+		if (reflectedBinding->vkType != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER &&
+			reflectedBinding->vkType != VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE &&
+			reflectedBinding->vkType != VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
+			return Result::Failed;
+		}
+
+		const auto& descriptorSets = m_BoundPipeline->GetDescriptorSets();
+		if (reflectedBinding->setIndex >= descriptorSets.size()) {
+			return Result::Failed;
+		}
+
+		VulkanTextureView* vkTextureView = static_cast<VulkanTextureView*>(textureView);
+		const VulkanTexture* texture = vkTextureView->m_Texture;
+
+		VkDescriptorImageInfo imageInfo{
+			.sampler = reflectedBinding->vkType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ? texture->GetSampler() : VK_NULL_HANDLE,
+			.imageView = vkTextureView->GetImageView(),
+			.imageLayout = reflectedBinding->vkType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+				? VK_IMAGE_LAYOUT_GENERAL
+				: VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+		};
+
+		VkWriteDescriptorSet write{
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.dstSet = descriptorSets[reflectedBinding->setIndex],
+			.dstBinding = reflectedBinding->binding,
+			.dstArrayElement = 0,
+			.descriptorCount = 1,
+			.descriptorType = reflectedBinding->vkType,
+			.pImageInfo = &imageInfo
+		};
+
+		vkUpdateDescriptorSets(m_Device->GetDevice(), 1, &write, 0, nullptr);
+		return Result::Success;
     }
 
     void VulkanCommandList::BindVertexBuffer(Buffer* vertexBuffer) {

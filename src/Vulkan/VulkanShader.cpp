@@ -18,12 +18,48 @@ namespace RealRHI {
 			return static_cast<uint32_t>(GetSet(context, setIndex).bindings.size());
 		}
 
+		std::string JoinBindingName(const std::string& prefix, const char* name) {
+			if (!name || !name[0]) {
+				return prefix;
+			}
+			if (prefix.empty()) {
+				return name;
+			}
+			return prefix + "." + name;
+		}
+
+		void CollectDescriptorBindingNames(
+			slang::TypeLayoutReflection* typeLayout,
+			const std::string& prefix,
+			std::vector<std::string>& outNames) {
+			const uint32_t fieldCount = static_cast<uint32_t>(typeLayout->getFieldCount());
+			for (uint32_t fieldIndex = 0; fieldIndex < fieldCount; ++fieldIndex) {
+				auto* fieldLayout = typeLayout->getFieldByIndex(fieldIndex);
+				auto* fieldTypeLayout = fieldLayout->getTypeLayout();
+				const std::string fieldName = JoinBindingName(prefix, fieldLayout->getName());
+
+				const int rangeCount = fieldTypeLayout->getDescriptorSetDescriptorRangeCount(0);
+				for (int rangeIndex = 0; rangeIndex < rangeCount; ++rangeIndex) {
+					const slang::BindingType bindingType =
+						fieldTypeLayout->getDescriptorSetDescriptorRangeType(0, rangeIndex);
+					if (bindingType == slang::BindingType::PushConstant) {
+						continue;
+					}
+					outNames.push_back(fieldName);
+				}
+			}
+		}
+
 		void AddDescriptorRanges(
 			slang::TypeLayoutReflection* typeLayout,
 			uint32_t setIndex,
-			DescriptorSetBuilderContext& context) {
+			DescriptorSetBuilderContext& context,
+			const std::string& prefix) {
 			constexpr int relativeSetIndex = 0;
 			const int rangeCount = typeLayout->getDescriptorSetDescriptorRangeCount(relativeSetIndex);
+			std::vector<std::string> descriptorNames;
+			CollectDescriptorBindingNames(typeLayout, prefix, descriptorNames);
+			size_t descriptorNameIndex = 0;
 
 			for (int rangeIndex = 0; rangeIndex < rangeCount; ++rangeIndex) {
 				const slang::BindingType bindingType =
@@ -33,6 +69,7 @@ namespace RealRHI {
 				}
 
 				GetSet(context, setIndex).bindings.push_back(DescriptorBinding{
+					.name = descriptorNameIndex < descriptorNames.size() ? descriptorNames[descriptorNameIndex++] : std::string{},
 					.binding = GetNextBindingIndex(context, setIndex),
 					.vkType = Utils::SlangBindingTypeToVkDescriptorType(bindingType),
 					.descriptorCount = static_cast<uint32_t>(
@@ -44,7 +81,8 @@ namespace RealRHI {
 		void AddRangesForParameterBlockElement(
 			slang::TypeLayoutReflection* elementTypeLayout,
 			uint32_t setIndex,
-			DescriptorSetBuilderContext& context);
+			DescriptorSetBuilderContext& context,
+			const std::string& prefix);
 
 		void CompactDescriptorSets(DescriptorsDesc& descriptors) {
 			std::vector<DescriptorSetLayoutDesc> compactedSets;
@@ -65,7 +103,8 @@ namespace RealRHI {
 
 		void AddDescriptorSetForParameterBlock(
 			slang::TypeLayoutReflection* parameterBlockTypeLayout,
-			DescriptorSetBuilderContext& context);
+			DescriptorSetBuilderContext& context,
+			const std::string& prefix);
 
 		void AddProgramParameters(
 			slang::ProgramLayout* programLayout,
@@ -75,25 +114,27 @@ namespace RealRHI {
 			for (uint32_t parameterIndex = 0; parameterIndex < parameterCount; ++parameterIndex) {
 				auto* parameterLayout = programLayout->getParameterByIndex(parameterIndex);
 				auto* parameterTypeLayout = parameterLayout->getTypeLayout();
+				const std::string parameterName = parameterLayout->getName();
 
 				if (parameterTypeLayout->getKind() == slang::TypeReflection::Kind::ParameterBlock) {
-					AddDescriptorSetForParameterBlock(parameterTypeLayout, context);
+					AddDescriptorSetForParameterBlock(parameterTypeLayout, context, parameterName);
 					continue;
 				}
 
-				AddRangesForParameterBlockElement(parameterTypeLayout, defaultSetIndex, context);
+				AddRangesForParameterBlockElement(parameterTypeLayout, defaultSetIndex, context, parameterName);
 			}
 		}
 
 		void AddDescriptorSetForParameterBlock(
 			slang::TypeLayoutReflection* parameterBlockTypeLayout,
-			DescriptorSetBuilderContext& context) {
+			DescriptorSetBuilderContext& context,
+			const std::string& prefix) {
 			const uint32_t setIndex = static_cast<uint32_t>(context.descriptors.sets.size());
 			context.descriptors.sets.push_back(DescriptorSetLayoutDesc{
 				.setIndex = setIndex,
 			});
 
-			AddRangesForParameterBlockElement(parameterBlockTypeLayout->getElementTypeLayout(), setIndex, context);
+			AddRangesForParameterBlockElement(parameterBlockTypeLayout->getElementTypeLayout(), setIndex, context, prefix);
 		}
 
 		void WarnIfPushConstantsIgnored(
@@ -117,26 +158,39 @@ namespace RealRHI {
 		void AddSubObjectRanges(
 			slang::TypeLayoutReflection* typeLayout,
 			uint32_t setIndex,
-			DescriptorSetBuilderContext& context) {
-			const int subObjectRangeCount = typeLayout->getSubObjectRangeCount();
-			for (int subObjectRangeIndex = 0; subObjectRangeIndex < subObjectRangeCount; ++subObjectRangeIndex) {
-				const int bindingRangeIndex = typeLayout->getSubObjectRangeBindingRangeIndex(subObjectRangeIndex);
-				const slang::BindingType bindingType = typeLayout->getBindingRangeType(bindingRangeIndex);
-				slang::TypeLayoutReflection* leafTypeLayout =
-					typeLayout->getBindingRangeLeafTypeLayout(bindingRangeIndex);
+			DescriptorSetBuilderContext& context,
+			const std::string& prefix) {
+			const uint32_t fieldCount = static_cast<uint32_t>(typeLayout->getFieldCount());
+			for (uint32_t fieldIndex = 0; fieldIndex < fieldCount; ++fieldIndex) {
+				auto* fieldLayout = typeLayout->getFieldByIndex(fieldIndex);
+				auto* fieldTypeLayout = fieldLayout->getTypeLayout();
+				const std::string fieldName = JoinBindingName(prefix, fieldLayout->getName());
 
-				switch (bindingType) {
-					case slang::BindingType::ParameterBlock:
-						AddDescriptorSetForParameterBlock(leafTypeLayout, context);
-						break;
-					case slang::BindingType::ConstantBuffer:
-						AddRangesForParameterBlockElement(leafTypeLayout->getElementTypeLayout(), setIndex, context);
-						break;
-					case slang::BindingType::PushConstant:
-						WarnIfPushConstantsIgnored(leafTypeLayout, context.device);
+				switch (fieldTypeLayout->getKind()) {
+					case slang::TypeReflection::Kind::ParameterBlock:
+						AddDescriptorSetForParameterBlock(fieldTypeLayout, context, fieldName);
 						break;
 					default:
 						break;
+				}
+
+				const int subObjectRangeCount = fieldTypeLayout->getSubObjectRangeCount();
+				for (int subObjectRangeIndex = 0; subObjectRangeIndex < subObjectRangeCount; ++subObjectRangeIndex) {
+					const int bindingRangeIndex = fieldTypeLayout->getSubObjectRangeBindingRangeIndex(subObjectRangeIndex);
+					const slang::BindingType bindingType = fieldTypeLayout->getBindingRangeType(bindingRangeIndex);
+					slang::TypeLayoutReflection* leafTypeLayout =
+						fieldTypeLayout->getBindingRangeLeafTypeLayout(bindingRangeIndex);
+
+					switch (bindingType) {
+						case slang::BindingType::ConstantBuffer:
+							AddRangesForParameterBlockElement(leafTypeLayout->getElementTypeLayout(), setIndex, context, fieldName);
+							break;
+						case slang::BindingType::PushConstant:
+							WarnIfPushConstantsIgnored(leafTypeLayout, context.device);
+							break;
+						default:
+							break;
+					}
 				}
 			}
 		}
@@ -144,17 +198,19 @@ namespace RealRHI {
 		void AddRangesForParameterBlockElement(
 			slang::TypeLayoutReflection* elementTypeLayout,
 			uint32_t setIndex,
-			DescriptorSetBuilderContext& context) {
+			DescriptorSetBuilderContext& context,
+			const std::string& prefix) {
 			if (elementTypeLayout->getSize() > 0) {
 				GetSet(context, setIndex).bindings.push_back(DescriptorBinding{
+					.name = prefix,
 					.binding = GetNextBindingIndex(context, setIndex),
 					.vkType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 					.descriptorCount = 1
 				});
 			}
 
-			AddDescriptorRanges(elementTypeLayout, setIndex, context);
-			AddSubObjectRanges(elementTypeLayout, setIndex, context);
+			AddDescriptorRanges(elementTypeLayout, setIndex, context, prefix);
+			AddSubObjectRanges(elementTypeLayout, setIndex, context, prefix);
 		}
 	}
 
@@ -312,7 +368,7 @@ namespace RealRHI {
 		const uint32_t entryPointCount = programLayout->getEntryPointCount();
 		for (uint32_t i = 0; i < entryPointCount; ++i) {
 			auto* entryPointLayout = programLayout->getEntryPointByIndex(i);
-			AddRangesForParameterBlockElement(entryPointLayout->getTypeLayout(), defaultSetIndex, context);
+			AddRangesForParameterBlockElement(entryPointLayout->getTypeLayout(), defaultSetIndex, context, entryPointLayout->getName());
 		}
 
 		CompactDescriptorSets(result);

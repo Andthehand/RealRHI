@@ -5,6 +5,8 @@
 #include <Vulkan/vulkan.h>
 
 namespace RealRHI {
+	class VulkanPipeline;
+
 	class VulkanCommandList : public CommandList {
 	public:
 		VulkanCommandList(const VulkanDevice* device);
@@ -23,6 +25,8 @@ namespace RealRHI {
 		void SetScissor(const Rect& rect);
 
 		void BindPipeline(Pipeline* pipeline) override;
+		Result BindBuffer(const char* name, Buffer* buffer, uint64_t offset = 0, uint64_t range = UINT64_MAX) override;
+		Result BindTexture(const char* name, TextureView* textureView) override;
 		void BindVertexBuffer(Buffer* vertexBuffer) override;
 		void BindIndexBuffer(Buffer* indexBuffer) override;
 
@@ -34,6 +38,7 @@ namespace RealRHI {
 		VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
 	private:
 		const VulkanDevice* m_Device;
+		VulkanPipeline* m_BoundPipeline = nullptr;
 
 		VkCommandBuffer m_CommandBuffer;
 	};

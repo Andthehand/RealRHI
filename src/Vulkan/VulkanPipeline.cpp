@@ -138,6 +138,7 @@ namespace RealRHI {
         if (CreateDescriptorSetLayout(descriptorsDesc) != Result::Success) {
             return Result::Failed;
 		}
+		BuildBindingLookup(descriptorsDesc);
 
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -242,5 +243,33 @@ namespace RealRHI {
         }
 
         return Result::Success;
+    }
+
+    void VulkanPipeline::BuildBindingLookup(const DescriptorsDesc& desc) {
+        m_BindingLookup.clear();
+
+        for (const auto& set : desc.sets) {
+            for (const auto& binding : set.bindings) {
+                if (binding.name.empty()) {
+                    continue;
+                }
+
+                m_BindingLookup[binding.name] = ReflectedBindingInfo{
+                    .setIndex = set.setIndex,
+                    .binding = binding.binding,
+                    .vkType = binding.vkType,
+                    .descriptorCount = binding.descriptorCount,
+                };
+            }
+        }
+    }
+
+    const VulkanPipeline::ReflectedBindingInfo* VulkanPipeline::FindBinding(const char* name) const {
+        auto it = m_BindingLookup.find(name);
+        if (it == m_BindingLookup.end()) {
+            return nullptr;
+        }
+
+        return &it->second;
     }
 }
