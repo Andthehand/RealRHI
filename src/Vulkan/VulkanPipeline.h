@@ -2,6 +2,8 @@
 #include "Pipeline.h"
 #include "PipelineDesc.h"
 
+#include "DescriptorsDesc.h"
+
 #include "VulkanDevice.h"
 #include "Result.h"
 
@@ -15,14 +17,18 @@ namespace RealRHI {
 
 		static Result Create(const VulkanDevice* device, const PipelineDesc& desc, Ref<VulkanPipeline>& outPipeline);
 		Result Init(const PipelineDesc& desc);
-
 	protected:
 		friend class VulkanCommandList;
 		VkPipeline GetPipeline() const { return m_Pipeline; }
+	private:
+		Result CreateDescriptorSetLayout(const DescriptorsDesc& desc);
 	private:
 		const VulkanDevice* m_Device = nullptr;
 
 		VkPipelineLayout m_PipelineLayout = VK_NULL_HANDLE;
 		VkPipeline m_Pipeline = VK_NULL_HANDLE;
+
+		std::vector<VkDescriptorSetLayout> m_DescriptorSetLayouts;
+		std::vector<VkDescriptorSet> m_DescriptorSets;
 	};
 }

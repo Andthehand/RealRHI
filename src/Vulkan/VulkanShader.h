@@ -39,7 +39,7 @@ namespace RealRHI {
 
 		static Slang::ComPtr<slang::IComponentType> LinkProgram(
 			const VulkanDevice* device,
-			slang::IModule* module,
+			slang::IComponentType* composed,
 			Slang::ComPtr<slang::IBlob>& diagnostics);
 
 		static VkShaderModule CreateVkShaderModule(

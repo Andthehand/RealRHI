@@ -1,4 +1,5 @@
 #pragma once
+#include "DescriptorsDesc.h"
 #include "TextureFormat.h"
 #include "TextureDesc.h"
 #include "PipelineDesc.h"
@@ -8,6 +9,17 @@
 #include <Vulkan/vulkan.h>
 
 namespace RealRHI::Utils {
+    // ---------------------- DescriptoDesc ----------------
+    constexpr VkDescriptorType DescriptorTypeToVkDescriptorType(DescriptorType type) {
+        switch (type) {
+            case RealRHI::DescriptorType::UniformBuffer: return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            case RealRHI::DescriptorType::StorageBuffer: return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            case RealRHI::DescriptorType::SampledImage: return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+            default: return VK_DESCRIPTOR_TYPE_MAX_ENUM;
+        }
+	}
+    // ---------------------- DescriptoDesc ----------------
+
     // ---------------------- ShaderStage ------------------
     constexpr VkShaderStageFlagBits SlangStageToVkShaderStage(SlangStage stage) {
         switch (stage) {

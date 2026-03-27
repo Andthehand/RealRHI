@@ -34,9 +34,12 @@ namespace RealRHI {
 		VkQueue GetPresentQueue() const { return m_PresentQueue; }
 		uint32_t GetGraphicsQueueFamily() const { return m_GraphicsQueueFamily; }
 		uint32_t GetPresentQueueFamily() const { return m_PresentQueueFamily; }
-		VkCommandPool GetCommandPool() const { return m_CommandPool; }
 
-		//Allocator
+		// Pools
+		VkCommandPool GetCommandPool() const { return m_CommandPool; }
+		VkDescriptorPool GetDescriptorPool() const { return m_DescriptorPool; }
+
+		// Allocator
 		VmaAllocator GetAllocator() const { return m_Allocator; }
 
 		std::filesystem::path GetShaderDirectory() const override { return m_ShaderDirectory; }
@@ -63,6 +66,7 @@ namespace RealRHI {
 		QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
 		bool CreateAllocator();
 		Result CreateCommandPool();
+		Result CreateDescriptorPool();
 
 		static VKAPI_ATTR VkBool32 VulkanDebugCallback(
 			VkDebugUtilsMessageSeverityFlagBitsEXT severity,
@@ -79,8 +83,9 @@ namespace RealRHI {
 			VkQueue m_GraphicsQueue;
 			VkQueue m_PresentQueue;
 
-			// Command pool
+			// Pools
 			VkCommandPool m_CommandPool;
+			VkDescriptorPool m_DescriptorPool;
 
 			VmaAllocator m_Allocator;
 

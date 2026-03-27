@@ -39,13 +39,16 @@ namespace RealRHI {
 		m_BufferLayout = ReflectLayout(m_Device, composedProgram, m_EntryPoints, diagnostics);
 
 		// 4. Link program
-		auto linkedProgram = LinkProgram(m_Device, m_SlangModule, diagnostics);
+		auto linkedProgram = LinkProgram(m_Device, composedProgram, diagnostics);
 		if (!linkedProgram) return Result::Failed;
+
+		linkedProgram->getLayout()->toJson(diagnostics.writeRef());
+		CheckSlangDiagnostics(m_Device, diagnostics);
 
 		// 5. Create Vulkan module
 		m_ShaderModule = CreateVkShaderModule(m_Device, linkedProgram);
 		if (!m_ShaderModule) return Result::Failed;
-
+		
 		return Result::Success;
 	}
 
@@ -72,13 +75,9 @@ namespace RealRHI {
 			slang::IModule* module,
 			Slang::ComPtr<slang::IBlob>& diagnostics) {
 		const uint32_t entryCount = module->getDefinedEntryPointCount();
-
 		std::vector<Slang::ComPtr<slang::IEntryPoint>> entryPoints(entryCount);
-
 		for (uint32_t i = 0; i < entryCount; ++i) {
-			module->getDefinedEntryPoint(
-				i,
-				entryPoints[i].writeRef());
+			module->getDefinedEntryPoint(i, entryPoints[i].writeRef());
 		}
 
 		Slang::ComPtr<slang::IComponentType> composedProgram;
@@ -135,11 +134,11 @@ namespace RealRHI {
 	Slang::ComPtr<slang::IComponentType>
 		VulkanShader::LinkProgram(
 			const VulkanDevice* device,
-			slang::IModule* module,
+			slang::IComponentType* composed,
 			Slang::ComPtr<slang::IBlob>& diagnostics) {
 		Slang::ComPtr<slang::IComponentType> linkedProgram;
 
-		module->link(
+		composed->link(
 			linkedProgram.writeRef(),
 			diagnostics.writeRef()
 		);
@@ -221,12 +220,11 @@ namespace RealRHI {
 				std::to_array<slang::TargetDesc>({
 					slang::TargetDesc{
 						.format{SLANG_SPIRV}, // Compile to SPIR-V
-						.profile{s_SlangGlobalSession->findProfile("spirv_1_4")}
+						.profile{s_SlangGlobalSession->findProfile("spirv_1_5")}
 					}
 				})
 			};
 
-			SlangDebugInfoLevel debugInfoLevel = isDebugEnabled ? SLANG_DEBUG_INFO_LEVEL_STANDARD : SLANG_DEBUG_INFO_LEVEL_NONE;
 			std::array<slang::CompilerOptionEntry, 2> slangOptions{
 				std::to_array<slang::CompilerOptionEntry>({
 					slang::CompilerOptionEntry{
@@ -235,10 +233,12 @@ namespace RealRHI {
 					},
 					slang::CompilerOptionEntry{
 						slang::CompilerOptionName::DebugInformation,
-						slang::CompilerOptionValue{slang::CompilerOptionValueKind::Int, (int)debugInfoLevel}
+						slang::CompilerOptionValue{slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_STANDARD}
 					}
 				})
 			};
+
+			uint32_t slangOptionsCount = isDebugEnabled ? 2 : 1;
 			slang::SessionDesc slangSessionDesc{
 				.targets{slangTargets.data()},
 				.targetCount{SlangInt(slangTargets.size())},
@@ -246,7 +246,7 @@ namespace RealRHI {
 				.searchPaths = &shaderDirectory,
 				.searchPathCount = 1,
 				.compilerOptionEntries{slangOptions.data()},
-				.compilerOptionEntryCount{uint32_t(slangOptions.size())}
+				.compilerOptionEntryCount{slangOptionsCount}
 			};
 			s_SlangGlobalSession->createSession(slangSessionDesc, s_SlangSession.writeRef());
 		}

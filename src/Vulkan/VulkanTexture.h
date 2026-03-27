@@ -35,6 +35,8 @@ namespace RealRHI {
 
 		static Result CreateFromSwapChain(const VulkanDevice* device, VkFormat format, VkImage image, Ref<VulkanTexture>& outTexture);
 		Result InitSwapChainTexture(VkFormat format, VkImage image);
+
+		Result CreateSampler(); // TODO: Add sampler desc
 	private:
 		const VulkanDevice* m_Device = nullptr;
 		VkImage m_Image = VK_NULL_HANDLE;
@@ -50,6 +52,7 @@ namespace RealRHI {
 		
 		// This need to be at the end because of weird c++ rules
 		// https://stackoverflow.com/questions/6308915/member-fields-order-of-construction
-		VulkanTextureView m_TextureView; 
+		VulkanTextureView m_TextureView;
+		VkSampler m_Sampler = VK_NULL_HANDLE;
 	};
 }

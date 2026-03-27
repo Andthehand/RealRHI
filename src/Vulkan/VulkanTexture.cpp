@@ -11,6 +11,7 @@ namespace RealRHI {
     VulkanTexture::~VulkanTexture() {
         if (!m_IsExternal) {
             vmaDestroyImage(m_Device->GetAllocator(), m_Image, m_Allocation);
+			vkDestroySampler(m_Device->GetDevice(), m_Sampler, nullptr);
         }
     }
 
@@ -55,6 +56,10 @@ namespace RealRHI {
 
         if (vmaCreateImage(m_Device->GetAllocator(), &imageInfo, &allocInfo, &m_Image, &m_Allocation, nullptr) != VK_SUCCESS) {
             m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan image.");
+            return Result::Failed;
+        }
+
+        if (CreateSampler() == Result::Failed) {
             return Result::Failed;
         }
 
@@ -155,6 +160,34 @@ namespace RealRHI {
 		m_Image = image;
 
         m_TextureView.Init(m_Device, TextureViewDesc{ .texture = this });
+
+        return Result::Success;
+    }
+
+    Result VulkanTexture::CreateSampler() {
+        VkSamplerCreateInfo samplerInfo{
+            .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+            .magFilter = VK_FILTER_LINEAR,
+            .minFilter = VK_FILTER_LINEAR,
+            .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+            .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+            .mipLodBias = 0.0f,
+            .anisotropyEnable = VK_FALSE,
+            .maxAnisotropy = 1.0f,
+            .compareEnable = VK_FALSE,
+            .compareOp = VK_COMPARE_OP_ALWAYS,
+            .minLod = 0.0f,
+            .maxLod = VK_LOD_CLAMP_NONE,
+            .borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+            .unnormalizedCoordinates = VK_FALSE,
+        };
+
+        if (vkCreateSampler(m_Device->GetDevice(), &samplerInfo, nullptr, &m_Sampler) != VK_SUCCESS) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan sampler.");
+            return Result::Failed;
+        }
 
         return Result::Success;
     }

@@ -13,6 +13,10 @@
 
 namespace RealRHI {
     VulkanDevice::~VulkanDevice() {
+        if (m_DescriptorPool != VK_NULL_HANDLE) {
+			vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
+        }
+
 		if (m_CommandPool != VK_NULL_HANDLE) {
             vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
         }
@@ -80,6 +84,10 @@ namespace RealRHI {
         }
 
         if (CreateCommandPool() != Result::Success) {
+            return Result::Failed;
+        }
+
+		if (CreateDescriptorPool() != Result::Success) {
             return Result::Failed;
         }
 
@@ -465,6 +473,27 @@ namespace RealRHI {
         }
 
 		return Result::Success;
+    }
+
+    Result VulkanDevice::CreateDescriptorPool() {
+        // Mainly taken from https://github.com/shader-slang/slang-rhi/blob/99f18183f41c3aa25e3038a532c5f98d89c16c1c/src/vulkan/vk-descriptor-allocator.cpp#L8
+        std::vector<VkDescriptorPoolSize> poolSizes;
+        poolSizes.push_back(VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1024 });
+
+        VkDescriptorPoolCreateInfo poolInfo{
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+            .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+            .maxSets = 4096,
+            .poolSizeCount = (uint32_t)poolSizes.size(),
+            .pPoolSizes = poolSizes.data(),
+        };
+
+        if (vkCreateDescriptorPool(m_Device, &poolInfo, nullptr, &m_DescriptorPool) != VK_SUCCESS) {
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan descriptor pool.");
+			return Result::Failed;
+        }
+
+        return Result::Success;
     }
 
     VKAPI_ATTR VkBool32 VulkanDevice::VulkanDebugCallback(

@@ -10,6 +10,10 @@ namespace RealRHI {
     VulkanPipeline::~VulkanPipeline() {
         vkDestroyPipeline(m_Device->GetDevice(), m_Pipeline, nullptr);
         vkDestroyPipelineLayout(m_Device->GetDevice(), m_PipelineLayout, nullptr);
+
+		for (auto layout : m_DescriptorSetLayouts) {
+            vkDestroyDescriptorSetLayout(m_Device->GetDevice(), layout, nullptr);
+        }
     }
 
     Result VulkanPipeline::Create(const VulkanDevice* device, const PipelineDesc& desc, Ref<VulkanPipeline>& outPipeline) {
@@ -129,8 +133,16 @@ namespace RealRHI {
             .pAttachments = &colorBlendAttachment,
         };
 
+		DescriptorsDesc descriptorsDesc{}; // TODO: Get from shader reflection data
+
+        if (CreateDescriptorSetLayout(descriptorsDesc) != Result::Success) {
+            return Result::Failed;
+		}
+
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+			.setLayoutCount = static_cast<uint32_t>(m_DescriptorSetLayouts.size()),
+			.pSetLayouts = m_DescriptorSetLayouts.data(),
         };
 
         if (vkCreatePipelineLayout(m_Device->GetDevice(), &pipelineLayoutInfo, nullptr, &m_PipelineLayout) != VK_SUCCESS) {
@@ -170,6 +182,57 @@ namespace RealRHI {
 
         if (vkCreateGraphicsPipelines(m_Device->GetDevice(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_Pipeline) != VK_SUCCESS) {
             m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan graphics pipelines.");
+            return Result::Failed;
+        }
+
+        return Result::Success;
+    }
+
+    Result VulkanPipeline::CreateDescriptorSetLayout(const DescriptorsDesc& desc) {
+		const uint32_t setCount = desc.sets.size();
+        m_DescriptorSetLayouts.resize(setCount);
+		m_DescriptorSets.resize(setCount);
+
+		// This is assuming that the descriptor sets are tightly packed (i.e. set 0, set 1, etc.) 
+        // This is the same with bindings (e.g. binding 0, binding 1, etc.).
+        for (uint32_t i = 0; i < setCount; i++) { //TODO: Seperate into different function calls to cleanup
+			const auto& set = desc.sets[i];
+            uint32_t descriptorCount = set.bindings.size();
+            std::vector<VkDescriptorSetLayoutBinding> layoutBindings(descriptorCount);
+
+            for (uint32_t j = 0; j < descriptorCount; j++) {
+                const auto& binding = set.bindings[j];
+
+                layoutBindings[j] = VkDescriptorSetLayoutBinding{
+                    .binding = j,
+                    .descriptorType = Utils::DescriptorTypeToVkDescriptorType(binding.type),
+                    .descriptorCount = binding.count,
+                    .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS // From research doesn't seem to harm performance
+                };
+            }
+
+            VkDescriptorSetLayoutCreateInfo layoutInfo{
+                .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                .bindingCount = descriptorCount,
+				.pBindings = layoutBindings.data(),
+            };
+
+            if (vkCreateDescriptorSetLayout(m_Device->GetDevice(), &layoutInfo, nullptr, &m_DescriptorSetLayouts[i]) != VK_SUCCESS) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan descriptor set layout.");
+                return Result::Failed;
+            }
+        }
+
+		// Create descriptor sets
+        VkDescriptorSetAllocateInfo allocInfo{
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .descriptorPool = m_Device->GetDescriptorPool(),
+            .descriptorSetCount = setCount,
+            .pSetLayouts = m_DescriptorSetLayouts.data(),
+        };
+
+        if (vkAllocateDescriptorSets(m_Device->GetDevice(), &allocInfo, m_DescriptorSets.data()) != VK_SUCCESS) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to allocate Vulkan descriptor sets.");
             return Result::Failed;
         }
 
