@@ -9,16 +9,27 @@
 #include <Vulkan/vulkan.h>
 
 namespace RealRHI::Utils {
-    // ---------------------- DescriptoDesc ----------------
-    constexpr VkDescriptorType DescriptorTypeToVkDescriptorType(DescriptorType type) {
-        switch (type) {
-            case RealRHI::DescriptorType::UniformBuffer: return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            case RealRHI::DescriptorType::StorageBuffer: return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            case RealRHI::DescriptorType::SampledImage: return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-            default: return VK_DESCRIPTOR_TYPE_MAX_ENUM;
+    // ---------------------- DescriptorDesc ----------------
+    // Maps a slang::BindingType directly to VkDescriptorType.
+    // PushConstant is intentionally omitted — only descriptor sets are supported.
+    inline VkDescriptorType SlangBindingTypeToVkDescriptorType(slang::BindingType bindingType) {
+        switch (bindingType) {
+            case slang::BindingType::Sampler:                         return VK_DESCRIPTOR_TYPE_SAMPLER;
+            case slang::BindingType::Texture:                         return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+            case slang::BindingType::CombinedTextureSampler:          return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            case slang::BindingType::MutableTexture:                  return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            case slang::BindingType::TypedBuffer:                     return VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
+            case slang::BindingType::MutableTypedBuffer:              return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
+            case slang::BindingType::RawBuffer:                       return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            case slang::BindingType::MutableRawBuffer:                return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            case slang::BindingType::ConstantBuffer:                  return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            case slang::BindingType::RayTracingAccelerationStructure: return VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+            default:
+                assert(!"Unmapped slang::BindingType — update SlangBindingTypeToVkDescriptorType");
+                return VK_DESCRIPTOR_TYPE_MAX_ENUM;
         }
-	}
-    // ---------------------- DescriptoDesc ----------------
+    }
+    // ---------------------- DescriptorDesc ----------------
 
     // ---------------------- ShaderStage ------------------
     constexpr VkShaderStageFlagBits SlangStageToVkShaderStage(SlangStage stage) {

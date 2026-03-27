@@ -1,23 +1,21 @@
 #pragma once
 #include <vector>
+#include <Vulkan/vulkan.h>
 
 namespace RealRHI {
-	enum class DescriptorType {
-		UniformBuffer, // constantBuffer
-		StorageBuffer, // RWStructuredBuffer
-		SampledImage, // Sampler2D
-	};
-
+	// One reflected binding entry within a Vulkan descriptor set.
 	struct DescriptorBinding {
-		DescriptorType type;
-		uint32_t count;
+		uint32_t binding = 0;
+		VkDescriptorType vkType = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+		uint32_t descriptorCount = 1;
 	};
 
-	struct DescriptorSetLayoutBinding {
+	struct DescriptorSetLayoutDesc {
+		uint32_t setIndex = 0;
 		std::vector<DescriptorBinding> bindings;
 	};
 
 	struct DescriptorsDesc {
-		std::vector<DescriptorSetLayoutBinding> sets;
+		std::vector<DescriptorSetLayoutDesc> sets;
 	};
 }

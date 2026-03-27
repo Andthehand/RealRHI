@@ -479,6 +479,7 @@ namespace RealRHI {
         // Mainly taken from https://github.com/shader-slang/slang-rhi/blob/99f18183f41c3aa25e3038a532c5f98d89c16c1c/src/vulkan/vk-descriptor-allocator.cpp#L8
         std::vector<VkDescriptorPoolSize> poolSizes;
         poolSizes.push_back(VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1024 });
+        poolSizes.push_back(VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4096 });
 
         VkDescriptorPoolCreateInfo poolInfo{
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,

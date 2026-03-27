@@ -133,7 +133,7 @@ namespace RealRHI {
             .pAttachments = &colorBlendAttachment,
         };
 
-		DescriptorsDesc descriptorsDesc{}; // TODO: Get from shader reflection data
+		const DescriptorsDesc& descriptorsDesc = shader->GetDescriptorsDesc();
 
         if (CreateDescriptorSetLayout(descriptorsDesc) != Result::Success) {
             return Result::Failed;
@@ -165,7 +165,7 @@ namespace RealRHI {
 
         VkGraphicsPipelineCreateInfo pipelineInfo{
             .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-            .pNext = &pipelineRenderingInfo, // Chain the dynamic rendering info
+            .pNext = &pipelineRenderingInfo,
             .stageCount = (uint32_t)shaderStages.size(),
             .pStages = shaderStages.data(),
             .pVertexInputState = &vertexInputInfo,
@@ -177,7 +177,6 @@ namespace RealRHI {
             .pColorBlendState = &colorBlending,
             .pDynamicState = &dynamicState,
             .layout = m_PipelineLayout,
-            .renderPass = nullptr, // We're using dynamic rendering, so no render pass
         };
 
         if (vkCreateGraphicsPipelines(m_Device->GetDevice(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_Pipeline) != VK_SUCCESS) {
@@ -189,46 +188,52 @@ namespace RealRHI {
     }
 
     Result VulkanPipeline::CreateDescriptorSetLayout(const DescriptorsDesc& desc) {
-		const uint32_t setCount = desc.sets.size();
-        m_DescriptorSetLayouts.resize(setCount);
-		m_DescriptorSets.resize(setCount);
+		std::vector<VkDescriptorSetLayout> allLayouts;
+		allLayouts.reserve(desc.sets.size());
 
-		// This is assuming that the descriptor sets are tightly packed (i.e. set 0, set 1, etc.) 
-        // This is the same with bindings (e.g. binding 0, binding 1, etc.).
-        for (uint32_t i = 0; i < setCount; i++) { //TODO: Seperate into different function calls to cleanup
+        for (uint32_t i = 0; i < desc.sets.size(); i++) {
 			const auto& set = desc.sets[i];
-            uint32_t descriptorCount = set.bindings.size();
+
+            uint32_t descriptorCount = static_cast<uint32_t>(set.bindings.size());
             std::vector<VkDescriptorSetLayoutBinding> layoutBindings(descriptorCount);
 
             for (uint32_t j = 0; j < descriptorCount; j++) {
                 const auto& binding = set.bindings[j];
 
                 layoutBindings[j] = VkDescriptorSetLayoutBinding{
-                    .binding = j,
-                    .descriptorType = Utils::DescriptorTypeToVkDescriptorType(binding.type),
-                    .descriptorCount = binding.count,
-                    .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS // From research doesn't seem to harm performance
+                    .binding         = binding.binding,
+                    .descriptorType  = binding.vkType,
+                    .descriptorCount = binding.descriptorCount,
+                    .stageFlags      = VK_SHADER_STAGE_ALL
                 };
             }
 
             VkDescriptorSetLayoutCreateInfo layoutInfo{
-                .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
                 .bindingCount = descriptorCount,
-				.pBindings = layoutBindings.data(),
+				.pBindings    = layoutBindings.data(),
             };
 
-            if (vkCreateDescriptorSetLayout(m_Device->GetDevice(), &layoutInfo, nullptr, &m_DescriptorSetLayouts[i]) != VK_SUCCESS) {
+			VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+            if (vkCreateDescriptorSetLayout(m_Device->GetDevice(), &layoutInfo, nullptr, &layout) != VK_SUCCESS) {
                 m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan descriptor set layout.");
                 return Result::Failed;
             }
+			allLayouts.push_back(layout);
         }
 
-		// Create descriptor sets
+		m_DescriptorSetLayouts = std::move(allLayouts);
+		m_DescriptorSets.resize(m_DescriptorSetLayouts.size());
+
+		if (m_DescriptorSetLayouts.empty()) {
+			return Result::Success;
+		}
+
         VkDescriptorSetAllocateInfo allocInfo{
-            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-            .descriptorPool = m_Device->GetDescriptorPool(),
-            .descriptorSetCount = setCount,
-            .pSetLayouts = m_DescriptorSetLayouts.data(),
+            .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .descriptorPool     = m_Device->GetDescriptorPool(),
+            .descriptorSetCount = static_cast<uint32_t>(m_DescriptorSetLayouts.size()),
+            .pSetLayouts        = m_DescriptorSetLayouts.data(),
         };
 
         if (vkAllocateDescriptorSets(m_Device->GetDevice(), &allocInfo, m_DescriptorSets.data()) != VK_SUCCESS) {
