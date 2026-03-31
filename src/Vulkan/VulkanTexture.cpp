@@ -29,6 +29,8 @@ namespace RealRHI {
     Result VulkanTexture::Init(const TextureDesc& desc) {
 		m_Format = Utils::TextureFormatToVkFormat(desc.format);
 		m_Layout = TextureLayout::Undefined;
+        m_MipLevels = desc.mipLevels;
+        m_ArrayLayers = desc.arrayLayers;
         m_ImageExtent = {
             .width = desc.width,
             .height = desc.height,
@@ -60,6 +62,14 @@ namespace RealRHI {
         }
 
         if (CreateSampler() == Result::Failed) {
+            return Result::Failed;
+        }
+
+        if (m_TextureView.Init(m_Device, TextureViewDesc{
+            .texture = this,
+            .mipLevelCount = m_MipLevels,
+            .arrayLayerCount = m_ArrayLayers,
+            }) != Result::Success) {
             return Result::Failed;
         }
 
@@ -106,6 +116,14 @@ namespace RealRHI {
     Result VulkanTexture::UploadData(const void* data, uint32_t size) {
         Ref<VulkanCommandList> commandList;
         Result res = VulkanCommandList::Create(m_Device, commandList);
+        if (res != Result::Success) {
+            return res;
+        }
+
+        res = commandList->Begin();
+        if (res != Result::Success) {
+            return res;
+        }
 
         ChangeLayout(commandList.Raw(), TextureLayout::TransferDst);
 
@@ -139,6 +157,11 @@ namespace RealRHI {
 
         vkCmdCopyBufferToImage(commandList->GetCommandBuffer(), transferBuffer->GetBuffer(), m_Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
         ChangeLayout(commandList.Raw(), TextureLayout::ShaderRead);
+
+        res = commandList->End();
+        if (res != Result::Success) {
+            return res;
+        }
 
         return m_Device->ImmediateSubmit(commandList.Raw());
     }
