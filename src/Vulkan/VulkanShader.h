@@ -49,7 +49,7 @@ namespace RealRHI {
 
 		std::vector<BufferAttribute> CalculateCumulativeOffset(slang::TypeLayoutReflection* typeReflection, uint32_t* offset);
 
-		static void InitializeSlang(const char* shaderDirectory, bool isDebugEnabled);
+		static void InitializeSlang(const VulkanDevice* m_Device);
 
 		bool CheckSlangDiagnostics(const Slang::ComPtr<slang::IBlob>& diagnostics);
 	private:

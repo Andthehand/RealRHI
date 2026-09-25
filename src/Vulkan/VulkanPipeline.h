@@ -28,20 +28,9 @@ namespace RealRHI {
 	protected:
 		friend class VulkanCommandList;
 		VkPipeline GetPipeline() const { return m_Pipeline; }
-		VkPipelineLayout GetPipelineLayout() const { return m_PipelineLayout; }
-		const std::vector<VkDescriptorSet>& GetDescriptorSets() const { return m_DescriptorSets; }
-		const ReflectedBindingInfo* FindBinding(const char* name) const;
-	private:
-		Result CreateDescriptorSetLayout(const DescriptorsDesc& desc);
-		void BuildBindingLookup(const DescriptorsDesc& desc);
 	private:
 		const VulkanDevice* m_Device = nullptr;
 
-		VkPipelineLayout m_PipelineLayout = VK_NULL_HANDLE;
 		VkPipeline m_Pipeline = VK_NULL_HANDLE;
-
-		std::vector<VkDescriptorSetLayout> m_DescriptorSetLayouts;
-		std::vector<VkDescriptorSet> m_DescriptorSets;
-		std::unordered_map<std::string, ReflectedBindingInfo> m_BindingLookup;
 	};
 }

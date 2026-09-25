@@ -1,22 +1,21 @@
-struct Material
-{
-    Sampler2D albedo;
-};
-
-ParameterBlock<Material> material;
 
 struct VSInput
 {
     float2 pos;
     float2 uv;
+
+    uint texIdx;
 };
 
 struct VSOutput
 {
     float4 pos : SV_Position;
     float2 uv;
+
+    uint texIdx;
 };
 
+[require(spvDescriptorHeapEXT)]
 [shader("vertex")]
 VSOutput main(VSInput input)
 {
@@ -26,6 +25,7 @@ VSOutput main(VSInput input)
     return output;
 }
 
+[require(spvDescriptorHeapEXT)]
 [shader("fragment")]
 float4 main(VSOutput input) : SV_Target
 {

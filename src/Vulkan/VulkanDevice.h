@@ -94,9 +94,14 @@ namespace RealRHI {
 
 			bool m_EnableDebug;
 
-			static constexpr std::array<const char*, 2> s_DeviceExtensions{
+			VkPhysicalDeviceDescriptorHeapPropertiesEXT m_DescriptorHeapProperties;
+
+			static constexpr std::array<const char*, 5> s_DeviceExtensions{
 				VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
-				VK_KHR_SWAPCHAIN_EXTENSION_NAME
+				VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+				VK_KHR_MAINTENANCE_5_EXTENSION_NAME,
+				VK_KHR_SHADER_UNTYPED_POINTERS_EXTENSION_NAME,
+				VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME
 			};
 	};
 }

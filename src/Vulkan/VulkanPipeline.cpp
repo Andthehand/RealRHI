@@ -9,11 +9,6 @@ namespace RealRHI {
 
     VulkanPipeline::~VulkanPipeline() {
         vkDestroyPipeline(m_Device->GetDevice(), m_Pipeline, nullptr);
-        vkDestroyPipelineLayout(m_Device->GetDevice(), m_PipelineLayout, nullptr);
-
-		for (auto layout : m_DescriptorSetLayouts) {
-            vkDestroyDescriptorSetLayout(m_Device->GetDevice(), layout, nullptr);
-        }
     }
 
     Result VulkanPipeline::Create(const VulkanDevice* device, const PipelineDesc& desc, Ref<VulkanPipeline>& outPipeline) {
@@ -133,24 +128,6 @@ namespace RealRHI {
             .pAttachments = &colorBlendAttachment,
         };
 
-		const DescriptorsDesc& descriptorsDesc = shader->GetDescriptorsDesc();
-
-        if (CreateDescriptorSetLayout(descriptorsDesc) != Result::Success) {
-            return Result::Failed;
-		}
-		BuildBindingLookup(descriptorsDesc);
-
-        VkPipelineLayoutCreateInfo pipelineLayoutInfo{
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-			.setLayoutCount = static_cast<uint32_t>(m_DescriptorSetLayouts.size()),
-			.pSetLayouts = m_DescriptorSetLayouts.data(),
-        };
-
-        if (vkCreatePipelineLayout(m_Device->GetDevice(), &pipelineLayoutInfo, nullptr, &m_PipelineLayout) != VK_SUCCESS) {
-            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan pipeline layout.");
-            return Result::Failed;
-        }
-
         const RenderTargetFormats& formats = desc.renderTargetFormats;
         std::vector<VkFormat> vkColorFormats(formats.colorFormats.size());
         for (uint32_t i = 0; i < formats.colorFormats.size(); i++) {
@@ -164,9 +141,15 @@ namespace RealRHI {
             .depthAttachmentFormat = Utils::TextureFormatToVkFormat(formats.depthFormat),
         };
 
+        VkPipelineCreateFlags2CreateInfo pipelineCreateFlags2Info{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO,
+			.pNext = &pipelineRenderingInfo,
+            .flags = VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT
+		};
+
         VkGraphicsPipelineCreateInfo pipelineInfo{
             .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-            .pNext = &pipelineRenderingInfo,
+            .pNext = &pipelineCreateFlags2Info,
             .stageCount = (uint32_t)shaderStages.size(),
             .pStages = shaderStages.data(),
             .pVertexInputState = &vertexInputInfo,
@@ -177,8 +160,8 @@ namespace RealRHI {
             .pDepthStencilState = &depthStencilState,
             .pColorBlendState = &colorBlending,
             .pDynamicState = &dynamicState,
-            .layout = m_PipelineLayout,
         };
+
 
         if (vkCreateGraphicsPipelines(m_Device->GetDevice(), VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_Pipeline) != VK_SUCCESS) {
             m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan graphics pipelines.");
@@ -186,90 +169,5 @@ namespace RealRHI {
         }
 
         return Result::Success;
-    }
-
-    Result VulkanPipeline::CreateDescriptorSetLayout(const DescriptorsDesc& desc) {
-		std::vector<VkDescriptorSetLayout> allLayouts;
-		allLayouts.reserve(desc.sets.size());
-
-        for (uint32_t i = 0; i < desc.sets.size(); i++) {
-			const auto& set = desc.sets[i];
-
-            uint32_t descriptorCount = static_cast<uint32_t>(set.bindings.size());
-            std::vector<VkDescriptorSetLayoutBinding> layoutBindings(descriptorCount);
-
-            for (uint32_t j = 0; j < descriptorCount; j++) {
-                const auto& binding = set.bindings[j];
-
-                layoutBindings[j] = VkDescriptorSetLayoutBinding{
-                    .binding         = binding.binding,
-                    .descriptorType  = binding.vkType,
-                    .descriptorCount = binding.descriptorCount,
-                    .stageFlags      = VK_SHADER_STAGE_ALL
-                };
-            }
-
-            VkDescriptorSetLayoutCreateInfo layoutInfo{
-                .sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-                .bindingCount = descriptorCount,
-				.pBindings    = layoutBindings.data(),
-            };
-
-			VkDescriptorSetLayout layout = VK_NULL_HANDLE;
-            if (vkCreateDescriptorSetLayout(m_Device->GetDevice(), &layoutInfo, nullptr, &layout) != VK_SUCCESS) {
-                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan descriptor set layout.");
-                return Result::Failed;
-            }
-			allLayouts.push_back(layout);
-        }
-
-		m_DescriptorSetLayouts = std::move(allLayouts);
-		m_DescriptorSets.resize(m_DescriptorSetLayouts.size());
-
-		if (m_DescriptorSetLayouts.empty()) {
-			return Result::Success;
-		}
-
-        VkDescriptorSetAllocateInfo allocInfo{
-            .sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-            .descriptorPool     = m_Device->GetDescriptorPool(),
-            .descriptorSetCount = static_cast<uint32_t>(m_DescriptorSetLayouts.size()),
-            .pSetLayouts        = m_DescriptorSetLayouts.data(),
-        };
-
-        if (vkAllocateDescriptorSets(m_Device->GetDevice(), &allocInfo, m_DescriptorSets.data()) != VK_SUCCESS) {
-            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to allocate Vulkan descriptor sets.");
-            return Result::Failed;
-        }
-
-        return Result::Success;
-    }
-
-    void VulkanPipeline::BuildBindingLookup(const DescriptorsDesc& desc) {
-        m_BindingLookup.clear();
-
-        for (const auto& set : desc.sets) {
-            for (const auto& binding : set.bindings) {
-                if (binding.name.empty()) {
-                    continue;
-                }
-
-                m_BindingLookup[binding.name] = ReflectedBindingInfo{
-                    .setIndex = set.setIndex,
-                    .binding = binding.binding,
-                    .vkType = binding.vkType,
-                    .descriptorCount = binding.descriptorCount,
-                };
-            }
-        }
-    }
-
-    const VulkanPipeline::ReflectedBindingInfo* VulkanPipeline::FindBinding(const char* name) const {
-        auto it = m_BindingLookup.find(name);
-        if (it == m_BindingLookup.end()) {
-            return nullptr;
-        }
-
-        return &it->second;
     }
 }

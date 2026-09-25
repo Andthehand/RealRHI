@@ -289,10 +289,15 @@ namespace RealRHI {
     }
 
     int VulkanDevice::RatePhysicalDevice(VkPhysicalDevice device) {
-        VkPhysicalDeviceProperties properties;
         VkPhysicalDeviceFeatures features;
 
-        vkGetPhysicalDeviceProperties(device, &properties);
+        m_DescriptorHeapProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT;
+		VkPhysicalDeviceProperties2 properties2{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+            .pNext = &m_DescriptorHeapProperties,
+		};
+
+        vkGetPhysicalDeviceProperties2(device, &properties2);
         vkGetPhysicalDeviceFeatures(device, &features);
 
         // Must support required queues
@@ -302,16 +307,20 @@ namespace RealRHI {
 
         int score = 0;
 
+		// Must support required features
+        if (m_DescriptorHeapProperties.bufferDescriptorSize > 0)
+			score += 1000;
+
         // Prefer discrete GPU
-        if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+        if (properties2.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
             score += 1000;
 
         // Slight preference for integrated if no discrete
-        if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)
+        if (properties2.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)
             score += 100;
 
         // Prefer larger max image dimension (usually stronger GPU)
-        score += properties.limits.maxImageDimension2D;
+        score += properties2.properties.limits.maxImageDimension2D;
 
         return score;
     }
@@ -381,21 +390,33 @@ namespace RealRHI {
             queueCreateInfos.push_back(queueCreateInfo);
         }
 
+        VkPhysicalDeviceDescriptorHeapFeaturesEXT heapFeatures{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_FEATURES_EXT,
+			.descriptorHeap = VK_TRUE,
+        };
+
+        VkPhysicalDeviceShaderUntypedPointersFeaturesKHR untypedPtrFeatures{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_UNTYPED_POINTERS_FEATURES_KHR,
+            .pNext = &heapFeatures,
+            .shaderUntypedPointers = VK_TRUE,
+		};
+        
+        VkPhysicalDeviceVulkan13Features enabledVk13Features {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+            .pNext = &untypedPtrFeatures,
+            .synchronization2 = VK_TRUE,
+            .dynamicRendering = VK_TRUE,
+        };
         VkPhysicalDeviceVulkan12Features enabledVk12Features{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-        };
-        const VkPhysicalDeviceVulkan13Features enabledVk13Features {
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-            .pNext = &enabledVk12Features,
-            .synchronization2 = true,
-            .dynamicRendering = true,
+            .pNext = &enabledVk13Features
         };
         VkPhysicalDeviceFeatures deviceFeatures{
             .samplerAnisotropy = VK_TRUE,
         };
         VkDeviceCreateInfo createInfo{
             .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-            .pNext = &enabledVk13Features,
+            .pNext = &enabledVk12Features,
             .queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size()),
             .pQueueCreateInfos = queueCreateInfos.data(),
             .enabledExtensionCount = static_cast<uint32_t>(s_DeviceExtensions.size()),

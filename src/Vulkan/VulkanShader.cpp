@@ -233,7 +233,7 @@ namespace RealRHI {
 	}
 
 	Result VulkanShader::Init(const ShaderDesc& desc) {
-		InitializeSlang(m_Device->GetShaderDirectory().string().c_str(), m_Device->IsDebugEnabled());
+		InitializeSlang(m_Device);
 
 		Slang::ComPtr<slang::IBlob> diagnostics;
 
@@ -457,23 +457,36 @@ namespace RealRHI {
 		return attributes;
 	}
 
-	void VulkanShader::InitializeSlang(const char* shaderDirectory, bool isDebugEnabled) {
+	void VulkanShader::InitializeSlang(const VulkanDevice* m_Device) {
 		if (!s_SlangGlobalSession) {
 			slang::createGlobalSession(s_SlangGlobalSession.writeRef());
 			std::array<slang::TargetDesc, 1> slangTargets{
 				std::to_array<slang::TargetDesc>({
 					slang::TargetDesc{
 						.format{SLANG_SPIRV}, // Compile to SPIR-V
-						.profile{s_SlangGlobalSession->findProfile("spirv_1_5")}
+						.profile{s_SlangGlobalSession->findProfile("spirv_1_6")}
 					}
 				})
 			};
 
-			std::array<slang::CompilerOptionEntry, 2> slangOptions{
+			SlangCapabilityID spvDescriptorHeapEXT = s_SlangGlobalSession->findCapability("spvDescriptorHeapEXT");
+			if (spvDescriptorHeapEXT == SLANG_CAPABILITY_UNKNOWN) {
+				m_Device->SendDebugMessage(
+					DebugSeverity::Error, 
+					DebugMessageType::ShaderCompilation,
+					"SPIR-V extension 'SPV_EXT_descriptor_indexing' not supported by Slang compiler. Installed Slang version is not supported!"
+				);
+			}
+
+			std::array<slang::CompilerOptionEntry, 3> slangOptions{
 				std::to_array<slang::CompilerOptionEntry>({
 					slang::CompilerOptionEntry{
 						slang::CompilerOptionName::EmitSpirvDirectly, // Emit SPIR-V directly instead of generating source code that will be compiled by a downstream compiler.
 						slang::CompilerOptionValue{slang::CompilerOptionValueKind::Int, 1} // Set to 1 to enable, 0 to disable. Default is false (0).
+					},
+					slang::CompilerOptionEntry{
+						slang::CompilerOptionName::Capability,
+						slang::CompilerOptionValue{slang::CompilerOptionValueKind::Int, spvDescriptorHeapEXT}
 					},
 					slang::CompilerOptionEntry{
 						slang::CompilerOptionName::DebugInformation,
@@ -482,12 +495,14 @@ namespace RealRHI {
 				})
 			};
 
-			uint32_t slangOptionsCount = isDebugEnabled ? 2 : 1;
+			uint32_t slangOptionsCount = m_Device->IsDebugEnabled() ? slangOptions.size() : slangOptions.size() - 1;
+			std::string shaderSearchPath = m_Device->GetShaderDirectory().string();
+			const char* shaderSearchPathCStr = shaderSearchPath.c_str();
 			slang::SessionDesc slangSessionDesc{
 				.targets{slangTargets.data()},
 				.targetCount{SlangInt(slangTargets.size())},
 				.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR, // Because we use glm which uses column-major layout
-				.searchPaths = &shaderDirectory,
+				.searchPaths = &shaderSearchPathCStr,
 				.searchPathCount = 1,
 				.compilerOptionEntries{slangOptions.data()},
 				.compilerOptionEntryCount{slangOptionsCount}
