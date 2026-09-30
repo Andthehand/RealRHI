@@ -18,7 +18,10 @@ namespace RealRHI {
 	protected:
 		friend class VulkanCommandList;
 		friend class VulkanTexture;
+		friend class VulkanDescriptorHeaps;
 		VkBuffer GetBuffer() const { return m_Buffer; }
+
+		VkDeviceAddress GetBufferDeviceAddress() const;
 	private:
 		const VulkanDevice* m_Device = nullptr;
 

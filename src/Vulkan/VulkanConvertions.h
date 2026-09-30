@@ -6,7 +6,7 @@
 #include "TextureViewDesc.h"
 #include "Shader.h"
 
-#include <Vulkan/vulkan.h>
+#include <volk.h>
 
 namespace RealRHI::Utils {
     // ---------------------- DescriptorDesc ----------------
@@ -141,6 +141,8 @@ namespace RealRHI::Utils {
         if (Any(usage & BufferUsage::TransferSrc)) flags |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
         if (Any(usage & BufferUsage::TransferDst)) flags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
         if (Any(usage & BufferUsage::Indirect)) flags |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+        if (Any(usage & BufferUsage::Heap)) flags |= VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT;
+		if (Any(usage & BufferUsage::Addressable)) flags |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
         return flags;
 	}
 

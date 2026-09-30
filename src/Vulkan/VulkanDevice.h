@@ -1,7 +1,7 @@
 #pragma once
 #include "Device.h"
 
-#include <vulkan/vulkan.h>
+#include <volk.h>
 #include <vma/vk_mem_alloc.h>
 
 #include <array>
@@ -10,6 +10,9 @@
 #undef CreateWindow // Windows.h defines a macro for CreateWindow, which conflicts with our Device::CreateWindow method
 
 namespace RealRHI {
+	// Forward declarations to avoid circular dependencies
+	class VulkanDescriptorHeaps;
+
 	struct QueueFamilyIndices {
 		std::optional<uint32_t> graphicsFamily;
 		std::optional<uint32_t> presentFamily;
@@ -37,7 +40,6 @@ namespace RealRHI {
 
 		// Pools
 		VkCommandPool GetCommandPool() const { return m_CommandPool; }
-		VkDescriptorPool GetDescriptorPool() const { return m_DescriptorPool; }
 
 		// Allocator
 		VmaAllocator GetAllocator() const { return m_Allocator; }
@@ -46,17 +48,25 @@ namespace RealRHI {
 		bool IsDebugEnabled() const override { return m_EnableDebug; }
 		void SendDebugMessage(DebugSeverity severity, DebugMessageType type, const char* message) const { m_DebugCallback({ .severity = severity, .type = type, .message = message }); }
 
-		Result CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) override;
-		Result CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) override;
-		Result CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) override;
-		Result CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) override;
-		Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) override;
-		Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) override;
-		Result CreateCommandList(Ref<CommandList>& outCommandList) override;
+		// Device Creations
+		Result CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) const override;
+		Result CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) const override;
+		Result CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) const override;
+		Result CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) const override;
+		Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) const override;
+		Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const override;
+		Result CreateCommandList(Ref<CommandList>& outCommandList) const override;
 
+		// TODO: Temp?
+		void BindDescriptorHeaps(VkCommandBuffer commandBuffer) const;
+
+		// Command submission and synchronization
 		void Submit(CommandList* cmd, Swapchain* swapchain, const FrameContext& frame) override;
 		Result ImmediateSubmit(CommandList* cmd) const override;
 		void WaitIdle() override;
+
+		// Properties
+		VkPhysicalDeviceDescriptorHeapPropertiesEXT GetDescriptorHeapProperties() const;
 	private:
 		bool CreateInstance(const char* appName, bool enableValidationLayer);
 		bool SetupDebugMessenger();
@@ -66,7 +76,6 @@ namespace RealRHI {
 		QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
 		bool CreateAllocator();
 		Result CreateCommandPool();
-		Result CreateDescriptorPool();
 
 		static VKAPI_ATTR VkBool32 VulkanDebugCallback(
 			VkDebugUtilsMessageSeverityFlagBitsEXT severity,
@@ -74,6 +83,7 @@ namespace RealRHI {
 			const VkDebugUtilsMessengerCallbackDataEXT* callbackData,
 			void* userData);
 	private:
+			// Vulkan instance and devices
 			VkInstance m_Instance;
 			VkDebugUtilsMessengerEXT m_DebugMessenger;
 			VkPhysicalDevice m_PhysicalDevice;
@@ -85,16 +95,15 @@ namespace RealRHI {
 
 			// Pools
 			VkCommandPool m_CommandPool;
-			VkDescriptorPool m_DescriptorPool;
+			std::unique_ptr<VulkanDescriptorHeaps> m_DescriptorHeaps;
 
+			// Allocator
 			VmaAllocator m_Allocator;
 
+			// User Defined settings
 			std::filesystem::path m_ShaderDirectory;
 			DebugCallback m_DebugCallback;
-
 			bool m_EnableDebug;
-
-			VkPhysicalDeviceDescriptorHeapPropertiesEXT m_DescriptorHeapProperties;
 
 			static constexpr std::array<const char*, 5> s_DeviceExtensions{
 				VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,

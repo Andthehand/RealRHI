@@ -1,3 +1,4 @@
+#define VOLK_IMPLEMENTATION
 #define VMA_IMPLEMENTATION
 #include "VulkanDevice.h"
 
@@ -7,15 +8,14 @@
 #include "VulkanPipeline.h"
 #include "VulkanBuffer.h"
 #include "VulkanCommandList.h"
+#include "VulkanDescriptorHeaps.h"
 
 #include <set>
 #include <iostream>
 
 namespace RealRHI {
     VulkanDevice::~VulkanDevice() {
-        if (m_DescriptorPool != VK_NULL_HANDLE) {
-			vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
-        }
+		m_DescriptorHeaps.reset();
 
 		if (m_CommandPool != VK_NULL_HANDLE) {
             vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
@@ -27,11 +27,7 @@ namespace RealRHI {
         }
 
         if (m_DebugMessenger != VK_NULL_HANDLE) {
-            auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
-                m_Instance, "vkDestroyDebugUtilsMessengerEXT");
-            if (func != nullptr) {
-                func(m_Instance, m_DebugMessenger, nullptr);
-            }
+            vkDestroyDebugUtilsMessengerEXT(m_Instance, m_DebugMessenger, nullptr);
         }
 
         if (m_Instance != VK_NULL_HANDLE) {
@@ -51,12 +47,17 @@ namespace RealRHI {
 			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to init SDL video.");
             return Result::Failed;
         }
-        if (!SDL_Vulkan_LoadLibrary(nullptr)) {
+		if (!SDL_Vulkan_LoadLibrary(nullptr)) {
 			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to load Vulkan library via SDL.");
-            return Result::Failed;
-        }
+			return Result::Failed;
+		}
 
-        if (!CreateInstance(desc.applicationName, desc.enableValidationLayers)) {
+		if (volkInitialize() != VK_SUCCESS) {
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to initialize volk.");
+			return Result::Failed;
+		}
+
+		if (!CreateInstance(desc.applicationName, desc.enableValidationLayers)) {
 			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan instance.");
             return Result::Failed;
         }
@@ -87,39 +88,45 @@ namespace RealRHI {
             return Result::Failed;
         }
 
-		if (CreateDescriptorPool() != Result::Success) {
+        m_DescriptorHeaps = std::make_unique<VulkanDescriptorHeaps>(this);
+		if (m_DescriptorHeaps->Init(GetDescriptorHeapProperties()) != Result::Success) {
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to initialize Vulkan descriptor heaps.");
             return Result::Failed;
         }
 
 		return Result::Success;
 	}
 
-    Result VulkanDevice::CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) {
+    Result VulkanDevice::CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) const {
         return VulkanWindow::Create(this, desc, (Ref<VulkanWindow>&)outWindow);
     }
 
-    Result VulkanDevice::CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) {
+    Result VulkanDevice::CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) const {
         return VulkanShader::Create(this, desc, (Ref<VulkanShader>&)outShader);
     }
 
-    Result VulkanDevice::CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) {
+    Result VulkanDevice::CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) const {
         return VulkanPipeline::Create(this, desc, (Ref<VulkanPipeline>&)outPipeline);
     }
 
-    Result VulkanDevice::CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) {
+    Result VulkanDevice::CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) const {
         return VulkanSwapchain::Create(this, desc, (Ref<VulkanSwapchain>&)outSwapchain);
     }
 
-    Result VulkanDevice::CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) {
+    Result VulkanDevice::CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) const {
         return VulkanBuffer::Create(this, desc, (Ref<VulkanBuffer>&)outBuffer);
     }
 
-    Result VulkanDevice::CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) {
+    Result VulkanDevice::CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const {
         return VulkanTexture::Create(this, desc, (Ref<VulkanTexture>&)outTexture);
     }
 
-    Result VulkanDevice::CreateCommandList(Ref<CommandList>& outCommandList) {
+    Result VulkanDevice::CreateCommandList(Ref<CommandList>& outCommandList) const {
 		return VulkanCommandList::Create(this, (Ref<VulkanCommandList>&)outCommandList);
+    }
+
+    void VulkanDevice::BindDescriptorHeaps(VkCommandBuffer commandBuffer) const {
+		m_DescriptorHeaps->BindDescriptorHeaps(commandBuffer);
     }
 
     void VulkanDevice::Submit(CommandList* cmd, Swapchain* sc, const FrameContext& frame) {
@@ -255,7 +262,25 @@ namespace RealRHI {
             return false;
         }
 
+        volkLoadInstance(m_Instance);
+
         return true;
+    }
+
+    VkPhysicalDeviceDescriptorHeapPropertiesEXT VulkanDevice::GetDescriptorHeapProperties() const {
+        VkPhysicalDeviceDescriptorHeapPropertiesEXT descriptorHeapProperties{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT,
+            .pNext = nullptr,
+        };
+
+        VkPhysicalDeviceProperties2 physicalDeviceProperties{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+            .pNext = &descriptorHeapProperties,
+        };
+
+        vkGetPhysicalDeviceProperties2(m_PhysicalDevice, &physicalDeviceProperties);
+
+        return descriptorHeapProperties;
     }
 
     bool VulkanDevice::SetupDebugMessenger() {
@@ -272,16 +297,8 @@ namespace RealRHI {
             .pfnUserCallback = VulkanDebugCallback,
             .pUserData = reinterpret_cast<void*>(m_DebugCallback)
         };
-        
 
-        auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
-            m_Instance, "vkCreateDebugUtilsMessengerEXT");
-
-        if (func == nullptr) {
-            return false;
-        }
-
-        if (func(m_Instance, &createInfo, nullptr, &m_DebugMessenger) != VK_SUCCESS) {
+        if (vkCreateDebugUtilsMessengerEXT(m_Instance, &createInfo, nullptr, &m_DebugMessenger) != VK_SUCCESS) {
             return false;
         }
 
@@ -291,14 +308,36 @@ namespace RealRHI {
     int VulkanDevice::RatePhysicalDevice(VkPhysicalDevice device) {
         VkPhysicalDeviceFeatures features;
 
-        m_DescriptorHeapProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT;
+        VkPhysicalDeviceDescriptorHeapPropertiesEXT descriptorHeapProperties{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT
+        };
 		VkPhysicalDeviceProperties2 properties2{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-            .pNext = &m_DescriptorHeapProperties,
+			.pNext = &descriptorHeapProperties
 		};
 
         vkGetPhysicalDeviceProperties2(device, &properties2);
         vkGetPhysicalDeviceFeatures(device, &features);
+
+        // Temp
+		// Print out heap properties for debugging
+        SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, "Heap properties:");
+		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Sampler heap alignment: " + std::to_string(descriptorHeapProperties.samplerHeapAlignment)).c_str());
+		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Resource heap alignment: " + std::to_string(descriptorHeapProperties.resourceHeapAlignment)).c_str());
+		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Max sampler heap size: " + std::to_string(descriptorHeapProperties.maxSamplerHeapSize)).c_str());
+		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Max resource heap size: " + std::to_string(descriptorHeapProperties.maxResourceHeapSize)).c_str());
+		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Min sampler heap reserved range: " + std::to_string(descriptorHeapProperties.minSamplerHeapReservedRange)).c_str());
+		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Min sampler heap reserved range with embedded: " + std::to_string(descriptorHeapProperties.minSamplerHeapReservedRangeWithEmbedded)).c_str());
+		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Min resource heap reserved range: " + std::to_string(descriptorHeapProperties.minResourceHeapReservedRange)).c_str());
+		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Sampler descriptor size: " + std::to_string(descriptorHeapProperties.samplerDescriptorSize)).c_str());
+		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Image descriptor size: " + std::to_string(descriptorHeapProperties.imageDescriptorSize)).c_str());
+		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Buffer descriptor size: " + std::to_string(descriptorHeapProperties.bufferDescriptorSize)).c_str());
+		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Max push data size: " + std::to_string(descriptorHeapProperties.maxPushDataSize)).c_str());
+		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Max descriptor heap embedded samplers: " + std::to_string(descriptorHeapProperties.maxDescriptorHeapEmbeddedSamplers)).c_str());
+		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Sampler YCbCr conversion count: " + std::to_string(descriptorHeapProperties.samplerYcbcrConversionCount)).c_str());
+		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Sparse descriptor heaps: " + std::to_string(descriptorHeapProperties.sparseDescriptorHeaps)).c_str());
+		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Protected descriptor heaps: " + std::to_string(descriptorHeapProperties.protectedDescriptorHeaps)).c_str());
+		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, "End of heap properties.");
 
         // Must support required queues
         QueueFamilyIndices indices = FindQueueFamilies(device);
@@ -308,7 +347,7 @@ namespace RealRHI {
         int score = 0;
 
 		// Must support required features
-        if (m_DescriptorHeapProperties.bufferDescriptorSize > 0)
+        if (descriptorHeapProperties.bufferDescriptorSize > 0)
 			score += 1000;
 
         // Prefer discrete GPU
@@ -409,7 +448,8 @@ namespace RealRHI {
         };
         VkPhysicalDeviceVulkan12Features enabledVk12Features{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-            .pNext = &enabledVk13Features
+            .pNext = &enabledVk13Features,
+			.bufferDeviceAddress = VK_TRUE
         };
         VkPhysicalDeviceFeatures deviceFeatures{
             .samplerAnisotropy = VK_TRUE,
@@ -428,6 +468,8 @@ namespace RealRHI {
         if (vkCreateDevice(m_PhysicalDevice, &createInfo, nullptr, &m_Device) != VK_SUCCESS) {
             return false;
         }
+
+        volkLoadDevice(m_Device);
 
         vkGetDeviceQueue(m_Device, m_GraphicsQueueFamily, 0, &m_GraphicsQueue);
         vkGetDeviceQueue(m_Device, m_PresentQueueFamily, 0, &m_PresentQueue);
@@ -472,10 +514,11 @@ namespace RealRHI {
             .vkCreateImage = vkCreateImage 
         };
         VmaAllocatorCreateInfo allocatorCI{ 
+            .flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
             .physicalDevice = m_PhysicalDevice, 
             .device = m_Device, 
             .pVulkanFunctions = &vkFunctions, 
-            .instance = m_Instance 
+            .instance = m_Instance
         };
 
         return vmaCreateAllocator(&allocatorCI, &m_Allocator) == VK_SUCCESS;
@@ -494,28 +537,6 @@ namespace RealRHI {
         }
 
 		return Result::Success;
-    }
-
-    Result VulkanDevice::CreateDescriptorPool() {
-        // Mainly taken from https://github.com/shader-slang/slang-rhi/blob/99f18183f41c3aa25e3038a532c5f98d89c16c1c/src/vulkan/vk-descriptor-allocator.cpp#L8
-        std::vector<VkDescriptorPoolSize> poolSizes;
-        poolSizes.push_back(VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1024 });
-        poolSizes.push_back(VkDescriptorPoolSize{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 4096 });
-
-        VkDescriptorPoolCreateInfo poolInfo{
-            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-            .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-            .maxSets = 4096,
-            .poolSizeCount = (uint32_t)poolSizes.size(),
-            .pPoolSizes = poolSizes.data(),
-        };
-
-        if (vkCreateDescriptorPool(m_Device, &poolInfo, nullptr, &m_DescriptorPool) != VK_SUCCESS) {
-			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan descriptor pool.");
-			return Result::Failed;
-        }
-
-        return Result::Success;
     }
 
     VKAPI_ATTR VkBool32 VulkanDevice::VulkanDebugCallback(

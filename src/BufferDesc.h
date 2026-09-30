@@ -11,6 +11,8 @@ namespace RealRHI {
         TransferSrc = 1 << 4,
         TransferDst = 1 << 5,
         Indirect = 1 << 6,
+		Heap = 1 << 7,
+		Addressable = 1 << 8,
     };
 
     constexpr BufferUsage operator|(BufferUsage a, BufferUsage b) {

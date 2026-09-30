@@ -53,4 +53,13 @@ namespace RealRHI {
 
 		return Result::Success;
     }
+
+    VkDeviceAddress VulkanBuffer::GetBufferDeviceAddress() const {
+        VkBufferDeviceAddressInfo addrInfo{ 
+            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+			.buffer = m_Buffer
+        };
+
+        return vkGetBufferDeviceAddress(m_Device->GetDevice(), &addrInfo);
+    }
 }

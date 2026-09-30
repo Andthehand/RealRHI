@@ -138,6 +138,9 @@ namespace RealRHI {
     void VulkanCommandList::BindPipeline(Pipeline* pipeline) {
 		m_BoundPipeline = static_cast<VulkanPipeline*>(pipeline);
 		vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_BoundPipeline->GetPipeline());
+
+        // TODO: Remove or move
+		m_Device->BindDescriptorHeaps(m_CommandBuffer);
     }
 
     Result VulkanCommandList::BindBuffer(const char* name, Buffer* buffer, uint64_t offset, uint64_t range) {
