@@ -1,9 +1,9 @@
 #pragma once
+#include "TextureView.h"
+
 #include <cstdint>
 
 namespace RealRHI {
-    class TextureView;
-
     struct FrameContext {
         uint32_t frameIndex = 0;
         uint32_t imageIndex = 0;

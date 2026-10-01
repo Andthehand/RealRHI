@@ -5,13 +5,13 @@
 #include <vma/vk_mem_alloc.h>
 
 #include <array>
+#include <memory>
 #include <optional>
 
 #undef CreateWindow // Windows.h defines a macro for CreateWindow, which conflicts with our Device::CreateWindow method
 
 namespace RealRHI {
-	// Forward declarations to avoid circular dependencies
-	class VulkanDescriptorHeaps;
+	class VulkanDescriptorManager;
 
 	struct QueueFamilyIndices {
 		std::optional<uint32_t> graphicsFamily;
@@ -43,6 +43,7 @@ namespace RealRHI {
 
 		// Allocator
 		VmaAllocator GetAllocator() const { return m_Allocator; }
+		VulkanDescriptorManager* GetDescriptorManager() const { return m_DescriptorManager.get(); }
 
 		std::filesystem::path GetShaderDirectory() const override { return m_ShaderDirectory; }
 		bool IsDebugEnabled() const override { return m_EnableDebug; }
@@ -95,7 +96,7 @@ namespace RealRHI {
 
 			// Pools
 			VkCommandPool m_CommandPool;
-			std::unique_ptr<VulkanDescriptorHeaps> m_DescriptorHeaps;
+			std::unique_ptr<VulkanDescriptorManager> m_DescriptorManager;
 
 			// Allocator
 			VmaAllocator m_Allocator;

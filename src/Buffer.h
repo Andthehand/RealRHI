@@ -8,6 +8,8 @@ namespace RealRHI {
 	public:
 		virtual ~Buffer() = default;
 
+		virtual uint64_t GetSize() const = 0;
+
 		virtual Result WriteData(const void* data, uint64_t size, uint64_t offset = 0) = 0;
 	};
 }

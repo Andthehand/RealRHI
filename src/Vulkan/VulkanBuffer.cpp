@@ -23,6 +23,8 @@ namespace RealRHI {
 	}
 
     Result VulkanBuffer::Init(const BufferDesc& desc) {
+        m_Usage = desc.usage;
+
         VkBufferCreateInfo bufferInfo{
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .size = desc.size,

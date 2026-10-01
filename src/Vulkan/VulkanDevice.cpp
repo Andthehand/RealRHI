@@ -10,12 +10,14 @@
 #include "VulkanCommandList.h"
 #include "VulkanDescriptorHeaps.h"
 
+#include "VulkanDescriptorManager.h"
+
 #include <set>
 #include <iostream>
 
 namespace RealRHI {
     VulkanDevice::~VulkanDevice() {
-		m_DescriptorHeaps.reset();
+        m_DescriptorManager->Cleanup();
 
 		if (m_CommandPool != VK_NULL_HANDLE) {
             vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
@@ -88,9 +90,9 @@ namespace RealRHI {
             return Result::Failed;
         }
 
-        m_DescriptorHeaps = std::make_unique<VulkanDescriptorHeaps>(this);
-		if (m_DescriptorHeaps->Init(GetDescriptorHeapProperties()) != Result::Success) {
-			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to initialize Vulkan descriptor heaps.");
+        m_DescriptorManager = std::make_unique<VulkanDescriptorManager>(this);
+		if (m_DescriptorManager->Init() != Result::Success) {
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to initialize Vulkan descriptor manager.");
             return Result::Failed;
         }
 
@@ -126,7 +128,7 @@ namespace RealRHI {
     }
 
     void VulkanDevice::BindDescriptorHeaps(VkCommandBuffer commandBuffer) const {
-		m_DescriptorHeaps->BindDescriptorHeaps(commandBuffer);
+		m_DescriptorManager->BindDescriptorHeaps(commandBuffer);
     }
 
     void VulkanDevice::Submit(CommandList* cmd, Swapchain* sc, const FrameContext& frame) {

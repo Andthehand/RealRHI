@@ -1,12 +1,11 @@
 #pragma once
 #include "CommandList.h"
 #include "VulkanDevice.h"
+#include "VulkanPipeline.h"
 
 #include <volk.h>
 
 namespace RealRHI {
-	class VulkanPipeline;
-
 	class VulkanCommandList : public CommandList {
 	public:
 		VulkanCommandList(const VulkanDevice* device);

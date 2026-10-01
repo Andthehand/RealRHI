@@ -1,12 +1,13 @@
 #include "VulkanTexture.h"
 #include "VulkanConvertions.h"
 
-#include "VulkanCommandList.h"
 #include "VulkanBuffer.h"
+#include "VulkanCommandList.h"
+#include "VulkanDescriptorManager.h"
 
 namespace RealRHI {
-    VulkanTexture::VulkanTexture(const VulkanDevice* device) : m_Device(device) {
-    }
+    VulkanTexture::VulkanTexture(const VulkanDevice* device) 
+        : m_Device(device) {}
 
     VulkanTexture::~VulkanTexture() {
         if (!m_IsExternal) {
@@ -61,17 +62,22 @@ namespace RealRHI {
             return Result::Failed;
         }
 
-        if (CreateSampler() == Result::Failed) {
-            return Result::Failed;
-        }
+		if (m_Device->GetDescriptorManager()->AllocateSamplerDescriptor(GetSampler()) == UINT32_MAX) {
+			return Result::Failed;
+		}
 
-        if (m_TextureView.Init(m_Device, TextureViewDesc{
-            .texture = this,
-            .mipLevelCount = m_MipLevels,
-            .arrayLayerCount = m_ArrayLayers,
-            }) != Result::Success) {
-            return Result::Failed;
-        }
+		if (m_TextureView.Init(m_Device, TextureViewDesc{
+			.texture = this,
+			.mipLevelCount = m_MipLevels,
+			.arrayLayerCount = m_ArrayLayers,
+			}) != Result::Success) {
+			return Result::Failed;
+		}
+
+		//upload image descriptor to descriptor heap
+		if (m_Device->GetDescriptorManager()->AllocateImageDescriptor(this) == UINT32_MAX) {
+			return Result::Failed;
+		}
 
 		return Result::Success;
     }
@@ -187,7 +193,7 @@ namespace RealRHI {
         return Result::Success;
     }
 
-    Result VulkanTexture::CreateSampler() {
+    VkSamplerCreateInfo VulkanTexture::GetSampler() {
         VkSamplerCreateInfo samplerInfo{
             .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
             .magFilter = VK_FILTER_LINEAR,
@@ -207,11 +213,6 @@ namespace RealRHI {
             .unnormalizedCoordinates = VK_FALSE,
         };
 
-        if (vkCreateSampler(m_Device->GetDevice(), &samplerInfo, nullptr, &m_Sampler) != VK_SUCCESS) {
-            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan sampler.");
-            return Result::Failed;
-        }
-
-        return Result::Success;
+        return samplerInfo;
     }
 }

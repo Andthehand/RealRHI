@@ -16,6 +16,10 @@ namespace RealRHI {
 
 		Result Init(VkPhysicalDeviceDescriptorHeapPropertiesEXT heapProperties);
 
+		const VkPhysicalDeviceDescriptorHeapPropertiesEXT& GetHeapProperties() const { return m_HeapProperties; }
+		DescriptorHeap GetResourceHeap() const { return m_DescriptorHeapResources; }
+		DescriptorHeap GetSamplerHeap() const { return m_DescriptorHeapSamplers; }
+
 		void BindDescriptorHeaps(VkCommandBuffer commandBuffer) const;
 	private:
 		Result CreateDescriptorHeaps();

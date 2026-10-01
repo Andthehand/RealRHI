@@ -1,12 +1,15 @@
 #pragma once
+#include "BufferDesc.h"
 #include "DescriptorsDesc.h"
-#include "TextureFormat.h"
-#include "TextureDesc.h"
 #include "PipelineDesc.h"
-#include "TextureViewDesc.h"
+#include "RenderingInfo.h"
 #include "Shader.h"
+#include "TextureDesc.h"
+#include "TextureFormat.h"
+#include "TextureViewDesc.h"
 
 #include <volk.h>
+#include <vma/vk_mem_alloc.h>
 
 namespace RealRHI::Utils {
     // ---------------------- DescriptorDesc ----------------
@@ -134,16 +137,22 @@ namespace RealRHI::Utils {
     // ---------------------- BufferDesc -------------------
     constexpr VkBufferUsageFlags BufferUsageToVkBufferUsage(BufferUsage usage) {
         VkBufferUsageFlags flags = 0;
-        if (Any(usage & BufferUsage::Vertex)) flags |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-        if (Any(usage & BufferUsage::Index)) flags |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-        if (Any(usage & BufferUsage::Uniform)) flags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        if (Any(usage & BufferUsage::Storage)) flags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-        if (Any(usage & BufferUsage::TransferSrc)) flags |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-        if (Any(usage & BufferUsage::TransferDst)) flags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-        if (Any(usage & BufferUsage::Indirect)) flags |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
-        if (Any(usage & BufferUsage::Heap)) flags |= VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT;
-		if (Any(usage & BufferUsage::Addressable)) flags |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+        if (Any(usage & BufferUsage::Vertex)) flags         |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        if (Any(usage & BufferUsage::Index)) flags          |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+        if (Any(usage & BufferUsage::Uniform)) flags        |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        if (Any(usage & BufferUsage::Storage)) flags        |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        if (Any(usage & BufferUsage::TransferSrc)) flags    |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        if (Any(usage & BufferUsage::TransferDst)) flags    |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        if (Any(usage & BufferUsage::Indirect)) flags       |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+        if (Any(usage & BufferUsage::Heap)) flags           |= VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT;
+		if (Any(usage & BufferUsage::Addressable)) flags    |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
         return flags;
+	}
+
+	constexpr VkDescriptorType BufferUsageToVkDescriptorType(BufferUsage usage) {
+		if (Any(usage & BufferUsage::Uniform)) return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		if (Any(usage & BufferUsage::Storage)) return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		return VK_DESCRIPTOR_TYPE_MAX_ENUM;
 	}
 
     constexpr VmaAllocationCreateInfo MemoryUsageToVmaAllocationCreateInfo(MemoryUsage usage) {

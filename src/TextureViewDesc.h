@@ -1,9 +1,9 @@
 #pragma once
+#include "Texture.h"
+
 #include <cstdint>
 
 namespace RealRHI {
-	class Texture;
-
 	enum class TextureViewType {
 		View1D,
 		View2D,

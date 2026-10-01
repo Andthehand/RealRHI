@@ -1,10 +1,13 @@
 #pragma once
+#include "CommandList.h"
 #include "Texture.h"
 #include "TextureDesc.h"
 
+#include "VulkanDevice.h"
 #include "VulkanTextureView.h"
 
 #include <volk.h>
+#include <vma/vk_mem_alloc.h>
 
 namespace RealRHI {
 	class VulkanTexture : public Texture {
@@ -33,12 +36,11 @@ namespace RealRHI {
 		friend class VulkanCommandList;
 		VkImage GetImage() const { return m_Image; }
 		VkFormat GetFormat() const { return m_Format; }
-		VkSampler GetSampler() const { return m_Sampler; }
 
 		static Result CreateFromSwapChain(const VulkanDevice* device, VkFormat format, VkImage image, Ref<VulkanTexture>& outTexture);
 		Result InitSwapChainTexture(VkFormat format, VkImage image);
 
-		Result CreateSampler(); // TODO: Add sampler desc
+		VkSamplerCreateInfo GetSampler(); // TODO: Add sampler desc
 	private:
 		const VulkanDevice* m_Device = nullptr;
 		VkImage m_Image = VK_NULL_HANDLE;
@@ -51,7 +53,7 @@ namespace RealRHI {
 		VkExtent3D m_ImageExtent{ .width = 0, .height = 0, .depth = 1, };
 		uint32_t m_MipLevels = 1;
 		uint32_t m_ArrayLayers = 1;
-		
+
 		// This need to be at the end because of weird c++ rules
 		// https://stackoverflow.com/questions/6308915/member-fields-order-of-construction
 		VulkanTextureView m_TextureView;
