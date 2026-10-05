@@ -180,9 +180,6 @@ void RecordCommandBuffer(RealRHI::CommandList* cmd, const RealRHI::FrameContext&
 
     cmd->BeginRendering(renderingInfo);
     cmd->BindPipeline(pipeline.Raw());
-    if (cmd->BindTexture("material.albedo", texture->GetTextureView()) != RealRHI::Result::Success) {
-        std::cerr << "Failed to bind texture" << std::endl;
-    }
 
     RealRHI::Viewport viewport{
         .x = 0.0f,

@@ -14,8 +14,6 @@ namespace RealRHI {
 	};
 
 	struct TextureViewDesc {
-		const Texture* texture;
-
 		TextureViewType type = TextureViewType::View2D;
 
 		// Subresource range

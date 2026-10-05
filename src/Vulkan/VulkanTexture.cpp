@@ -215,4 +215,30 @@ namespace RealRHI {
 
         return samplerInfo;
     }
+
+    VkImageViewCreateInfo VulkanTexture::GetImageViewCreateInfo(const TextureViewDesc& desc) {
+        constexpr VkComponentMapping componentMapping{
+            .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .a = VK_COMPONENT_SWIZZLE_IDENTITY,
+        };
+        VkImageSubresourceRange subresourceRange{
+            .aspectMask = Utils::TextureFormatToVkImageAspect(Utils::VkFormatToTextureFormat(m_Format)),
+            .baseMipLevel = desc.baseMipLevel,
+            .levelCount = desc.mipLevelCount,
+            .baseArrayLayer = desc.baseArrayLayer,
+            .layerCount = desc.arrayLayerCount,
+        };
+        VkImageViewCreateInfo imageViewCreateInfo{
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = m_Image,
+            .viewType = Utils::TextureViewTypeToVkImageViewType(desc.type),
+            .format = m_Format,
+            .components = componentMapping,
+            .subresourceRange = subresourceRange,
+        };
+
+        return imageViewCreateInfo;
+    }
 }

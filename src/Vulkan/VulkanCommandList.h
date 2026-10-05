@@ -25,7 +25,6 @@ namespace RealRHI {
 
 		void BindPipeline(Pipeline* pipeline) override;
 		Result BindBuffer(const char* name, Buffer* buffer, uint64_t offset = 0, uint64_t range = UINT64_MAX) override;
-		Result BindTexture(const char* name, TextureView* textureView) override;
 		void BindVertexBuffer(Buffer* vertexBuffer) override;
 		void BindIndexBuffer(Buffer* indexBuffer) override;
 

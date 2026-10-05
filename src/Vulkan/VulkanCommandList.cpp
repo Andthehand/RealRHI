@@ -148,11 +148,6 @@ namespace RealRHI {
 		return Result::Success;
     }
 
-    Result VulkanCommandList::BindTexture(const char* name, TextureView* textureView) {
-		// TODO: Implement
-		return Result::Success;
-    }
-
     void VulkanCommandList::BindVertexBuffer(Buffer* vertexBuffer) {
         VkBuffer vertexBuffers[] = { static_cast<VulkanBuffer*>(vertexBuffer)->GetBuffer() };
         VkDeviceSize offsets[] = { 0 };

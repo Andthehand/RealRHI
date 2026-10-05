@@ -42,6 +42,8 @@ namespace RealRHI {
 
 		VkSamplerCreateInfo GetSampler(); // TODO: Add sampler desc
 	private:
+		VkImageViewCreateInfo GetImageViewCreateInfo(const TextureViewDesc& desc);
+	private:
 		const VulkanDevice* m_Device = nullptr;
 		VkImage m_Image = VK_NULL_HANDLE;
 		VmaAllocation m_Allocation = VK_NULL_HANDLE;
