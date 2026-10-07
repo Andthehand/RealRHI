@@ -5,33 +5,41 @@
 
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <vector>
 
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
 constexpr uint32_t TEXTURE_WIDTH = 256;
 constexpr uint32_t TEXTURE_HEIGHT = 256;
+constexpr uint32_t TEXTURE_COUNT = 2;
 
 struct Vertex {
     float pos[2];
     float uv[2];
+    uint32_t texIdx;
+    uint32_t samplerIdx;
 };
 
-const std::vector<Vertex> vertices = {
-    {{-0.75f, -0.75f}, {0.0f, 1.0f}},
-    {{ 0.75f, -0.75f}, {1.0f, 1.0f}},
-    {{ 0.75f,  0.75f}, {1.0f, 0.0f}},
-    {{-0.75f, -0.75f}, {0.0f, 1.0f}},
-    {{ 0.75f,  0.75f}, {1.0f, 0.0f}},
-    {{-0.75f,  0.75f}, {0.0f, 0.0f}},
-};
+std::vector<Vertex> BuildQuadVertices(float minX, float maxX, uint32_t textureIndex, uint32_t samplerIndex) {
+    return {
+        {{minX, -0.75f}, {0.0f, 1.0f}, textureIndex, samplerIndex},
+        {{maxX, -0.75f}, {1.0f, 1.0f}, textureIndex, samplerIndex},
+        {{maxX,  0.75f}, {1.0f, 0.0f}, textureIndex, samplerIndex},
+        {{minX, -0.75f}, {0.0f, 1.0f}, textureIndex, samplerIndex},
+        {{maxX,  0.75f}, {1.0f, 0.0f}, textureIndex, samplerIndex},
+        {{minX,  0.75f}, {0.0f, 0.0f}, textureIndex, samplerIndex},
+    };
+}
+
+std::vector<Vertex> vertices;
 
 std::unique_ptr<RealRHI::Device> device;
 RealRHI::Ref<RealRHI::Window> window;
 RealRHI::Ref<RealRHI::Swapchain> swapchain;
 RealRHI::Ref<RealRHI::Pipeline> pipeline;
 RealRHI::Ref<RealRHI::Buffer> vertexBuffer;
-RealRHI::Ref<RealRHI::Texture> texture;
+std::vector<RealRHI::Ref<RealRHI::Texture>> textures;
 std::vector<RealRHI::Ref<RealRHI::CommandList>> commandLists;
 
 std::vector<uint8_t> BuildCheckerboardTexture() {
@@ -43,6 +51,27 @@ std::vector<uint8_t> BuildCheckerboardTexture() {
             const uint8_t red = checker ? 255 : 40;
             const uint8_t green = checker ? static_cast<uint8_t>((x * 255) / (TEXTURE_WIDTH - 1)) : 180;
             const uint8_t blue = checker ? static_cast<uint8_t>((y * 255) / (TEXTURE_HEIGHT - 1)) : 255;
+
+            const size_t pixelIndex = static_cast<size_t>((y * TEXTURE_WIDTH + x) * 4);
+            pixels[pixelIndex + 0] = red;
+            pixels[pixelIndex + 1] = green;
+            pixels[pixelIndex + 2] = blue;
+            pixels[pixelIndex + 3] = 255;
+        }
+    }
+
+    return pixels;
+}
+
+std::vector<uint8_t> BuildStripeTexture() {
+    std::vector<uint8_t> pixels(TEXTURE_WIDTH * TEXTURE_HEIGHT * 4);
+
+    for (uint32_t y = 0; y < TEXTURE_HEIGHT; ++y) {
+        for (uint32_t x = 0; x < TEXTURE_WIDTH; ++x) {
+            const bool stripe = ((x / 16) % 2) == 0;
+            const uint8_t red = stripe ? 40 : 250;
+            const uint8_t green = stripe ? static_cast<uint8_t>((y * 255) / (TEXTURE_HEIGHT - 1)) : 100;
+            const uint8_t blue = stripe ? 255 : static_cast<uint8_t>((x * 255) / (TEXTURE_WIDTH - 1));
 
             const size_t pixelIndex = static_cast<size_t>((y * TEXTURE_WIDTH + x) * 4);
             pixels[pixelIndex + 0] = red;
@@ -112,8 +141,43 @@ void CreateGraphicsPipeline() {
 }
 
 void CreateVertexBuffer() {
+    if (textures.size() != TEXTURE_COUNT) {
+        std::cerr << "Failed to create vertex buffer: textures not created" << std::endl;
+        return;
+    }
+
+    vertices.clear();
+    vertices.reserve(TEXTURE_COUNT * 6);
+
+    struct QuadDesc {
+        float minX;
+        float maxX;
+    };
+
+    const QuadDesc quadDescs[TEXTURE_COUNT] = {
+        { -0.95f, -0.05f },
+        { 0.05f, 0.95f },
+    };
+
+    for (uint32_t i = 0; i < TEXTURE_COUNT; ++i) {
+        if (textures[i].Raw() == nullptr) {
+            std::cerr << "Failed to create vertex buffer: texture not created" << std::endl;
+            return;
+        }
+
+        const uint32_t textureIndex = textures[i]->GetSampledImageDescriptorIndex();
+        const uint32_t samplerIndex = textures[i]->GetSamplerDescriptorIndex();
+        if (textureIndex == std::numeric_limits<uint32_t>::max() || samplerIndex == std::numeric_limits<uint32_t>::max()) {
+            std::cerr << "Failed to create vertex buffer: invalid texture or sampler descriptor index" << std::endl;
+            return;
+        }
+
+        std::vector<Vertex> quadVertices = BuildQuadVertices(quadDescs[i].minX, quadDescs[i].maxX, textureIndex, samplerIndex);
+        vertices.insert(vertices.end(), quadVertices.begin(), quadVertices.end());
+    }
+
     RealRHI::Result result = device->CreateBuffer({
-        .size = sizeof(vertices[0]) * vertices.size(),
+        .size = sizeof(Vertex) * vertices.size(),
         .usage = RealRHI::BufferUsage::Vertex,
         .memoryUsage = RealRHI::MemoryUsage::CPUToGPU,
         .initialData = vertices.data(),
@@ -123,25 +187,34 @@ void CreateVertexBuffer() {
     }
 }
 
-void CreateTexture() {
-    RealRHI::Result result = device->CreateTexture({
-        .width = TEXTURE_WIDTH,
-        .height = TEXTURE_HEIGHT,
-        .depth = 1,
-        .mipLevels = 1,
-        .arrayLayers = 1,
-        .format = RealRHI::TextureFormat::RGBA8_UNorm,
-        .usage = RealRHI::TextureUsage::ShaderResource | RealRHI::TextureUsage::TransferDst,
-    }, texture);
-    if (result != RealRHI::Result::Success) {
-        std::cerr << "Failed to create texture" << std::endl;
-        return;
-    }
+void CreateTextures() {
+    textures.resize(TEXTURE_COUNT);
 
-    const std::vector<uint8_t> pixels = BuildCheckerboardTexture();
-    result = texture->UploadData(pixels.data(), static_cast<uint32_t>(pixels.size()));
-    if (result != RealRHI::Result::Success) {
-        std::cerr << "Failed to upload texture data" << std::endl;
+    const std::vector<uint8_t> texturePixels[TEXTURE_COUNT] = {
+        BuildCheckerboardTexture(),
+        BuildStripeTexture(),
+    };
+
+    for (uint32_t i = 0; i < TEXTURE_COUNT; ++i) {
+        RealRHI::Result result = device->CreateTexture({
+            .width = TEXTURE_WIDTH,
+            .height = TEXTURE_HEIGHT,
+            .depth = 1,
+            .mipLevels = 1,
+            .arrayLayers = 1,
+            .format = RealRHI::TextureFormat::RGBA8_UNorm,
+            .usage = RealRHI::TextureUsage::ShaderResource | RealRHI::TextureUsage::TransferDst,
+        }, textures[i]);
+        if (result != RealRHI::Result::Success) {
+            std::cerr << "Failed to create texture" << std::endl;
+            return;
+        }
+
+        result = textures[i]->UploadData(texturePixels[i].data(), static_cast<uint32_t>(texturePixels[i].size()));
+        if (result != RealRHI::Result::Success) {
+            std::cerr << "Failed to upload texture data" << std::endl;
+            return;
+        }
     }
 }
 
@@ -221,7 +294,10 @@ void DrawFrame() {
 void Cleanup() {
     device->WaitIdle();
 
-    texture.Reset();
+    for (auto& texture : textures) {
+        texture.Reset();
+    }
+    textures.clear();
     pipeline.Reset();
     vertexBuffer.Reset();
     commandLists.clear();
@@ -249,11 +325,11 @@ int main() {
 
     CreateSwapChain();
     CreateGraphicsPipeline();
+    CreateTextures();
     CreateVertexBuffer();
-    CreateTexture();
     CreateCommandLists();
 
-    std::cout << "Rendering procedural texture..." << std::endl;
+    std::cout << "Rendering procedural textures..." << std::endl;
 
     bool running = true;
     SDL_Event event;

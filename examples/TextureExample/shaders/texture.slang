@@ -4,15 +4,16 @@ struct VSInput
     float2 pos;
     float2 uv;
 
-    // uint texIdx;
+    uint texIdx;
+    uint samplerIdx;
 };
 
 struct VSOutput
 {
     float4 pos : SV_Position;
     float2 uv;
-
     uint texIdx;
+    uint samplerIdx;
 };
 
 [require(spvDescriptorHeapEXT)]
@@ -22,7 +23,8 @@ VSOutput main(VSInput input)
     VSOutput output;
     output.pos = float4(input.pos, 0.0, 1.0);
     output.uv = input.uv;
-    output.texIdx = 1048575;
+    output.texIdx = input.texIdx;
+    output.samplerIdx = input.samplerIdx;
     return output;
 }
 
@@ -31,6 +33,6 @@ VSOutput main(VSInput input)
 float4 main(VSOutput input) : SV_Target
 {
     Texture2D tex = Texture2D.Handle(uint2(input.texIdx, 0));
-    SamplerState samp = SamplerState.Handle(uint2(0, 0));
+    SamplerState samp = SamplerState.Handle(uint2(input.samplerIdx, 0));
     return tex.Sample(samp, input.uv);
 }
