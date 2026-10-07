@@ -30,6 +30,10 @@ namespace RealRHI {
 			return &m_TextureView;
 		}
 
+		uint32_t GetSampledImageDescriptorIndex() const { return m_SampledImageDescriptorIndex; }
+		uint32_t GetStorageImageDescriptorIndex() const { return m_StorageImageDescriptorIndex; }
+		uint32_t GetSamplerDescriptorIndex() const { return m_SamplerDescriptorIndex; }
+
 	protected:
 		friend class VulkanSwapchain;
 		friend class VulkanTextureView;
@@ -42,19 +46,21 @@ namespace RealRHI {
 
 		VkSamplerCreateInfo GetSampler(); // TODO: Add sampler desc
 	private:
-		VkImageViewCreateInfo GetImageViewCreateInfo(const TextureViewDesc& desc);
-	private:
 		const VulkanDevice* m_Device = nullptr;
 		VkImage m_Image = VK_NULL_HANDLE;
 		VmaAllocation m_Allocation = VK_NULL_HANDLE;
 
 		TextureLayout m_Layout = TextureLayout::Undefined;
+		TextureUsage m_Usage = TextureUsage::None;
 		VkFormat m_Format = VK_FORMAT_UNDEFINED;
 		bool m_IsExternal = false; // Whether the image is owned by us or external (e.g. swapchain)
 
 		VkExtent3D m_ImageExtent{ .width = 0, .height = 0, .depth = 1, };
 		uint32_t m_MipLevels = 1;
 		uint32_t m_ArrayLayers = 1;
+		uint32_t m_SampledImageDescriptorIndex = UINT32_MAX;
+		uint32_t m_StorageImageDescriptorIndex = UINT32_MAX;
+		uint32_t m_SamplerDescriptorIndex = UINT32_MAX;
 
 		// This need to be at the end because of weird c++ rules
 		// https://stackoverflow.com/questions/6308915/member-fields-order-of-construction

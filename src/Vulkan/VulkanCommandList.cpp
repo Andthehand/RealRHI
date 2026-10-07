@@ -64,35 +64,80 @@ namespace RealRHI {
 		return Result::Success;
     }
 
-    void VulkanCommandList::BeginRendering(const RenderingInfo& renderingInfo) {
+	void VulkanCommandList::BeginRendering(const RenderingInfo& renderingInfo) {
 		std::vector<VkRenderingAttachmentInfo> colorAttachmentInfos(renderingInfo.colorAttachments.size());
-        for (uint8_t i = 0; i < renderingInfo.colorAttachments.size(); i++) {
-            const auto& attachment = renderingInfo.colorAttachments[i];
+		for (uint32_t i = 0; i < renderingInfo.colorAttachments.size(); i++) {
+			const auto& attachment = renderingInfo.colorAttachments[i];
+			if (attachment.target == nullptr) {
+				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Rendering color attachment is missing a texture view.");
+				return;
+			}
+
+			auto* textureView = static_cast<VulkanTextureView*>(attachment.target);
 
 			VkClearValue clearColor = { {{attachment.clearColor.r, attachment.clearColor.g, attachment.clearColor.b, attachment.clearColor.a}} };
-            colorAttachmentInfos[i] = {
-                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                .imageView = static_cast<VulkanTextureView*>(attachment.target)->GetImageView(),
-                .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                .resolveMode = VK_RESOLVE_MODE_NONE,
-                .loadOp = Utils::LoadOpToVkLoadOp(attachment.loadOp),
-                .storeOp = Utils::StoreOpToVkStoreOp(attachment.storeOp),
-                .clearValue = clearColor
+			colorAttachmentInfos[i] = {
+				.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+				.imageView = textureView->GetImageView(),
+				.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+				.resolveMode = VK_RESOLVE_MODE_NONE,
+				.loadOp = Utils::LoadOpToVkLoadOp(attachment.loadOp),
+				.storeOp = Utils::StoreOpToVkStoreOp(attachment.storeOp),
+				.clearValue = clearColor
 			};
-        }
+		}
 
+		VkRenderingAttachmentInfo depthAttachmentInfo{
+			.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+		};
+		const VkRenderingAttachmentInfo* pDepthAttachment = nullptr;
+		const VkRenderingAttachmentInfo* pStencilAttachment = nullptr;
+		if (renderingInfo.hasDepth) {
+			const auto& attachment = renderingInfo.depthAttachment;
+			if (attachment.target == nullptr) {
+				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Rendering depth attachment is missing a texture view.");
+				return;
+			}
+
+			auto* textureView = static_cast<VulkanTextureView*>(attachment.target);
+
+			const VkImageAspectFlags aspectMask = textureView->GetImageViewCreateInfo().subresourceRange.aspectMask;
+			const bool hasStencilAspect = (aspectMask & VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
+			const bool readOnly = attachment.readOnlyDepth && (!hasStencilAspect || attachment.readOnlyStencil);
+			VkClearValue clearValue{};
+			clearValue.depthStencil = {
+				.depth = attachment.clear.depth,
+				.stencil = attachment.clear.stencil,
+			};
+
+			depthAttachmentInfo = {
+				.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+				.imageView = textureView->GetImageView(),
+				.imageLayout = readOnly ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+				.resolveMode = VK_RESOLVE_MODE_NONE,
+				.loadOp = Utils::LoadOpToVkLoadOp(attachment.depthLoadOp),
+				.storeOp = Utils::StoreOpToVkStoreOp(attachment.depthStoreOp),
+				.clearValue = clearValue,
+			};
+			if ((aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) {
+				pDepthAttachment = &depthAttachmentInfo;
+			}
+			if (hasStencilAspect) {
+				pStencilAttachment = &depthAttachmentInfo;
+			}
+		}
 
 		auto& renderAreaRect = renderingInfo.renderArea;
-        VkRect2D renderArea{
-            .offset = {
-                .x = renderAreaRect.x, 
-                .y = renderAreaRect.y,
-            },
-            .extent = {
+		VkRect2D renderArea{
+			.offset = {
+				.x = renderAreaRect.x, 
+				.y = renderAreaRect.y,
+			},
+			.extent = {
 				.width = renderAreaRect.width,
 				.height = renderAreaRect.height,
-            }
-        };
+			}
+		};
 
 		VkRenderingInfo renderPassInfo{
 			.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
@@ -100,6 +145,8 @@ namespace RealRHI {
 			.layerCount = 1,
 			.colorAttachmentCount = (uint32_t)colorAttachmentInfos.size(),
 			.pColorAttachments = colorAttachmentInfos.data(),
+			.pDepthAttachment = pDepthAttachment,
+			.pStencilAttachment = pStencilAttachment,
 		};
 
 		vkCmdBeginRendering(m_CommandBuffer, &renderPassInfo);

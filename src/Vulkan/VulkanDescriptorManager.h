@@ -3,12 +3,14 @@
 
 #include "VulkanDescriptorHeaps.h"
 #include "VulkanDevice.h"
-#include "VulkanTexture.h"
 
 #include <memory>
 #include <vector>
 
 namespace RealRHI {
+	class VulkanBuffer;
+	class VulkanTextureView;
+
 	class VulkanDescriptorManager {
 	public:
 		VulkanDescriptorManager(const VulkanDevice* device);
@@ -22,7 +24,7 @@ namespace RealRHI {
 		uint32_t AllocateBufferDescriptor(const VulkanBuffer* buffer);
 		void FreeBufferDescriptor(uint32_t index);
 
-		uint32_t AllocateImageDescriptor(const VulkanTexture* texture);
+		uint32_t AllocateImageDescriptor(const VulkanTextureView* textureView, VkDescriptorType descriptorType, VkImageLayout descriptorAccessLayout);
 		void FreeImageDescriptor(uint32_t index);
 
 		uint32_t AllocateSamplerDescriptor(const VkSamplerCreateInfo& samplerCI);

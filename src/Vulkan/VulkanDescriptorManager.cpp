@@ -1,6 +1,8 @@
 #include "VulkanDescriptorManager.h"
 
+#include "VulkanBuffer.h"
 #include "VulkanConvertions.h"
+#include "VulkanTextureView.h"
 
 namespace RealRHI {
 	VulkanDescriptorManager::VulkanDescriptorManager(const VulkanDevice* device) 
@@ -67,12 +69,17 @@ namespace RealRHI {
 		};
 
 		// Write the descriptor to descriptorMemory
-		VkResult result = vkWriteResourceDescriptorsEXT(
+		if(vkWriteResourceDescriptorsEXT(
 			m_Device->GetDevice(),
 			1,
 			&descriptorInfo,
 			&hostAddressRange
-		);
+		) != VK_SUCCESS) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to write Vulkan buffer descriptor.");
+			m_FreeBufferDescriptors.push_back(bufferDescriptorIndex);
+
+			return UINT32_MAX;
+		}
 
 		// Upload descriptorMemory to the m_DescriptorHeaps at the correct offset
 		m_DescriptorHeaps->GetResourceHeap().buffer->WriteData(descriptorMemory.data(), m_BufferDescriptorSize, bufferDescriptorIndex * m_BufferDescriptorSize);
@@ -83,7 +90,7 @@ namespace RealRHI {
 		m_FreeBufferDescriptors.push_back(index);
 	}
 
-	uint32_t VulkanDescriptorManager::AllocateImageDescriptor(const VulkanTexture* texture) {
+	uint32_t VulkanDescriptorManager::AllocateImageDescriptor(const VulkanTextureView* textureView, VkDescriptorType descriptorType, VkImageLayout descriptorAccessLayout) {
 		// Check if there are any free image descriptors available
 		uint32_t imageDescriptorIndex;
 		if (!m_FreeImageDescriptors.empty()) {
@@ -94,16 +101,15 @@ namespace RealRHI {
 			imageDescriptorIndex = m_NextImageDescriptorIndex--;
 		}
 
-		const auto* textureView = static_cast<const VulkanTextureView*>(texture->GetTextureView());
 		VkImageDescriptorInfoEXT imageDescriptorInfo{
 			.sType = VK_STRUCTURE_TYPE_IMAGE_DESCRIPTOR_INFO_EXT,
 			.pView = &textureView->GetImageViewCreateInfo(),
-			.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			.layout = descriptorAccessLayout,
 		};
 
 		VkResourceDescriptorInfoEXT descriptorInfo{
 			.sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT,
-			.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+			.type = descriptorType,
 			.data = {
 				.pImage = &imageDescriptorInfo,
 			}
@@ -116,15 +122,23 @@ namespace RealRHI {
 		};
 
 		// Write the descriptor to descriptorMemory
-		VkResult result = vkWriteResourceDescriptorsEXT(
+		if(vkWriteResourceDescriptorsEXT(
 			m_Device->GetDevice(),
 			1,
 			&descriptorInfo,
 			&hostAddressRange
-		);
+		) != VK_SUCCESS) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to write Vulkan image descriptor.");
+			m_FreeImageDescriptors.push_back(imageDescriptorIndex);
 
-		// Upload descriptorMemory to the m_DescriptorHeaps at the correct offset
-		m_DescriptorHeaps->GetResourceHeap().buffer->WriteData(descriptorMemory.data(), m_ImageDescriptorSize, imageDescriptorIndex * m_ImageDescriptorSize);
+			return UINT32_MAX;
+		}
+
+		if (m_DescriptorHeaps->GetResourceHeap().buffer->WriteData(descriptorMemory.data(), m_ImageDescriptorSize, imageDescriptorIndex * m_ImageDescriptorSize) != Result::Success) {
+			m_FreeImageDescriptors.push_back(imageDescriptorIndex);
+
+			return UINT32_MAX;
+		}
 		return imageDescriptorIndex;
 	}
 
@@ -149,12 +163,17 @@ namespace RealRHI {
 			.size = m_SamplerDescriptorSize,
 		};
 
-		vkWriteSamplerDescriptorsEXT(
+		if(vkWriteSamplerDescriptorsEXT(
 			m_Device->GetDevice(),
 			1,
 			&samplerCI,
 			&hostAddressRange
-		);
+		) != VK_SUCCESS) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to write Vulkan sampler descriptor.");
+			m_FreeSamplerDescriptors.push_back(samplerDescriptorIndex);
+
+			return UINT32_MAX;
+		}
 
 		m_DescriptorHeaps->GetSamplerHeap().buffer->WriteData(descriptorMemory.data(), m_SamplerDescriptorSize, samplerDescriptorIndex * m_SamplerDescriptorSize);
 		return samplerDescriptorIndex;

@@ -9,12 +9,24 @@ namespace RealRHI {
     VulkanTexture::VulkanTexture(const VulkanDevice* device) 
         : m_Device(device) {}
 
-    VulkanTexture::~VulkanTexture() {
-        if (!m_IsExternal) {
-            vmaDestroyImage(m_Device->GetAllocator(), m_Image, m_Allocation);
+	VulkanTexture::~VulkanTexture() {
+		if (m_SampledImageDescriptorIndex != UINT32_MAX) {
+			m_Device->GetDescriptorManager()->FreeImageDescriptor(m_SampledImageDescriptorIndex);
+		}
+		if (m_StorageImageDescriptorIndex != UINT32_MAX) {
+			m_Device->GetDescriptorManager()->FreeImageDescriptor(m_StorageImageDescriptorIndex);
+		}
+		if (m_SamplerDescriptorIndex != UINT32_MAX) {
+			m_Device->GetDescriptorManager()->FreeSamplerDescriptor(m_SamplerDescriptorIndex);
+		}
+		if (m_Sampler != VK_NULL_HANDLE) {
 			vkDestroySampler(m_Device->GetDevice(), m_Sampler, nullptr);
-        }
-    }
+		}
+
+		if (!m_IsExternal) {
+			vmaDestroyImage(m_Device->GetAllocator(), m_Image, m_Allocation);
+		}
+	}
 
     Result VulkanTexture::Create(const VulkanDevice* device, const TextureDesc& desc, Ref<VulkanTexture>& outTexture) {
         Ref<VulkanTexture> texture = Ref<VulkanTexture>::Create(device);
@@ -27,15 +39,16 @@ namespace RealRHI {
         return Result::Success;
     }
 
-    Result VulkanTexture::Init(const TextureDesc& desc) {
+	Result VulkanTexture::Init(const TextureDesc& desc) {
 		m_Format = Utils::TextureFormatToVkFormat(desc.format);
 		m_Layout = TextureLayout::Undefined;
-        m_MipLevels = desc.mipLevels;
-        m_ArrayLayers = desc.arrayLayers;
-        m_ImageExtent = {
-            .width = desc.width,
-            .height = desc.height,
-            .depth = desc.depth,
+		m_Usage = desc.usage;
+		m_MipLevels = desc.mipLevels;
+		m_ArrayLayers = desc.arrayLayers;
+		m_ImageExtent = {
+			.width = desc.width,
+			.height = desc.height,
+			.depth = desc.depth,
 		};
 
         VkImageCreateInfo imageInfo{
@@ -62,21 +75,39 @@ namespace RealRHI {
             return Result::Failed;
         }
 
-		if (m_Device->GetDescriptorManager()->AllocateSamplerDescriptor(GetSampler()) == UINT32_MAX) {
-			return Result::Failed;
-		}
-
-		if (m_TextureView.Init(m_Device, TextureViewDesc{
-			.texture = this,
+		const bool createNativeImageView = Any(m_Usage & TextureUsage::RenderTarget) || Any(m_Usage & TextureUsage::DepthStencil);
+		if (m_TextureView.Init(m_Device, this, TextureViewDesc{
 			.mipLevelCount = m_MipLevels,
 			.arrayLayerCount = m_ArrayLayers,
-			}) != Result::Success) {
+			}, createNativeImageView) != Result::Success) {
 			return Result::Failed;
 		}
 
-		//upload image descriptor to descriptor heap
-		if (m_Device->GetDescriptorManager()->AllocateImageDescriptor(this) == UINT32_MAX) {
-			return Result::Failed;
+		if (Any(m_Usage & TextureUsage::ShaderResource)) {
+			m_SamplerDescriptorIndex = m_Device->GetDescriptorManager()->AllocateSamplerDescriptor(GetSampler());
+			if (m_SamplerDescriptorIndex == UINT32_MAX) {
+				return Result::Failed;
+			}
+
+			m_SampledImageDescriptorIndex = m_Device->GetDescriptorManager()->AllocateImageDescriptor(
+				&m_TextureView,
+				VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+			);
+			if (m_SampledImageDescriptorIndex == UINT32_MAX) {
+				return Result::Failed;
+			}
+		}
+
+		if (Any(m_Usage & TextureUsage::Storage)) {
+			m_StorageImageDescriptorIndex = m_Device->GetDescriptorManager()->AllocateImageDescriptor(
+				&m_TextureView,
+				VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+				VK_IMAGE_LAYOUT_GENERAL
+			);
+			if (m_StorageImageDescriptorIndex == UINT32_MAX) {
+				return Result::Failed;
+			}
 		}
 
 		return Result::Success;
@@ -183,15 +214,19 @@ namespace RealRHI {
         return Result::Success;
     }
 
-    Result VulkanTexture::InitSwapChainTexture(VkFormat format, VkImage image) {
+	Result VulkanTexture::InitSwapChainTexture(VkFormat format, VkImage image) {
 		m_IsExternal = true;
-        m_Format = format;
+		m_Layout = TextureLayout::Undefined;
+		m_Usage = TextureUsage::RenderTarget;
+		m_Format = format;
 		m_Image = image;
 
-        m_TextureView.Init(m_Device, TextureViewDesc{ .texture = this });
+		if (m_TextureView.Init(m_Device, this, TextureViewDesc{}, true) != Result::Success) {
+			return Result::Failed;
+		}
 
-        return Result::Success;
-    }
+		return Result::Success;
+	}
 
     VkSamplerCreateInfo VulkanTexture::GetSampler() {
         VkSamplerCreateInfo samplerInfo{
@@ -214,31 +249,5 @@ namespace RealRHI {
         };
 
         return samplerInfo;
-    }
-
-    VkImageViewCreateInfo VulkanTexture::GetImageViewCreateInfo(const TextureViewDesc& desc) {
-        constexpr VkComponentMapping componentMapping{
-            .r = VK_COMPONENT_SWIZZLE_IDENTITY,
-            .g = VK_COMPONENT_SWIZZLE_IDENTITY,
-            .b = VK_COMPONENT_SWIZZLE_IDENTITY,
-            .a = VK_COMPONENT_SWIZZLE_IDENTITY,
-        };
-        VkImageSubresourceRange subresourceRange{
-            .aspectMask = Utils::TextureFormatToVkImageAspect(Utils::VkFormatToTextureFormat(m_Format)),
-            .baseMipLevel = desc.baseMipLevel,
-            .levelCount = desc.mipLevelCount,
-            .baseArrayLayer = desc.baseArrayLayer,
-            .layerCount = desc.arrayLayerCount,
-        };
-        VkImageViewCreateInfo imageViewCreateInfo{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = m_Image,
-            .viewType = Utils::TextureViewTypeToVkImageViewType(desc.type),
-            .format = m_Format,
-            .components = componentMapping,
-            .subresourceRange = subresourceRange,
-        };
-
-        return imageViewCreateInfo;
     }
 }
