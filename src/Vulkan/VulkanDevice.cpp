@@ -8,8 +8,6 @@
 #include "VulkanPipeline.h"
 #include "VulkanBuffer.h"
 #include "VulkanCommandList.h"
-#include "VulkanDescriptorHeaps.h"
-
 #include "VulkanDescriptorManager.h"
 
 #include <set>

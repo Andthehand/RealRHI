@@ -24,7 +24,6 @@ namespace RealRHI {
         virtual void SetScissor(const Rect& rect) = 0;
 
         virtual void BindPipeline(Pipeline* pipeline) = 0;
-        virtual Result BindBuffer(const char* name, Buffer* buffer, uint64_t offset = 0, uint64_t range = UINT64_MAX) = 0;
         virtual void BindVertexBuffer(Buffer* vertexBuffer) = 0;
 		virtual void BindIndexBuffer(Buffer* indexBuffer) = 0;
 

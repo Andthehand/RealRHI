@@ -190,11 +190,6 @@ namespace RealRHI {
 		m_Device->BindDescriptorHeaps(m_CommandBuffer);
     }
 
-    Result VulkanCommandList::BindBuffer(const char* name, Buffer* buffer, uint64_t offset, uint64_t range) {
-		// TODO: Implement
-		return Result::Success;
-    }
-
     void VulkanCommandList::BindVertexBuffer(Buffer* vertexBuffer) {
         VkBuffer vertexBuffers[] = { static_cast<VulkanBuffer*>(vertexBuffer)->GetBuffer() };
         VkDeviceSize offsets[] = { 0 };
