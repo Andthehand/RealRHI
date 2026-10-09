@@ -84,22 +84,22 @@ namespace RealRHI {
 			const VkDebugUtilsMessengerCallbackDataEXT* callbackData,
 			void* userData);
 	private:
-			// Vulkan instance and devices
-			VkInstance m_Instance;
-			VkDebugUtilsMessengerEXT m_DebugMessenger;
-			VkPhysicalDevice m_PhysicalDevice;
-			VkDevice m_Device;
-			uint32_t m_GraphicsQueueFamily;
-			uint32_t m_PresentQueueFamily;
-			VkQueue m_GraphicsQueue;
-			VkQueue m_PresentQueue;
+			// Vulkan instance and devices - explicitly initialized in Init()
+			VkInstance m_Instance = VK_NULL_HANDLE;
+			VkDebugUtilsMessengerEXT m_DebugMessenger = VK_NULL_HANDLE;
+			VkPhysicalDevice m_PhysicalDevice = VK_NULL_HANDLE;
+			VkDevice m_Device = VK_NULL_HANDLE;
+			uint32_t m_GraphicsQueueFamily = 0;
+			uint32_t m_PresentQueueFamily = 0;
+			VkQueue m_GraphicsQueue = VK_NULL_HANDLE;
+			VkQueue m_PresentQueue = VK_NULL_HANDLE;
 
 			// Pools
-			VkCommandPool m_CommandPool;
+			VkCommandPool m_CommandPool = VK_NULL_HANDLE;
 			std::unique_ptr<VulkanDescriptorManager> m_DescriptorManager;
 
 			// Allocator
-			VmaAllocator m_Allocator;
+			VmaAllocator m_Allocator = VK_NULL_HANDLE;
 
 			// User Defined settings
 			std::filesystem::path m_ShaderDirectory;

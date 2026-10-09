@@ -14,29 +14,37 @@
 #include <iostream>
 
 namespace RealRHI {
-    VulkanDevice::~VulkanDevice() {
-        m_DescriptorManager->Cleanup();
+	VulkanDevice::~VulkanDevice() {
+		// Guard against partial initialization - only cleanup if constructed
+		if (m_DescriptorManager) {
+			m_DescriptorManager->Cleanup();
+		}
 
 		if (m_CommandPool != VK_NULL_HANDLE) {
-            vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
-        }
+			vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
+		}
 
-        if (m_Device != VK_NULL_HANDLE) {
-            vmaDestroyAllocator(m_Allocator);
-            vkDestroyDevice(m_Device, nullptr);
-        }
+		if (m_Device != VK_NULL_HANDLE) {
+			// Ensure all GPU work is complete before destroying device resources
+			vkDeviceWaitIdle(m_Device);
 
-        if (m_DebugMessenger != VK_NULL_HANDLE) {
-            vkDestroyDebugUtilsMessengerEXT(m_Instance, m_DebugMessenger, nullptr);
-        }
+			if (m_Allocator != VK_NULL_HANDLE) {
+				vmaDestroyAllocator(m_Allocator);
+			}
+			vkDestroyDevice(m_Device, nullptr);
+		}
 
-        if (m_Instance != VK_NULL_HANDLE) {
-            vkDestroyInstance(m_Instance, nullptr);
-        }
+		if (m_DebugMessenger != VK_NULL_HANDLE) {
+			vkDestroyDebugUtilsMessengerEXT(m_Instance, m_DebugMessenger, nullptr);
+		}
 
-        SDL_Vulkan_UnloadLibrary();
-        SDL_Quit();
-    }
+		if (m_Instance != VK_NULL_HANDLE) {
+			vkDestroyInstance(m_Instance, nullptr);
+		}
+
+		SDL_Vulkan_UnloadLibrary();
+		SDL_Quit();
+	}
 
 	Result VulkanDevice::Init(const DeviceDesc& desc) {
 		m_EnableDebug = desc.enableDebug;
@@ -98,27 +106,63 @@ namespace RealRHI {
 	}
 
     Result VulkanDevice::CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) const {
-        return VulkanWindow::Create(this, desc, (Ref<VulkanWindow>&)outWindow);
+        Ref<VulkanWindow> vkWindow;
+        Result res = VulkanWindow::Create(this, desc, vkWindow);
+        if (res == Result::Success) {
+            outWindow = vkWindow.template As<Window>();
+        }
+
+        return res;
     }
 
     Result VulkanDevice::CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) const {
-        return VulkanShader::Create(this, desc, (Ref<VulkanShader>&)outShader);
+        Ref<VulkanShader> vkShader;
+        Result res = VulkanShader::Create(this, desc, vkShader);
+        if (res == Result::Success) {
+            outShader = vkShader.template As<Shader>();
+        }
+
+        return res;
     }
 
     Result VulkanDevice::CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) const {
-        return VulkanPipeline::Create(this, desc, (Ref<VulkanPipeline>&)outPipeline);
+        Ref<VulkanPipeline> vkPipeline;
+        Result res = VulkanPipeline::Create(this, desc, vkPipeline);
+        if (res == Result::Success) {
+            outPipeline = vkPipeline.template As<Pipeline>();
+        }
+
+        return res;
     }
 
     Result VulkanDevice::CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) const {
-        return VulkanSwapchain::Create(this, desc, (Ref<VulkanSwapchain>&)outSwapchain);
+        Ref<VulkanSwapchain> vkSwapchain;
+        Result res = VulkanSwapchain::Create(this, desc, vkSwapchain);
+        if (res == Result::Success) {
+            outSwapchain = vkSwapchain.template As<Swapchain>();
+        }
+
+        return res;
     }
 
     Result VulkanDevice::CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) const {
-        return VulkanBuffer::Create(this, desc, (Ref<VulkanBuffer>&)outBuffer);
+        Ref<VulkanBuffer> vkBuffer;
+        Result res = VulkanBuffer::Create(this, desc, vkBuffer);
+        if (res == Result::Success) {
+            outBuffer = vkBuffer.template As<Buffer>();
+        }
+
+        return res;
     }
 
     Result VulkanDevice::CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const {
-        return VulkanTexture::Create(this, desc, (Ref<VulkanTexture>&)outTexture);
+        Ref<VulkanTexture> vkTexture;
+        Result res = VulkanTexture::Create(this, desc, vkTexture);
+        if (res == Result::Success) {
+            outTexture = vkTexture.template As<Texture>();
+        }
+
+        return res;
     }
 
     Result VulkanDevice::CreateCommandList(Ref<CommandList>& outCommandList) const {
