@@ -69,7 +69,7 @@ namespace RealRHI {
 		void BindDescriptorHeaps(VkCommandBuffer commandBuffer) const;
 
 		// Command submission and synchronization
-		void Submit(CommandList* cmd, Swapchain* swapchain, const FrameContext& frame) override;
+		Result Submit(CommandList* cmd, Swapchain* swapchain, const FrameContext& frame) override;
 		Result ImmediateSubmit(CommandList* cmd) const override;
 		void WaitIdle() override;
 

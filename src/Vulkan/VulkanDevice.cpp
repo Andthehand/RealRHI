@@ -191,20 +191,20 @@ namespace RealRHI {
 		m_DescriptorManager->BindDescriptorHeaps(commandBuffer);
     }
 
-    void VulkanDevice::Submit(CommandList* cmd, Swapchain* sc, const FrameContext& frame) {
+    Result VulkanDevice::Submit(CommandList* cmd, Swapchain* sc, const FrameContext& frame) {
         if (cmd == nullptr || sc == nullptr || m_GraphicsCommandQueue == nullptr) {
-            return;
+            return Result::Failed;
         }
 
         if (frame.imageIndex == std::numeric_limits<uint32_t>::max() || frame.backBufferView == nullptr) {
-            return;
+            return Result::Failed;
         }
 
         auto* vkSC = static_cast<VulkanSwapchain*>(sc);
         auto* vkCmd = dynamic_cast<VulkanCommandList*>(cmd);
         if (vkCmd == nullptr) {
             SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Submit received a command list from the wrong backend.");
-            return;
+            return Result::Failed;
         }
 
         VkCommandBuffer preCmdBuf = vkSC->RecordPreTransitionCmd(frame.frameIndex, frame.imageIndex);
@@ -229,20 +229,19 @@ namespace RealRHI {
         };
 
         std::array<CommandList*, 1> tracked = { cmd };
-        const VkFence fence = vkSC->GetFence(frame.frameIndex);
 
         if (!vkSC->PrepareFrameSubmission(frame.frameIndex)) {
-            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Frame fence was not ready for submission.");
-            return;
+            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Frame was not ready for submission.");
+            return Result::Failed;
         }
 
         const SubmissionToken token = m_GraphicsCommandQueue->SubmitTracked(
             { cmdInfos.data(), cmdInfos.size() },
             { &waitInfo, 1 },
             { &signalInfo, 1 },
-            tracked,
-            fence);
+            tracked);
         vkSC->FinishFrameSubmission(frame.frameIndex, token);
+        return token.IsValid() ? Result::Success : Result::Failed;
     }
 
     Result VulkanDevice::ImmediateSubmit(CommandList* cmd) const {

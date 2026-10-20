@@ -39,7 +39,6 @@ namespace RealRHI {
 		VkCommandBuffer RecordPostTransitionCmd(uint32_t frameIndex, uint32_t imageIndex);
 		VkSemaphore GetImageAvailableSemaphore(uint32_t frameIndex) const { return m_FrameSync[frameIndex].imageAvailableSemaphore; }
 		VkSemaphore GetRenderFinishedSemaphore(uint32_t imageIndex) const { return m_RenderFinishedSemaphores[imageIndex]; }
-		VkFence GetFence(uint32_t frameIndex) const { return m_FrameSync[frameIndex].fence; }
 		bool PrepareFrameSubmission(uint32_t frameIndex);
 		void FinishFrameSubmission(uint32_t frameIndex, SubmissionToken token);
 	private:
@@ -54,7 +53,6 @@ namespace RealRHI {
 	private:
 		struct FrameSync {
 			VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
-			VkFence fence = VK_NULL_HANDLE;
 			SubmissionToken completionToken{};
 			bool submissionPending = false;
 			bool submitted = false;
@@ -77,6 +75,6 @@ namespace RealRHI {
 		std::vector<VkSemaphore> m_RenderFinishedSemaphores;
 		VkCommandPool m_TransitionPool = VK_NULL_HANDLE;
 		uint32_t m_CurrentFrameIndex = 0;
-		bool m_NeedsRecovery = false;
+		bool m_FrameFailed = false;
 	};
 }

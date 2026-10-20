@@ -105,10 +105,10 @@ void CreateCommandLists() {
     }
 }
 
-void RecordCommandBuffer(RealRHI::CommandList* cmd, const RealRHI::FrameContext& frame) {
+bool RecordCommandBuffer(RealRHI::CommandList* cmd, const RealRHI::FrameContext& frame) {
     if (cmd->Begin() != RealRHI::Result::Success) {
 		std::cerr << "Failed to begin command list" << std::endl;
-        return;
+        return false;
 	}
 
     RealRHI::RenderingInfo renderingInfo{
@@ -155,17 +155,19 @@ void RecordCommandBuffer(RealRHI::CommandList* cmd, const RealRHI::FrameContext&
 
     if (cmd->End() != RealRHI::Result::Success) {
         std::cerr << "Failed to end command list" << std::endl;
+        return false;
     }
+    return true;
 }
 
-void DrawFrame() {
+bool DrawFrame() {
     RealRHI::FrameContext frame = swapchain->BeginFrame();
-
+    if (frame.backBufferView == nullptr) return false;
     auto* cmd = commandLists[frame.frameIndex].Raw();
-    RecordCommandBuffer(cmd, frame);
-
-    device->Submit(cmd, swapchain.Raw(), frame);
+    if (!RecordCommandBuffer(cmd, frame)) return false;
+    if (device->Submit(cmd, swapchain.Raw(), frame) != RealRHI::Result::Success) return false;
     swapchain->Present(frame);
+    return true;
 }
 
 void Cleanup() {
@@ -218,7 +220,7 @@ int main() {
                 running = false;
             }
         }
-        DrawFrame();
+        if (!DrawFrame()) break;
     }
 
     Cleanup();

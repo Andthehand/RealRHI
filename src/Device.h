@@ -48,7 +48,7 @@ namespace RealRHI {
 		virtual Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const = 0;
 		virtual Result CreateCommandList(Ref<CommandList>& outCommandList) const = 0;
 
-		virtual void Submit(CommandList* cmd, Swapchain* swapchain, const FrameContext& frame) = 0;
+		virtual Result Submit(CommandList* cmd, Swapchain* swapchain, const FrameContext& frame) = 0;
 		virtual Result ImmediateSubmit(CommandList* cmd) const = 0;
 		virtual void WaitIdle() = 0;
 
