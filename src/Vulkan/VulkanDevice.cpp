@@ -191,16 +191,24 @@ namespace RealRHI {
     }
 
     void VulkanDevice::Submit(CommandList* cmd, Swapchain* sc, const FrameContext& frame) {
+        if (cmd == nullptr || sc == nullptr || m_GraphicsCommandQueue == nullptr) {
+            return;
+        }
+
         auto* vkSC = static_cast<VulkanSwapchain*>(sc);
-        auto* vkCmd = static_cast<VulkanCommandList*>(cmd);
+        auto* vkCmd = dynamic_cast<VulkanCommandList*>(cmd);
+        if (vkCmd == nullptr) {
+            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Submit received a command list from the wrong backend.");
+            return;
+        }
 
         VkCommandBuffer preCmdBuf = vkSC->RecordPreTransitionCmd(frame.frameIndex, frame.imageIndex);
         VkCommandBuffer postCmdBuf = vkSC->RecordPostTransitionCmd(frame.frameIndex, frame.imageIndex);
 
-        VkCommandBufferSubmitInfo cmdInfos[] = {
-            { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = preCmdBuf },
-            { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = vkCmd->GetCommandBuffer() },
-            { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = postCmdBuf },
+        std::array<VkCommandBufferSubmitInfo, 3> cmdInfos = {
+            VkCommandBufferSubmitInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = preCmdBuf },
+            VkCommandBufferSubmitInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = vkCmd->GetCommandBuffer() },
+            VkCommandBufferSubmitInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = postCmdBuf },
         };
 
         VkSemaphoreSubmitInfo waitInfo{
@@ -215,47 +223,50 @@ namespace RealRHI {
             .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
         };
 
-        VkSubmitInfo2 submitInfo{
-            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-            .waitSemaphoreInfoCount = 1,
-            .pWaitSemaphoreInfos = &waitInfo,
-            .commandBufferInfoCount = 3,
-            .pCommandBufferInfos = cmdInfos,
-            .signalSemaphoreInfoCount = 1,
-            .pSignalSemaphoreInfos = &signalInfo,
-        };
-
-        if (vkQueueSubmit2(m_GraphicsQueue, 1, &submitInfo, vkSC->GetFence(frame.frameIndex)) != VK_SUCCESS) {
-            std::cerr << "Failed to submit command buffer!" << std::endl;
-        }
+        std::array<CommandList*, 1> tracked = { cmd };
+        m_GraphicsCommandQueue->SubmitTracked(
+            { cmdInfos.data(), cmdInfos.size() },
+            { &waitInfo, 1 },
+            { &signalInfo, 1 },
+            tracked,
+            vkSC->GetFence(frame.frameIndex));
     }
 
     Result VulkanDevice::ImmediateSubmit(CommandList* cmd) const {
-        auto* vkCmd = static_cast<VulkanCommandList*>(cmd);
+        if (cmd == nullptr || m_GraphicsCommandQueue == nullptr) {
+            return Result::Failed;
+        }
+
+        auto* vkCmd = dynamic_cast<VulkanCommandList*>(cmd);
+        if (vkCmd == nullptr) {
+            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "ImmediateSubmit received a command list from the wrong backend.");
+            return Result::Failed;
+        }
 
         VkCommandBufferSubmitInfo cmdInfo{
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
             .commandBuffer = vkCmd->GetCommandBuffer(),
         };
 
-        VkSubmitInfo2 submitInfo{
-            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-            .commandBufferInfoCount = 1,
-            .pCommandBufferInfos = &cmdInfo,
-        };
-
         VkFenceCreateInfo fenceInfo{
             .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
         };
 
-        VkFence fence;
+        VkFence fence = VK_NULL_HANDLE;
         if (vkCreateFence(m_Device, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
             SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create fence for immediate submit.");
             return Result::Failed;
         }
 
-        if (vkQueueSubmit2(m_GraphicsQueue, 1, &submitInfo, fence) != VK_SUCCESS) {
-            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to submit command buffer for immediate submit.");
+        std::array<CommandList*, 1> tracked = { cmd };
+        const SubmissionToken token = m_GraphicsCommandQueue->SubmitTracked(
+            { &cmdInfo, 1 },
+            {},
+            {},
+            tracked,
+            fence);
+
+        if (token.value == 0) {
             vkDestroyFence(m_Device, fence, nullptr);
             return Result::Failed;
         }
@@ -266,11 +277,15 @@ namespace RealRHI {
             return Result::Failed;
         }
 
+        m_GraphicsCommandQueue->Wait(token);
         vkDestroyFence(m_Device, fence, nullptr);
         return Result::Success;
     }
 
     void VulkanDevice::WaitIdle() {
+        if (m_GraphicsCommandQueue != nullptr) {
+            m_GraphicsCommandQueue->WaitIdle();
+        }
         vkDeviceWaitIdle(m_Device);
     }
 

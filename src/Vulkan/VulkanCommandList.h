@@ -5,6 +5,8 @@
 
 #include <volk.h>
 
+#include <mutex>
+
 namespace RealRHI {
 	class VulkanCommandList : public CommandList {
 	public:
@@ -17,8 +19,14 @@ namespace RealRHI {
 		Result Begin() override;
 		Result End() override;
 		Result Reset() override;
-		CommandListState GetState() const override { return m_State; }
-		void SetState(CommandListState state) { m_State = state; }
+		CommandListState GetState() const override {
+			std::scoped_lock lock(m_StateMutex);
+			return m_State;
+		}
+		void SetState(CommandListState state) {
+			std::scoped_lock lock(m_StateMutex);
+			m_State = state;
+		}
 
 		void BeginRendering(const RenderingInfo& renderingInfo) override;
 		void EndRendering() override;
@@ -32,9 +40,10 @@ namespace RealRHI {
 
 		void Draw(uint32_t vertexCount) override;
 		void DrawIndexed(uint32_t indexCount) override;
-		
+
 		QueueId GetQueueId() const { return m_QueueId; }
-		
+		const VulkanDevice* GetDevice() const { return m_Device; }
+
 	protected:
 		friend class VulkanDevice;
 		friend class VulkanTexture;
@@ -43,6 +52,7 @@ namespace RealRHI {
 	private:
 		const VulkanDevice* m_Device;
 		VulkanPipeline* m_BoundPipeline = nullptr;
+		mutable std::mutex m_StateMutex;
 		CommandListState m_State = CommandListState::Initial;
 		QueueId m_QueueId{};
 

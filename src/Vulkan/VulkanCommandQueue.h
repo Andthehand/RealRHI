@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Queue.h"
+#include "CommandList.h"
 
 #include <volk.h>
 
@@ -20,6 +21,12 @@ namespace RealRHI {
         SubmissionToken Submit(CommandList& cmd) override;
         SubmissionToken Submit(std::span<CommandList*> commandLists) override;
         SubmissionToken Submit(const SubmitInfo& submitInfo) override;
+        SubmissionToken SubmitTracked(
+            std::span<const VkCommandBufferSubmitInfo> commandBuffers,
+            std::span<const VkSemaphoreSubmitInfo> waitSemaphores,
+            std::span<const VkSemaphoreSubmitInfo> signalSemaphores,
+            std::span<CommandList*> trackedLists = {},
+            VkFence fence = VK_NULL_HANDLE);
         bool IsComplete(const SubmissionToken& token) const override;
         void Wait(const SubmissionToken& token) override;
         void WaitIdle() override;
@@ -38,7 +45,7 @@ namespace RealRHI {
 
         mutable std::mutex m_SubmissionMutex;
         uint64_t m_NextValue = 1;
-        mutable std::unordered_map<uint64_t, std::vector<CommandList*>> m_PendingSubmissions;
+        mutable std::unordered_map<uint64_t, std::vector<Ref<CommandList>>> m_PendingSubmissions;
         mutable uint64_t m_LastCompletedValue = 0;
     };
 }

@@ -11,6 +11,7 @@ namespace RealRHI {
         uint32_t familyIndex = 0;
         uint32_t queueIndex = 0;
 
+
         bool operator==(const QueueId& other) const = default;
     };
 
@@ -18,6 +19,7 @@ namespace RealRHI {
         QueueId queue{};
         uint64_t value = 0;
 
+		bool IsValid() const { return queue != QueueId{} && value != 0; }
         bool operator==(const SubmissionToken& other) const = default;
     };
 

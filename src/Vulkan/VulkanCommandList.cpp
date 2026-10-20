@@ -7,16 +7,22 @@
 
 #include "VulkanConvertions.h"
 
+#include <mutex>
+
 namespace RealRHI {
     VulkanCommandList::VulkanCommandList(const VulkanDevice* device)
         : m_Device(device), m_QueueId{ device->GetGraphicsQueueFamily() } {
     }
 
     VulkanCommandList::~VulkanCommandList() {
-		vkFreeCommandBuffers(m_Device->GetDevice(), m_Device->GetCommandPool(), 1, &m_CommandBuffer);
+        std::scoped_lock lock(m_StateMutex);
+        if (m_CommandBuffer != VK_NULL_HANDLE && m_State != CommandListState::Pending) {
+            vkFreeCommandBuffers(m_Device->GetDevice(), m_Device->GetCommandPool(), 1, &m_CommandBuffer);
+            m_CommandBuffer = VK_NULL_HANDLE;
+        }
     }
 
-	Result VulkanCommandList::Create(const VulkanDevice* device, Ref<VulkanCommandList>& outCommandList) {
+    Result VulkanCommandList::Create(const VulkanDevice* device, Ref<VulkanCommandList>& outCommandList) {
         Ref<VulkanCommandList> commandList = Ref<VulkanCommandList>::Create(device);
         Result res = commandList->Init();
         if (res != Result::Success) {
@@ -25,7 +31,7 @@ namespace RealRHI {
 
         outCommandList = commandList;
         return Result::Success;
-	}
+    }
 
     Result VulkanCommandList::Init() {
         VkCommandBufferAllocateInfo allocInfo{
@@ -40,159 +46,175 @@ namespace RealRHI {
             return Result::Failed;
         }
 
-		return Result::Success;
+        return Result::Success;
     }
 
-	Result VulkanCommandList::Begin() {
-		if (m_State == CommandListState::Recording || m_State == CommandListState::Pending) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Command buffer cannot begin while already recording or pending.");
-			return Result::Failed;
-		}
+    Result VulkanCommandList::Begin() {
+        {
+            std::scoped_lock lock(m_StateMutex);
+            if (m_State == CommandListState::Recording || m_State == CommandListState::Pending) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Command buffer cannot begin while already recording or pending.");
+                return Result::Failed;
+            }
+        }
 
-		if (m_State == CommandListState::Executable) {
-			const Result resetResult = Reset();
-			if (resetResult != Result::Success) {
-				return resetResult;
-			}
-		}
+        if (GetState() == CommandListState::Executable) {
+            const Result resetResult = Reset();
+            if (resetResult != Result::Success) {
+                return resetResult;
+            }
+        }
 
-		VkCommandBufferBeginInfo beginInfo{};
-		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-		if (vkBeginCommandBuffer(m_CommandBuffer, &beginInfo) != VK_SUCCESS) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to begin Vulkan command buffer.");
-			return Result::Failed;
-		}
+        {
+            std::scoped_lock lock(m_StateMutex);
+            if (vkBeginCommandBuffer(m_CommandBuffer, &beginInfo) != VK_SUCCESS) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to begin Vulkan command buffer.");
+                return Result::Failed;
+            }
+            m_State = CommandListState::Recording;
+        }
 
-		m_State = CommandListState::Recording;
-		return Result::Success;
-	}
+        return Result::Success;
+    }
 
-	Result VulkanCommandList::End() {
-		if (m_State != CommandListState::Recording) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Command buffer can only end while recording.");
-			return Result::Failed;
-		}
+    Result VulkanCommandList::End() {
+        {
+            std::scoped_lock lock(m_StateMutex);
+            if (m_State != CommandListState::Recording) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Command buffer can only end while recording.");
+                return Result::Failed;
+            }
+        }
 
-		if (vkEndCommandBuffer(m_CommandBuffer) != VK_SUCCESS) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to end Vulkan command buffer.");
-			return Result::Failed;
-		}
+        {
+            std::scoped_lock lock(m_StateMutex);
+            if (vkEndCommandBuffer(m_CommandBuffer) != VK_SUCCESS) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to end Vulkan command buffer.");
+                return Result::Failed;
+            }
+            m_State = CommandListState::Executable;
+        }
 
-		m_State = CommandListState::Executable;
-		return Result::Success;
-	}
+        return Result::Success;
+    }
 
-	Result VulkanCommandList::Reset() {
-		if (m_State == CommandListState::Pending || m_State == CommandListState::Recording) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Cannot reset a command buffer while it is pending or recording.");
-			return Result::Failed;
-		}
+    Result VulkanCommandList::Reset() {
+        CommandListState state = GetState();
+        if (state == CommandListState::Pending || state == CommandListState::Recording) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Cannot reset a command buffer while it is pending or recording.");
+            return Result::Failed;
+        }
 
-		if (m_State == CommandListState::Initial) {
-			return Result::Success;
-		}
+        if (state == CommandListState::Initial) {
+            return Result::Success;
+        }
 
-		VkResult resetResult = vkResetCommandBuffer(m_CommandBuffer, 0);
-		if (resetResult != VK_SUCCESS) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to reset Vulkan command buffer.");
-			return Result::Failed;
-		}
+        {
+            std::scoped_lock lock(m_StateMutex);
+            VkResult resetResult = vkResetCommandBuffer(m_CommandBuffer, 0);
+            if (resetResult != VK_SUCCESS) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to reset Vulkan command buffer.");
+                return Result::Failed;
+            }
+            m_State = CommandListState::Initial;
+        }
 
-		m_State = CommandListState::Initial;
-		return Result::Success;
-	}
+        return Result::Success;
+    }
 
-	void VulkanCommandList::BeginRendering(const RenderingInfo& renderingInfo) {
-		std::vector<VkRenderingAttachmentInfo> colorAttachmentInfos(renderingInfo.colorAttachments.size());
-		for (uint32_t i = 0; i < renderingInfo.colorAttachments.size(); i++) {
-			const auto& attachment = renderingInfo.colorAttachments[i];
-			if (attachment.target == nullptr) {
-				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Rendering color attachment is missing a texture view.");
-				return;
-			}
+    void VulkanCommandList::BeginRendering(const RenderingInfo& renderingInfo) {
+        std::vector<VkRenderingAttachmentInfo> colorAttachmentInfos(renderingInfo.colorAttachments.size());
+        for (uint32_t i = 0; i < renderingInfo.colorAttachments.size(); i++) {
+            const auto& attachment = renderingInfo.colorAttachments[i];
+            if (attachment.target == nullptr) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Rendering color attachment is missing a texture view.");
+                return;
+            }
 
-			auto* textureView = static_cast<VulkanTextureView*>(attachment.target);
+            auto* textureView = static_cast<VulkanTextureView*>(attachment.target);
 
-			VkClearValue clearColor = { {{attachment.clearColor.r, attachment.clearColor.g, attachment.clearColor.b, attachment.clearColor.a}} };
-			colorAttachmentInfos[i] = {
-				.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-				.imageView = textureView->GetImageView(),
-				.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-				.resolveMode = VK_RESOLVE_MODE_NONE,
-				.loadOp = Utils::LoadOpToVkLoadOp(attachment.loadOp),
-				.storeOp = Utils::StoreOpToVkStoreOp(attachment.storeOp),
-				.clearValue = clearColor
-			};
-		}
+            VkClearValue clearColor = { {{attachment.clearColor.r, attachment.clearColor.g, attachment.clearColor.b, attachment.clearColor.a}} };
+            colorAttachmentInfos[i] = {
+                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                .imageView = textureView->GetImageView(),
+                .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                .resolveMode = VK_RESOLVE_MODE_NONE,
+                .loadOp = Utils::LoadOpToVkLoadOp(attachment.loadOp),
+                .storeOp = Utils::StoreOpToVkStoreOp(attachment.storeOp),
+                .clearValue = clearColor
+            };
+        }
 
-		VkRenderingAttachmentInfo depthAttachmentInfo{
-			.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-		};
-		const VkRenderingAttachmentInfo* pDepthAttachment = nullptr;
-		const VkRenderingAttachmentInfo* pStencilAttachment = nullptr;
-		if (renderingInfo.hasDepth) {
-			const auto& attachment = renderingInfo.depthAttachment;
-			if (attachment.target == nullptr) {
-				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Rendering depth attachment is missing a texture view.");
-				return;
-			}
+        VkRenderingAttachmentInfo depthAttachmentInfo{
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        };
+        const VkRenderingAttachmentInfo* pDepthAttachment = nullptr;
+        const VkRenderingAttachmentInfo* pStencilAttachment = nullptr;
+        if (renderingInfo.hasDepth) {
+            const auto& attachment = renderingInfo.depthAttachment;
+            if (attachment.target == nullptr) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Rendering depth attachment is missing a texture view.");
+                return;
+            }
 
-			auto* textureView = static_cast<VulkanTextureView*>(attachment.target);
+            auto* textureView = static_cast<VulkanTextureView*>(attachment.target);
 
-			const VkImageAspectFlags aspectMask = textureView->GetImageViewCreateInfo().subresourceRange.aspectMask;
-			const bool hasStencilAspect = (aspectMask & VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
-			const bool readOnly = attachment.readOnlyDepth && (!hasStencilAspect || attachment.readOnlyStencil);
-			VkClearValue clearValue{};
-			clearValue.depthStencil = {
-				.depth = attachment.clear.depth,
-				.stencil = attachment.clear.stencil,
-			};
+            const VkImageAspectFlags aspectMask = textureView->GetImageViewCreateInfo().subresourceRange.aspectMask;
+            const bool hasStencilAspect = (aspectMask & VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
+            const bool readOnly = attachment.readOnlyDepth && (!hasStencilAspect || attachment.readOnlyStencil);
+            VkClearValue clearValue{};
+            clearValue.depthStencil = {
+                .depth = attachment.clear.depth,
+                .stencil = attachment.clear.stencil,
+            };
 
-			depthAttachmentInfo = {
-				.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-				.imageView = textureView->GetImageView(),
-				.imageLayout = readOnly ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-				.resolveMode = VK_RESOLVE_MODE_NONE,
-				.loadOp = Utils::LoadOpToVkLoadOp(attachment.depthLoadOp),
-				.storeOp = Utils::StoreOpToVkStoreOp(attachment.depthStoreOp),
-				.clearValue = clearValue,
-			};
-			if ((aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) {
-				pDepthAttachment = &depthAttachmentInfo;
-			}
-			if (hasStencilAspect) {
-				pStencilAttachment = &depthAttachmentInfo;
-			}
-		}
+            depthAttachmentInfo = {
+                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+                .imageView = textureView->GetImageView(),
+                .imageLayout = readOnly ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                .resolveMode = VK_RESOLVE_MODE_NONE,
+                .loadOp = Utils::LoadOpToVkLoadOp(attachment.depthLoadOp),
+                .storeOp = Utils::StoreOpToVkStoreOp(attachment.depthStoreOp),
+                .clearValue = clearValue,
+            };
+            if ((aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) {
+                pDepthAttachment = &depthAttachmentInfo;
+            }
+            if (hasStencilAspect) {
+                pStencilAttachment = &depthAttachmentInfo;
+            }
+        }
 
-		auto& renderAreaRect = renderingInfo.renderArea;
-		VkRect2D renderArea{
-			.offset = {
-				.x = renderAreaRect.x, 
-				.y = renderAreaRect.y,
-			},
-			.extent = {
-				.width = renderAreaRect.width,
-				.height = renderAreaRect.height,
-			}
-		};
+        auto& renderAreaRect = renderingInfo.renderArea;
+        VkRect2D renderArea{
+            .offset = {
+                .x = renderAreaRect.x,
+                .y = renderAreaRect.y,
+            },
+            .extent = {
+                .width = renderAreaRect.width,
+                .height = renderAreaRect.height,
+            }
+        };
 
-		VkRenderingInfo renderPassInfo{
-			.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-			.renderArea = renderArea,
-			.layerCount = 1,
-			.colorAttachmentCount = (uint32_t)colorAttachmentInfos.size(),
-			.pColorAttachments = colorAttachmentInfos.data(),
-			.pDepthAttachment = pDepthAttachment,
-			.pStencilAttachment = pStencilAttachment,
-		};
+        VkRenderingInfo renderPassInfo{
+            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+            .renderArea = renderArea,
+            .layerCount = 1,
+            .colorAttachmentCount = static_cast<uint32_t>(colorAttachmentInfos.size()),
+            .pColorAttachments = colorAttachmentInfos.data(),
+            .pDepthAttachment = pDepthAttachment,
+            .pStencilAttachment = pStencilAttachment,
+        };
 
-		vkCmdBeginRendering(m_CommandBuffer, &renderPassInfo);
-	}
+        vkCmdBeginRendering(m_CommandBuffer, &renderPassInfo);
+    }
 
     void VulkanCommandList::EndRendering() {
-		vkCmdEndRendering(m_CommandBuffer);
+        vkCmdEndRendering(m_CommandBuffer);
     }
 
     void VulkanCommandList::SetViewport(const Viewport& vp) {
@@ -204,7 +226,7 @@ namespace RealRHI {
             .minDepth = vp.minDepth,
             .maxDepth = vp.maxDepth
         };
-		vkCmdSetViewport(m_CommandBuffer, 0, 1, &viewport);
+        vkCmdSetViewport(m_CommandBuffer, 0, 1, &viewport);
     }
 
     void VulkanCommandList::SetScissor(const Rect& rect) {
@@ -222,11 +244,10 @@ namespace RealRHI {
     }
 
     void VulkanCommandList::BindPipeline(Pipeline* pipeline) {
-		m_BoundPipeline = static_cast<VulkanPipeline*>(pipeline);
-		vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_BoundPipeline->GetPipeline());
+        m_BoundPipeline = static_cast<VulkanPipeline*>(pipeline);
+        vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_BoundPipeline->GetPipeline());
 
-        // TODO: Remove or move
-		m_Device->BindDescriptorHeaps(m_CommandBuffer);
+        m_Device->BindDescriptorHeaps(m_CommandBuffer);
     }
 
     void VulkanCommandList::BindVertexBuffer(Buffer* vertexBuffer) {
@@ -237,13 +258,13 @@ namespace RealRHI {
 
     void VulkanCommandList::BindIndexBuffer(Buffer* indexBuffer) {
         vkCmdBindIndexBuffer(m_CommandBuffer, static_cast<VulkanBuffer*>(indexBuffer)->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
-	}
+    }
 
     void VulkanCommandList::Draw(uint32_t vertexCount) {
         vkCmdDraw(m_CommandBuffer, vertexCount, 1, 0, 0);
-	}
+    }
 
-    void VulkanCommandList::DrawIndexed(uint32_t indexCount){
-		vkCmdDrawIndexed(m_CommandBuffer, indexCount, 1, 0, 0, 0);
+    void VulkanCommandList::DrawIndexed(uint32_t indexCount) {
+        vkCmdDrawIndexed(m_CommandBuffer, indexCount, 1, 0, 0, 0);
     }
 }
