@@ -19,7 +19,7 @@ namespace RealRHI {
         QueueId queue{};
         uint64_t value = 0;
 
-		bool IsValid() const { return queue != QueueId{} && value != 0; }
+		constexpr bool IsValid() const noexcept { return value != 0; }
         bool operator==(const SubmissionToken& other) const = default;
     };
 
