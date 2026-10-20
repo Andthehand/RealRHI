@@ -8,6 +8,7 @@
 #include "VulkanPipeline.h"
 #include "VulkanBuffer.h"
 #include "VulkanCommandList.h"
+#include "VulkanCommandAllocator.h"
 #include "VulkanCommandQueue.h"
 #include "VulkanDescriptorManager.h"
 
@@ -181,6 +182,22 @@ namespace RealRHI {
 	Result VulkanDevice::CreateCommandList(Ref<CommandList>& outCommandList) const {
 		return VulkanCommandList::Create(this, (Ref<VulkanCommandList>&)outCommandList);
 	}
+
+    Result VulkanDevice::CreateCommandAllocator(Ref<CommandAllocator>& outAllocator) const {
+        Ref<VulkanCommandAllocator> allocator;
+        const Result result = VulkanCommandAllocator::Create(this, allocator);
+        if (result == Result::Success) outAllocator = allocator.As<CommandAllocator>();
+        return result;
+    }
+
+    Result VulkanDevice::CreateCommandList(CommandAllocator* allocator, Ref<CommandList>& outCommandList) const {
+        auto* vkAllocator = dynamic_cast<VulkanCommandAllocator*>(allocator);
+        if (vkAllocator == nullptr || vkAllocator->GetDevice() != this) return Result::Failed;
+        Ref<VulkanCommandList> list;
+        const Result result = VulkanCommandList::Create(this, Ref<VulkanCommandAllocator>(vkAllocator), list);
+        if (result == Result::Success) outCommandList = list.As<CommandList>();
+        return result;
+    }
 
 	VulkanCommandQueue* VulkanDevice::GetCommandQueue(const QueueId& queueId) const {
 		auto it = m_Queues.find(queueId);

@@ -14,11 +14,17 @@ namespace RealRHI {
         : m_Device(device), m_QueueId{ device->GetGraphicsQueueFamily() } {
     }
 
+    VulkanCommandList::VulkanCommandList(const VulkanDevice* device, Ref<VulkanCommandAllocator> allocator)
+        : m_Device(device), m_Allocator(std::move(allocator)), m_QueueId{ device->GetGraphicsQueueFamily() } {}
+
     VulkanCommandList::~VulkanCommandList() {
         std::scoped_lock stateLock(m_StateMutex);
         if (m_CommandBuffer != VK_NULL_HANDLE && m_State != CommandListState::Pending) {
-            std::scoped_lock poolLock(m_Device->GetCommandPoolMutex());
-            vkFreeCommandBuffers(m_Device->GetDevice(), m_Device->GetCommandPool(), 1, &m_CommandBuffer);
+            if (m_Allocator) m_Allocator->Free(m_CommandBuffer);
+            else {
+                std::scoped_lock poolLock(m_Device->GetCommandPoolMutex());
+                vkFreeCommandBuffers(m_Device->GetDevice(), m_Device->GetCommandPool(), 1, &m_CommandBuffer);
+            }
             m_CommandBuffer = VK_NULL_HANDLE;
         }
     }
@@ -34,7 +40,19 @@ namespace RealRHI {
         return Result::Success;
     }
 
+    Result VulkanCommandList::Create(const VulkanDevice* device, Ref<VulkanCommandAllocator> allocator, Ref<VulkanCommandList>& out) {
+        if (!allocator || allocator->GetDevice() != device) return Result::Failed;
+        Ref<VulkanCommandList> list = Ref<VulkanCommandList>::Create(device, std::move(allocator));
+        if (list->Init() != Result::Success) return Result::Failed;
+        out = list;
+        return Result::Success;
+    }
+
     Result VulkanCommandList::Init() {
+        if (m_Allocator) {
+            if (m_Allocator->Allocate(m_CommandBuffer) != VK_SUCCESS) return Result::Failed;
+            return Result::Success;
+        }
         VkCommandBufferAllocateInfo allocInfo{
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
             .commandPool = m_Device->GetCommandPool(),
@@ -116,7 +134,8 @@ namespace RealRHI {
 
         {
             std::scoped_lock lock(m_StateMutex);
-            std::scoped_lock poolLock(m_Device->GetCommandPoolMutex());
+            std::unique_lock<std::mutex> poolLock(m_Device->GetCommandPoolMutex(), std::defer_lock);
+            if (!m_Allocator) poolLock.lock();
             VkResult resetResult = vkResetCommandBuffer(m_CommandBuffer, 0);
             if (resetResult != VK_SUCCESS) {
                 m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to reset Vulkan command buffer.");
