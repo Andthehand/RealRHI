@@ -238,12 +238,15 @@ namespace RealRHI {
         const uint32_t frameIdx = m_CurrentFrameIndex;
         VkFence fence = m_FrameSync[frameIdx].fence;
 
-        if (fence != VK_NULL_HANDLE) {
-            VkFenceStatus fenceStatus = vkGetFenceStatus(m_Device->GetDevice(), fence);
-            if (fenceStatus == VK_NOT_READY) {
-                vkWaitForFences(m_Device->GetDevice(), 1, &fence, VK_TRUE, UINT64_MAX);
+        auto& sync = m_FrameSync[frameIdx];
+        if (sync.submissionPending) {
+            if (vkWaitForFences(m_Device->GetDevice(), 1, &fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to wait for previous frame submission.");
+                return FrameContext{};
             }
+            sync.submissionPending = false;
         }
+        sync.submitted = false;
 
         if (m_Swapchain == VK_NULL_HANDLE || m_SwapchainExtent.width == 0 || m_SwapchainExtent.height == 0) {
             return FrameContext{ .frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max(), .backBufferView = nullptr, .width = 0, .height = 0 };
@@ -276,12 +279,6 @@ namespace RealRHI {
             return FrameContext{ .frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max(), .backBufferView = nullptr, .width = 0, .height = 0 };
         }
 
-        if (fence != VK_NULL_HANDLE) {
-            VkFenceStatus fenceStatus = vkGetFenceStatus(m_Device->GetDevice(), fence);
-            if (fenceStatus == VK_SUCCESS) {
-                vkResetFences(m_Device->GetDevice(), 1, &fence);
-            }
-        }
 
         return FrameContext{
             .frameIndex = frameIdx,
@@ -292,11 +289,40 @@ namespace RealRHI {
         };
     }
 
+    bool VulkanSwapchain::PrepareFrameSubmission(uint32_t frameIndex) {
+        if (frameIndex >= m_FrameSync.size()) return false;
+        auto& sync = m_FrameSync[frameIndex];
+        if (sync.submissionPending || sync.submitted || sync.fence == VK_NULL_HANDLE) return false;
+        return vkResetFences(m_Device->GetDevice(), 1, &sync.fence) == VK_SUCCESS;
+    }
+
+    void VulkanSwapchain::FinishFrameSubmission(uint32_t frameIndex, bool success) {
+        if (frameIndex >= m_FrameSync.size()) return;
+        auto& sync = m_FrameSync[frameIndex];
+        if (success) {
+            sync.submissionPending = true;
+            sync.submitted = true;
+            return;
+        }
+        // The failed submit did not enqueue a fence signal. Replace the unsignaled
+        // fence with a signaled fence, but do not present or recycle the acquired
+        // image until the swapchain is recreated.
+        vkDestroyFence(m_Device->GetDevice(), sync.fence, nullptr);
+        sync.fence = VK_NULL_HANDLE;
+        VkFenceCreateInfo info{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = VK_FENCE_CREATE_SIGNALED_BIT };
+        if (vkCreateFence(m_Device->GetDevice(), &info, nullptr, &sync.fence) != VK_SUCCESS) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to restore frame fence after submission failure.");
+        }
+        sync.submissionPending = false;
+        sync.submitted = false;
+    }
+
     void VulkanSwapchain::Present(const FrameContext& frame) {
         if (frame.imageIndex == std::numeric_limits<uint32_t>::max() || frame.backBufferView == nullptr || m_Swapchain == VK_NULL_HANDLE) {
             return;
         }
 
+        if (frame.frameIndex >= m_FrameSync.size() || !m_FrameSync[frame.frameIndex].submitted) return;
         const uint32_t imageIndex = frame.imageIndex;
         if (imageIndex >= m_RenderFinishedSemaphores.size()) {
             return;

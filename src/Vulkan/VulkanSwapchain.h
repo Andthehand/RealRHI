@@ -40,6 +40,8 @@ namespace RealRHI {
 		VkSemaphore GetImageAvailableSemaphore(uint32_t frameIndex) const { return m_FrameSync[frameIndex].imageAvailableSemaphore; }
 		VkSemaphore GetRenderFinishedSemaphore(uint32_t imageIndex) const { return m_RenderFinishedSemaphores[imageIndex]; }
 		VkFence GetFence(uint32_t frameIndex) const { return m_FrameSync[frameIndex].fence; }
+		bool PrepareFrameSubmission(uint32_t frameIndex);
+		void FinishFrameSubmission(uint32_t frameIndex, bool success);
 	private:
 		SwapChainSupportDetails QuerySwapChainSupport();
 		VkSurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
@@ -53,6 +55,8 @@ namespace RealRHI {
 		struct FrameSync {
 			VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
 			VkFence fence = VK_NULL_HANDLE;
+			bool submissionPending = false;
+			bool submitted = false;
 			VkCommandBuffer preCmdBuf = VK_NULL_HANDLE;
 			VkCommandBuffer postCmdBuf = VK_NULL_HANDLE;
 		};

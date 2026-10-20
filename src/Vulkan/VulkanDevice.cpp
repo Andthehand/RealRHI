@@ -231,17 +231,18 @@ namespace RealRHI {
         std::array<CommandList*, 1> tracked = { cmd };
         const VkFence fence = vkSC->GetFence(frame.frameIndex);
 
+        if (!vkSC->PrepareFrameSubmission(frame.frameIndex)) {
+            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Frame fence was not ready for submission.");
+            return;
+        }
+
         const SubmissionToken token = m_GraphicsCommandQueue->SubmitTracked(
             { cmdInfos.data(), cmdInfos.size() },
             { &waitInfo, 1 },
             { &signalInfo, 1 },
             tracked,
             fence);
-        if (!token.IsValid()) {
-            if (fence != VK_NULL_HANDLE) {
-                vkResetFences(m_Device, 1, &fence);
-            }
-        }
+        vkSC->FinishFrameSubmission(frame.frameIndex, token.IsValid());
     }
 
     Result VulkanDevice::ImmediateSubmit(CommandList* cmd) const {
