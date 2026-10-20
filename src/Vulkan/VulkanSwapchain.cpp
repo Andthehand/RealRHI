@@ -1,4 +1,5 @@
 #include "VulkanSwapchain.h"
+#include "VulkanCommandQueue.h"
 #include "VulkanConvertions.h"
 
 #include <iostream>
@@ -14,7 +15,6 @@ namespace RealRHI {
 
         for (auto& sync : m_FrameSync) {
             vkDestroySemaphore(m_Device->GetDevice(), sync.imageAvailableSemaphore, nullptr);
-            vkDestroyFence(m_Device->GetDevice(), sync.fence, nullptr);
         }
         for (auto semaphore : m_RenderFinishedSemaphores) {
             vkDestroySemaphore(m_Device->GetDevice(), semaphore, nullptr);
@@ -74,16 +74,11 @@ namespace RealRHI {
         // Create per-frame sync objects
         m_FrameSync.resize(MAX_FRAMES_IN_FLIGHT);
         VkSemaphoreCreateInfo semInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
-        VkFenceCreateInfo fenceInfo{
-            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-            .flags = VK_FENCE_CREATE_SIGNALED_BIT,
-        };
 
         for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             m_FrameSync[i].preCmdBuf = cmdBufs[i * 2];
             m_FrameSync[i].postCmdBuf = cmdBufs[i * 2 + 1];
-            if (vkCreateSemaphore(m_Device->GetDevice(), &semInfo, nullptr, &m_FrameSync[i].imageAvailableSemaphore) != VK_SUCCESS ||
-                vkCreateFence(m_Device->GetDevice(), &fenceInfo, nullptr, &m_FrameSync[i].fence) != VK_SUCCESS) {
+            if (vkCreateSemaphore(m_Device->GetDevice(), &semInfo, nullptr, &m_FrameSync[i].imageAvailableSemaphore) != VK_SUCCESS) {
                 m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan frame sync objects for swapchain.");
                 return Result::Failed;
             }
@@ -235,15 +230,25 @@ namespace RealRHI {
     }
 
     FrameContext VulkanSwapchain::BeginFrame() {
+        if (m_FrameFailed) return FrameContext{ .imageIndex = std::numeric_limits<uint32_t>::max() };
         const uint32_t frameIdx = m_CurrentFrameIndex;
-        VkFence fence = m_FrameSync[frameIdx].fence;
 
-        if (fence != VK_NULL_HANDLE) {
-            VkFenceStatus fenceStatus = vkGetFenceStatus(m_Device->GetDevice(), fence);
-            if (fenceStatus == VK_NOT_READY) {
-                vkWaitForFences(m_Device->GetDevice(), 1, &fence, VK_TRUE, UINT64_MAX);
+        auto& sync = m_FrameSync[frameIdx];
+        if (sync.submissionPending) {
+            auto* queue = m_Device->GetCommandQueue(sync.completionToken.queue);
+            if (queue == nullptr || !sync.completionToken.IsValid()) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Missing frame completion token.");
+                return FrameContext{ .imageIndex = std::numeric_limits<uint32_t>::max() };
             }
+            queue->Wait(sync.completionToken);
+            if (!queue->IsComplete(sync.completionToken)) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to complete previous frame submission.");
+                return FrameContext{ .imageIndex = std::numeric_limits<uint32_t>::max() };
+            }
+            sync.completionToken = {};
+            sync.submissionPending = false;
         }
+        sync.submitted = false;
 
         if (m_Swapchain == VK_NULL_HANDLE || m_SwapchainExtent.width == 0 || m_SwapchainExtent.height == 0) {
             return FrameContext{ .frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max(), .backBufferView = nullptr, .width = 0, .height = 0 };
@@ -252,7 +257,7 @@ namespace RealRHI {
         uint32_t imageIndex = std::numeric_limits<uint32_t>::max();
         VkResult result = vkAcquireNextImageKHR(m_Device->GetDevice(), m_Swapchain, UINT64_MAX,
             m_FrameSync[frameIdx].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
-        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+        if (result == VK_ERROR_OUT_OF_DATE_KHR) {
             RecreateSwapchain();
             if (m_Swapchain == VK_NULL_HANDLE || m_SwapchainExtent.width == 0 || m_SwapchainExtent.height == 0) {
                 return FrameContext{ .frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max(), .backBufferView = nullptr, .width = 0, .height = 0 };
@@ -267,21 +272,16 @@ namespace RealRHI {
                 m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to acquire swapchain image after recreation.");
                 return FrameContext{ .frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max(), .backBufferView = nullptr, .width = 0, .height = 0 };
             }
-        } else if (result != VK_SUCCESS) {
+        } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
             m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to acquire swapchain image.");
             return FrameContext{ .frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max(), .backBufferView = nullptr, .width = 0, .height = 0 };
         }
 
         if (imageIndex >= m_SwapchainImages.size()) {
+            m_FrameFailed = true;
             return FrameContext{ .frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max(), .backBufferView = nullptr, .width = 0, .height = 0 };
         }
 
-        if (fence != VK_NULL_HANDLE) {
-            VkFenceStatus fenceStatus = vkGetFenceStatus(m_Device->GetDevice(), fence);
-            if (fenceStatus == VK_SUCCESS) {
-                vkResetFences(m_Device->GetDevice(), 1, &fence);
-            }
-        }
 
         return FrameContext{
             .frameIndex = frameIdx,
@@ -292,11 +292,36 @@ namespace RealRHI {
         };
     }
 
+    bool VulkanSwapchain::PrepareFrameSubmission(uint32_t frameIndex) {
+        if (frameIndex >= m_FrameSync.size()) return false;
+        auto& sync = m_FrameSync[frameIndex];
+        return !m_FrameFailed && !sync.submissionPending && !sync.submitted;
+    }
+
+    void VulkanSwapchain::FinishFrameSubmission(uint32_t frameIndex, SubmissionToken token) {
+        const bool success = token.IsValid();
+        if (frameIndex >= m_FrameSync.size()) return;
+        auto& sync = m_FrameSync[frameIndex];
+        if (success) {
+            sync.completionToken = token;
+            sync.submissionPending = true;
+            sync.submitted = true;
+            return;
+        }
+        sync.completionToken = {};
+        sync.submissionPending = false;
+        sync.submitted = false;
+        // An acquired image and its semaphore are still outstanding. Stop
+        // rendering instead of reacquiring with an already-signaled semaphore.
+        m_FrameFailed = true;
+    }
+
     void VulkanSwapchain::Present(const FrameContext& frame) {
         if (frame.imageIndex == std::numeric_limits<uint32_t>::max() || frame.backBufferView == nullptr || m_Swapchain == VK_NULL_HANDLE) {
             return;
         }
 
+        if (m_FrameFailed || frame.frameIndex >= m_FrameSync.size() || !m_FrameSync[frame.frameIndex].submitted) return;
         const uint32_t imageIndex = frame.imageIndex;
         if (imageIndex >= m_RenderFinishedSemaphores.size()) {
             return;

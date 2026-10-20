@@ -9,7 +9,7 @@ endif()
 
 # Options
 option(BUILD_EXAMPLES "Build example applications" ON)
-option(REALRHI_BUILD_TESTS "Build RealRHI tests" OFF)
+option(REALRHI_BUILD_TESTS "Build RealRHI tests" ON)
 
 FetchContent_Declare(volk
     GIT_REPOSITORY https://github.com/zeux/volk.git
