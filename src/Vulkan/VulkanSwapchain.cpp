@@ -235,15 +235,26 @@ namespace RealRHI {
     }
 
     FrameContext VulkanSwapchain::BeginFrame() {
+        if (m_NeedsRecovery) {
+            RecreateSwapchain();
+            m_NeedsRecovery = false;
+        }
         const uint32_t frameIdx = m_CurrentFrameIndex;
         VkFence fence = m_FrameSync[frameIdx].fence;
 
         auto& sync = m_FrameSync[frameIdx];
         if (sync.submissionPending) {
-            if (vkWaitForFences(m_Device->GetDevice(), 1, &fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
-                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to wait for previous frame submission.");
-                return FrameContext{};
+            auto* queue = m_Device->GetCommandQueue(sync.completionToken.queue);
+            if (queue == nullptr || !sync.completionToken.IsValid()) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Missing frame completion token.");
+                return FrameContext{ .imageIndex = std::numeric_limits<uint32_t>::max() };
             }
+            queue->Wait(sync.completionToken);
+            if (!queue->IsComplete(sync.completionToken)) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to complete previous frame submission.");
+                return FrameContext{ .imageIndex = std::numeric_limits<uint32_t>::max() };
+            }
+            sync.completionToken = {};
             sync.submissionPending = false;
         }
         sync.submitted = false;
@@ -296,10 +307,12 @@ namespace RealRHI {
         return vkResetFences(m_Device->GetDevice(), 1, &sync.fence) == VK_SUCCESS;
     }
 
-    void VulkanSwapchain::FinishFrameSubmission(uint32_t frameIndex, bool success) {
+    void VulkanSwapchain::FinishFrameSubmission(uint32_t frameIndex, SubmissionToken token) {
+        const bool success = token.IsValid();
         if (frameIndex >= m_FrameSync.size()) return;
         auto& sync = m_FrameSync[frameIndex];
         if (success) {
+            sync.completionToken = token;
             sync.submissionPending = true;
             sync.submitted = true;
             return;
@@ -313,8 +326,12 @@ namespace RealRHI {
         if (vkCreateFence(m_Device->GetDevice(), &info, nullptr, &sync.fence) != VK_SUCCESS) {
             m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to restore frame fence after submission failure.");
         }
+        sync.completionToken = {};
         sync.submissionPending = false;
         sync.submitted = false;
+        // An image was acquired but no submission consumed the acquire semaphore.
+        // Stop frame processing; recreate before any further acquisition.
+        m_NeedsRecovery = true;
     }
 
     void VulkanSwapchain::Present(const FrameContext& frame) {

@@ -242,7 +242,7 @@ namespace RealRHI {
             { &signalInfo, 1 },
             tracked,
             fence);
-        vkSC->FinishFrameSubmission(frame.frameIndex, token.IsValid());
+        vkSC->FinishFrameSubmission(frame.frameIndex, token);
     }
 
     Result VulkanDevice::ImmediateSubmit(CommandList* cmd) const {
