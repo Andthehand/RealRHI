@@ -54,7 +54,8 @@ namespace RealRHI {
 		commandBufferInfos.reserve(submitInfo.commandLists.size());
 		std::vector<CommandList*> trackedLists;
 		trackedLists.reserve(submitInfo.commandLists.size());
-		std::unordered_set<CommandList*> seenLists;
+		std::unordered_set<CommandList*> duplicateListTracker;
+		duplicateListTracker.reserve(submitInfo.commandLists.size());
 
 		for (CommandList* commandList : submitInfo.commandLists) {
 			auto* vkCommandList = dynamic_cast<VulkanCommandList*>(commandList);
@@ -68,7 +69,7 @@ namespace RealRHI {
 				return {};
 			}
 
-			if (!seenLists.insert(commandList).second) {
+			if (!duplicateListTracker.insert(commandList).second) {
 				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Duplicate command lists are not allowed in a single submission.");
 				return {};
 			}
@@ -111,15 +112,14 @@ namespace RealRHI {
 		std::span<const VkSemaphoreSubmitInfo> signalSemaphores,
 		std::span<CommandList*> trackedLists,
 		VkFence fence) {
-		if (commandBuffers.empty()) {
-			return {};
-		}
-
+		// Retains references to the command lists until the submission is completed then releases them
 		std::vector<Ref<CommandList>> retainedLists;
 		retainedLists.reserve(trackedLists.size());
-		std::vector<VkSemaphoreSubmitInfo> signalInfos(signalSemaphores.begin(), signalSemaphores.end());
-		std::unordered_set<CommandList*> seenLists;
 
+		std::vector<VkSemaphoreSubmitInfo> signalInfos(signalSemaphores.begin(), signalSemaphores.end());
+
+		std::unordered_set<CommandList*> duplicateListTracker;
+		duplicateListTracker.reserve(trackedLists.size());
 		for (CommandList* commandList : trackedLists) {
 			auto* vkCommandList = dynamic_cast<VulkanCommandList*>(commandList);
 			if (vkCommandList == nullptr || vkCommandList->GetDevice() != m_Device || vkCommandList->GetQueueId() != GetQueueId()) {
@@ -132,7 +132,7 @@ namespace RealRHI {
 				return {};
 			}
 
-			if (!seenLists.insert(commandList).second) {
+			if (!duplicateListTracker.insert(commandList).second) {
 				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Duplicate command lists are not allowed in a single submission.");
 				return {};
 			}
@@ -259,13 +259,18 @@ namespace RealRHI {
 		std::vector<Ref<CommandList>> completedLists;
 		{
 			std::scoped_lock lock(m_SubmissionMutex);
+
+			// Move completed command lists to a separate vector and remove them from the pending submissions
 			auto it = m_PendingSubmissions.begin();
 			while (it != m_PendingSubmissions.end()) {
 				if (it->first <= completedValue) {
+					// make_move_iterator is used to move the Ref<CommandList> objects instead of copying them, 
+					// which is more efficient and avoids unnecessary reference count increments/decrements.
 					completedLists.insert(
 						completedLists.end(),
 						std::make_move_iterator(it->second.begin()),
 						std::make_move_iterator(it->second.end()));
+
 					it = m_PendingSubmissions.erase(it);
 				} else {
 					++it;
@@ -277,9 +282,11 @@ namespace RealRHI {
 			}
 		}
 
+		// Update the state of the completed command lists to Executable
 		for (auto& commandList : completedLists) {
 			if (commandList) {
 				auto* vkCommandList = dynamic_cast<VulkanCommandList*>(commandList.Raw());
+
 				if (vkCommandList != nullptr && vkCommandList->GetState() == CommandListState::Pending) {
 					vkCommandList->SetState(CommandListState::Executable);
 				}

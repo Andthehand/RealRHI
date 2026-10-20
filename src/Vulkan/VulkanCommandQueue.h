@@ -18,15 +18,19 @@ namespace RealRHI {
         VulkanCommandQueue(const VulkanDevice* device, uint32_t familyIndex, uint32_t queueIndex, VkQueue queue);
         ~VulkanCommandQueue() override;
 
+		// Command submission functions
         SubmissionToken Submit(CommandList& cmd) override;
         SubmissionToken Submit(std::span<CommandList*> commandLists) override;
         SubmissionToken Submit(const SubmitInfo& submitInfo) override;
+
+		// Internal submission function that allows for tracking of command lists for lifecycle management.
         SubmissionToken SubmitTracked(
             std::span<const VkCommandBufferSubmitInfo> commandBuffers,
             std::span<const VkSemaphoreSubmitInfo> waitSemaphores,
             std::span<const VkSemaphoreSubmitInfo> signalSemaphores,
             std::span<CommandList*> trackedLists = {},
             VkFence fence = VK_NULL_HANDLE);
+
         bool IsComplete(const SubmissionToken& token) const override;
         void Wait(const SubmissionToken& token) override;
         void WaitIdle() override;
@@ -36,7 +40,7 @@ namespace RealRHI {
         QueueId GetQueueId() const { return { m_FamilyIndex, m_QueueIndex }; }
     private:
         void FinalizeCompleted(uint64_t completedValue) const;
-
+    private:
         const VulkanDevice* m_Device = nullptr;
         VkQueue m_Queue = VK_NULL_HANDLE;
         VkSemaphore m_TimelineSemaphore = VK_NULL_HANDLE;
