@@ -140,11 +140,8 @@ namespace RealRHI {
 			retainedLists.emplace_back(commandList);
 		}
 
-		uint64_t submissionValue = 0;
-		{
-			std::scoped_lock lock(m_SubmissionMutex);
-			submissionValue = m_NextValue++;
-		}
+		std::unique_lock submitLock(m_SubmissionMutex);
+		const uint64_t submissionValue = m_NextValue;
 		signalInfos.push_back({
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
 			.semaphore = m_TimelineSemaphore,
@@ -164,21 +161,18 @@ namespace RealRHI {
 
 		if (vkQueueSubmit2(m_Queue, 1, &submitInfo2, fence) != VK_SUCCESS) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to submit Vulkan command buffers to the queue.");
-			if (fence != VK_NULL_HANDLE) {
-				vkResetFences(m_Device->GetDevice(), 1, &fence);
-			}
+			// Caller owns recovery of a failed frame fence.
 			return {};
 		}
 
-		{
-			std::scoped_lock lock(m_SubmissionMutex);
-			m_PendingSubmissions[submissionValue] = std::move(retainedLists);
-		}
+		++m_NextValue;
+		m_PendingSubmissions[submissionValue] = std::move(retainedLists);
 		for (CommandList* commandList : trackedLists) {
 			if (commandList != nullptr) {
 				static_cast<VulkanCommandList*>(commandList)->SetState(CommandListState::Pending);
 			}
 		}
+		submitLock.unlock();
 
 		return SubmissionToken{ .queue = GetQueueId(), .value = submissionValue };
 	}
@@ -252,10 +246,13 @@ namespace RealRHI {
 	}
 
 	void VulkanCommandQueue::WaitIdle() {
-		vkQueueWaitIdle(m_Queue);
-		if (m_NextValue > 1) {
-			FinalizeCompleted(m_NextValue - 1);
+		uint64_t lastSubmitted = 0;
+		{
+			std::scoped_lock lock(m_SubmissionMutex);
+			vkQueueWaitIdle(m_Queue);
+			lastSubmitted = m_NextValue - 1;
 		}
+		if (lastSubmitted != 0) FinalizeCompleted(lastSubmitted);
 	}
 
 	void VulkanCommandQueue::FinalizeCompleted(uint64_t completedValue) const {
