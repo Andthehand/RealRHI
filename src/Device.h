@@ -25,6 +25,7 @@
 #include "Texture.h"
 
 #include "FrameContext.h"
+#include "Queue.h"
 
 #include <memory>
 #include <filesystem>
@@ -51,7 +52,7 @@ namespace RealRHI {
         virtual Result CreateCommandAllocator(Ref<CommandAllocator>& outAllocator) const = 0;
         virtual Result CreateCommandList(CommandAllocator* allocator, Ref<CommandList>& outCommandList) const = 0;
 
-		virtual Result Submit(CommandList* cmd, Swapchain* swapchain, const FrameContext& frame) = 0;
+		virtual Result Submit(CommandList* cmd, Swapchain* swapchain, const FrameContext& frame, SubmissionToken* outToken = nullptr) = 0;
 		virtual Result ImmediateSubmit(CommandList* cmd) const = 0;
 		virtual void WaitIdle() = 0;
 
