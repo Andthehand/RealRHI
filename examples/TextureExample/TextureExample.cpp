@@ -285,10 +285,19 @@ bool RecordCommandBuffer(RealRHI::CommandList* cmd, const RealRHI::FrameContext&
 
 bool DrawFrame() {
     RealRHI::FrameContext frame = swapchain->BeginFrame();
-    if (frame.backBufferView == nullptr) return false;
+    if (frame.backBufferView == nullptr) {
+        std::cerr << "Frame acquisition returned no backbuffer; stopping to avoid unsafe semaphore reuse." << std::endl;
+        return false;
+    }
     auto* cmd = commandLists[frame.frameIndex].Raw();
-    if (!RecordCommandBuffer(cmd, frame)) return false;
-    if (device->Submit(cmd, swapchain.Raw(), frame) != RealRHI::Result::Success) return false;
+    if (!RecordCommandBuffer(cmd, frame)) {
+        std::cerr << "Frame command recording failed." << std::endl;
+        return false;
+    }
+    if (device->Submit(cmd, swapchain.Raw(), frame) != RealRHI::Result::Success) {
+        std::cerr << "Frame submission failed." << std::endl;
+        return false;
+    }
     swapchain->Present(frame);
     return true;
 }

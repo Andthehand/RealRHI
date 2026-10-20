@@ -273,7 +273,7 @@ namespace RealRHI {
                 m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to acquire swapchain image after recreation.");
                 return FrameContext{ .frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max(), .backBufferView = nullptr, .width = 0, .height = 0 };
             }
-        } else if (result != VK_SUCCESS) {
+        } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
             m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to acquire swapchain image.");
             return FrameContext{ .frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max(), .backBufferView = nullptr, .width = 0, .height = 0 };
         }
