@@ -58,7 +58,7 @@ namespace RealRHI {
 
 		for (CommandList* commandList : submitInfo.commandLists) {
 			auto* vkCommandList = dynamic_cast<VulkanCommandList*>(commandList);
-			if (vkCommandList->GetQueueId() != GetQueueId()) {
+			if (vkCommandList == nullptr || vkCommandList->GetDevice() != m_Device || vkCommandList->GetQueueId() != GetQueueId()) {
 				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Command list was created for a different queue family or index.");
 				return {};
 			}
@@ -122,7 +122,7 @@ namespace RealRHI {
 
 		for (CommandList* commandList : trackedLists) {
 			auto* vkCommandList = dynamic_cast<VulkanCommandList*>(commandList);
-			if (vkCommandList == nullptr || vkCommandList->GetQueueId() != GetQueueId()) {
+			if (vkCommandList == nullptr || vkCommandList->GetDevice() != m_Device || vkCommandList->GetQueueId() != GetQueueId()) {
 				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Tried to submit a command list to the wrong queue.");
 				return {};
 			}

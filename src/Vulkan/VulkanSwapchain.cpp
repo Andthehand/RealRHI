@@ -78,8 +78,7 @@ namespace RealRHI {
         for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             m_FrameSync[i].preCmdBuf = cmdBufs[i * 2];
             m_FrameSync[i].postCmdBuf = cmdBufs[i * 2 + 1];
-            if (vkCreateSemaphore(m_Device->GetDevice(), &semInfo, nullptr, &m_FrameSync[i].imageAvailableSemaphore) != VK_SUCCESS ||
-                false) {
+            if (vkCreateSemaphore(m_Device->GetDevice(), &semInfo, nullptr, &m_FrameSync[i].imageAvailableSemaphore) != VK_SUCCESS) {
                 m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan frame sync objects for swapchain.");
                 return Result::Failed;
             }
