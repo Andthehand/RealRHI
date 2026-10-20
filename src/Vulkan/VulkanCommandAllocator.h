@@ -17,6 +17,7 @@ namespace RealRHI {
         const VulkanDevice* GetDevice() const { return m_Device; }
         VkResult Allocate(VkCommandBuffer& out);
         void Free(VkCommandBuffer buffer);
+        VkResult ResetBuffer(VkCommandBuffer buffer);
     private:
         const VulkanDevice* m_Device;
         VkCommandPool m_Pool = VK_NULL_HANDLE;

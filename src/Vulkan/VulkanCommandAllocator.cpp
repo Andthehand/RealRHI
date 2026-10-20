@@ -43,6 +43,11 @@ namespace RealRHI {
         --m_LiveBuffers;
     }
 
+    VkResult VulkanCommandAllocator::ResetBuffer(VkCommandBuffer buffer) {
+        std::scoped_lock lock(m_Mutex);
+        return vkResetCommandBuffer(buffer, 0);
+    }
+
     Result VulkanCommandAllocator::Reset() {
         std::scoped_lock lock(m_Mutex);
         // The initial implementation requires all lists to be released.

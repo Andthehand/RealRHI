@@ -60,6 +60,6 @@ namespace RealRHI {
 		CommandListState m_State = CommandListState::Initial;
 		QueueId m_QueueId{};
 
-		VkCommandBuffer m_CommandBuffer;
+		VkCommandBuffer m_CommandBuffer = VK_NULL_HANDLE;
 	};
 }

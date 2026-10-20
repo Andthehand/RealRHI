@@ -136,7 +136,7 @@ namespace RealRHI {
             std::scoped_lock lock(m_StateMutex);
             std::unique_lock<std::mutex> poolLock(m_Device->GetCommandPoolMutex(), std::defer_lock);
             if (!m_Allocator) poolLock.lock();
-            VkResult resetResult = vkResetCommandBuffer(m_CommandBuffer, 0);
+            VkResult resetResult = m_Allocator ? m_Allocator->ResetBuffer(m_CommandBuffer) : vkResetCommandBuffer(m_CommandBuffer, 0);
             if (resetResult != VK_SUCCESS) {
                 m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to reset Vulkan command buffer.");
                 return Result::Failed;
