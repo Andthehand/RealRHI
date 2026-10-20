@@ -178,61 +178,31 @@ namespace RealRHI {
 	}
 
 	bool VulkanCommandQueue::IsComplete(const SubmissionToken& token) const {
-		if (token.queue != GetQueueId() || token.value == 0) {
-			return false;
-		}
-
-		uint64_t lastCompletedValue = 0;
-		bool isStillPending = false;
+		if (!token.IsValid() || token.queue != GetQueueId()) return false;
 		{
 			std::scoped_lock lock(m_SubmissionMutex);
-			lastCompletedValue = m_LastCompletedValue;
-			isStillPending = token.value < m_NextFrameValue && m_PendingSubmissions.find(token.value) != m_PendingSubmissions.end();
+			if (token.value >= m_NextFrameValue) return false;
 		}
+		uint64_t completed = 0;
+		if (vkGetSemaphoreCounterValue(m_Device->GetDevice(), m_TimelineSemaphore, &completed) != VK_SUCCESS) return false;
+		return completed >= token.value;
+	}
 
-		if (token.value <= lastCompletedValue) {
-			return true;
+	void VulkanCommandQueue::ProcessCompletedSubmissions() {
+		uint64_t completed = 0;
+		if (vkGetSemaphoreCounterValue(m_Device->GetDevice(), m_TimelineSemaphore, &completed) != VK_SUCCESS) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to query queue timeline completion.");
+			return;
 		}
-
-		if (!isStillPending) {
-			return false;
-		}
-
-		uint64_t currentValue = 0;
-		const VkResult result = vkGetSemaphoreCounterValue(m_Device->GetDevice(), m_TimelineSemaphore, &currentValue);
-		if (result != VK_SUCCESS) {
-			return false;
-		}
-
-		if (currentValue < token.value) {
-			return false;
-		}
-
-		FinalizeCompleted(token.value);
-		return true;
+		FinalizeCompleted(completed);
 	}
 
 	void VulkanCommandQueue::Wait(const SubmissionToken& token) {
-		if (token.queue != GetQueueId() || token.value == 0) {
-			return;
-		}
-
-		uint64_t lastCompletedValue = 0;
-		bool isStillPending = false;
+		if (!token.IsValid() || token.queue != GetQueueId()) return;
 		{
 			std::scoped_lock lock(m_SubmissionMutex);
-			lastCompletedValue = m_LastCompletedValue;
-			isStillPending = token.value < m_NextFrameValue && m_PendingSubmissions.find(token.value) != m_PendingSubmissions.end();
+			if (token.value >= m_NextFrameValue) return;
 		}
-
-		if (token.value <= lastCompletedValue) {
-			return;
-		}
-
-		if (!isStillPending) {
-			return;
-		}
-
 		const uint64_t value = token.value;
 		VkSemaphoreWaitInfo waitInfo{
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
@@ -240,8 +210,10 @@ namespace RealRHI {
 			.pSemaphores = &m_TimelineSemaphore,
 			.pValues = &value,
 		};
-
-		vkWaitSemaphores(m_Device->GetDevice(), &waitInfo, UINT64_MAX);
+		if (vkWaitSemaphores(m_Device->GetDevice(), &waitInfo, UINT64_MAX) != VK_SUCCESS) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to wait for queue timeline completion.");
+			return;
+		}
 		FinalizeCompleted(value);
 	}
 
@@ -255,7 +227,7 @@ namespace RealRHI {
 		if (lastSubmitted != 0) FinalizeCompleted(lastSubmitted);
 	}
 
-	void VulkanCommandQueue::FinalizeCompleted(uint64_t completedValue) const {
+	void VulkanCommandQueue::FinalizeCompleted(uint64_t completedValue) {
 		std::vector<Ref<CommandList>> completedLists;
 		{
 			std::scoped_lock lock(m_SubmissionMutex);
