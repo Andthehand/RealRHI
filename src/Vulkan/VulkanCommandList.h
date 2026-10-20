@@ -16,7 +16,10 @@ namespace RealRHI {
 
 		Result Begin() override;
 		Result End() override;
-		
+		Result Reset() override;
+		CommandListState GetState() const override { return m_State; }
+		void SetState(CommandListState state) { m_State = state; }
+
 		void BeginRendering(const RenderingInfo& renderingInfo) override;
 		void EndRendering() override;
 
@@ -29,13 +32,19 @@ namespace RealRHI {
 
 		void Draw(uint32_t vertexCount) override;
 		void DrawIndexed(uint32_t indexCount) override;
+		
+		QueueId GetQueueId() const { return m_QueueId; }
+		
 	protected:
 		friend class VulkanDevice;
 		friend class VulkanTexture;
+		friend class VulkanCommandQueue;
 		VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
 	private:
 		const VulkanDevice* m_Device;
 		VulkanPipeline* m_BoundPipeline = nullptr;
+		CommandListState m_State = CommandListState::Initial;
+		QueueId m_QueueId{};
 
 		VkCommandBuffer m_CommandBuffer;
 	};

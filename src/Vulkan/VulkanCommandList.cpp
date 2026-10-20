@@ -9,7 +9,7 @@
 
 namespace RealRHI {
     VulkanCommandList::VulkanCommandList(const VulkanDevice* device)
-        : m_Device(device) {
+        : m_Device(device), m_QueueId{ device->GetGraphicsQueueFamily() } {
     }
 
     VulkanCommandList::~VulkanCommandList() {
@@ -43,26 +43,65 @@ namespace RealRHI {
 		return Result::Success;
     }
 
-    Result VulkanCommandList::Begin() {
-		vkResetCommandBuffer(m_CommandBuffer, 0);
+	Result VulkanCommandList::Begin() {
+		if (m_State == CommandListState::Recording || m_State == CommandListState::Pending) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Command buffer cannot begin while already recording or pending.");
+			return Result::Failed;
+		}
 
-        VkCommandBufferBeginInfo beginInfo{};
-        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		if (m_State == CommandListState::Executable) {
+			const Result resetResult = Reset();
+			if (resetResult != Result::Success) {
+				return resetResult;
+			}
+		}
 
-        if (vkBeginCommandBuffer(m_CommandBuffer, &beginInfo) != VK_SUCCESS) {
+		VkCommandBufferBeginInfo beginInfo{};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+		if (vkBeginCommandBuffer(m_CommandBuffer, &beginInfo) != VK_SUCCESS) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to begin Vulkan command buffer.");
 			return Result::Failed;
-        }
-		return Result::Success;
-    }
+		}
 
-    Result VulkanCommandList::End() {
-        if (vkEndCommandBuffer(m_CommandBuffer) != VK_SUCCESS) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to end Vulkan command buffer.");
-            return Result::Failed;
-        }
+		m_State = CommandListState::Recording;
 		return Result::Success;
-    }
+	}
+
+	Result VulkanCommandList::End() {
+		if (m_State != CommandListState::Recording) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Command buffer can only end while recording.");
+			return Result::Failed;
+		}
+
+		if (vkEndCommandBuffer(m_CommandBuffer) != VK_SUCCESS) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to end Vulkan command buffer.");
+			return Result::Failed;
+		}
+
+		m_State = CommandListState::Executable;
+		return Result::Success;
+	}
+
+	Result VulkanCommandList::Reset() {
+		if (m_State == CommandListState::Pending || m_State == CommandListState::Recording) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Cannot reset a command buffer while it is pending or recording.");
+			return Result::Failed;
+		}
+
+		if (m_State == CommandListState::Initial) {
+			return Result::Success;
+		}
+
+		VkResult resetResult = vkResetCommandBuffer(m_CommandBuffer, 0);
+		if (resetResult != VK_SUCCESS) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to reset Vulkan command buffer.");
+			return Result::Failed;
+		}
+
+		m_State = CommandListState::Initial;
+		return Result::Success;
+	}
 
 	void VulkanCommandList::BeginRendering(const RenderingInfo& renderingInfo) {
 		std::vector<VkRenderingAttachmentInfo> colorAttachmentInfos(renderingInfo.colorAttachments.size());

@@ -1,5 +1,6 @@
 #pragma once
 #include "Device.h"
+#include "Queue.h"
 
 #include <volk.h>
 #include <vma/vk_mem_alloc.h>
@@ -7,11 +8,13 @@
 #include <array>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 
 #undef CreateWindow // Windows.h defines a macro for CreateWindow, which conflicts with our Device::CreateWindow method
 
 namespace RealRHI {
 	class VulkanDescriptorManager;
+	class VulkanCommandQueue;
 
 	struct QueueFamilyIndices {
 		std::optional<uint32_t> graphicsFamily;
@@ -37,6 +40,8 @@ namespace RealRHI {
 		VkQueue GetPresentQueue() const { return m_PresentQueue; }
 		uint32_t GetGraphicsQueueFamily() const { return m_GraphicsQueueFamily; }
 		uint32_t GetPresentQueueFamily() const { return m_PresentQueueFamily; }
+		VulkanCommandQueue* GetGraphicsCommandQueue() const { return m_GraphicsCommandQueue; }
+		VulkanCommandQueue* GetCommandQueue(const QueueId& queueId) const;
 
 		// Pools
 		VkCommandPool GetCommandPool() const { return m_CommandPool; }
@@ -76,6 +81,7 @@ namespace RealRHI {
 		bool CreateLogicalDevice();
 		QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
 		bool CreateAllocator();
+		bool CreateCommandQueues();
 		Result CreateCommandPool();
 
 		static VKAPI_ATTR VkBool32 VulkanDebugCallback(
@@ -93,6 +99,8 @@ namespace RealRHI {
 			uint32_t m_PresentQueueFamily = 0;
 			VkQueue m_GraphicsQueue = VK_NULL_HANDLE;
 			VkQueue m_PresentQueue = VK_NULL_HANDLE;
+			VulkanCommandQueue* m_GraphicsCommandQueue = nullptr;
+			std::unordered_map<QueueId, VulkanCommandQueue*> m_Queues;
 
 			// Pools
 			VkCommandPool m_CommandPool = VK_NULL_HANDLE;

@@ -8,6 +8,7 @@
 #include "VulkanPipeline.h"
 #include "VulkanBuffer.h"
 #include "VulkanCommandList.h"
+#include "VulkanCommandQueue.h"
 #include "VulkanDescriptorManager.h"
 
 #include <set>
@@ -15,6 +16,12 @@
 
 namespace RealRHI {
 	VulkanDevice::~VulkanDevice() {
+		for (auto& [queueId, queue] : m_Queues) {
+			delete queue;
+		}
+		m_Queues.clear();
+		m_GraphicsCommandQueue = nullptr;
+
 		// Guard against partial initialization - only cleanup if constructed
 		if (m_DescriptorManager) {
 			m_DescriptorManager->Cleanup();
@@ -82,12 +89,17 @@ namespace RealRHI {
             return Result::Failed;
         }
 
-        if (!CreateLogicalDevice()) {
+		if (!CreateLogicalDevice()) {
 			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan logical device.");
+			return Result::Failed;
+		}
+
+		if (!CreateCommandQueues()) {
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan command queues.");
             return Result::Failed;
         }
 
-        if (!CreateAllocator()) {
+		if (!CreateAllocator()) {
 			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan memory allocator.");
             return Result::Failed;
         }
@@ -165,11 +177,16 @@ namespace RealRHI {
         return res;
     }
 
-    Result VulkanDevice::CreateCommandList(Ref<CommandList>& outCommandList) const {
+	Result VulkanDevice::CreateCommandList(Ref<CommandList>& outCommandList) const {
 		return VulkanCommandList::Create(this, (Ref<VulkanCommandList>&)outCommandList);
-    }
+	}
 
-    void VulkanDevice::BindDescriptorHeaps(VkCommandBuffer commandBuffer) const {
+	VulkanCommandQueue* VulkanDevice::GetCommandQueue(const QueueId& queueId) const {
+		auto it = m_Queues.find(queueId);
+		return it == m_Queues.end() ? nullptr : it->second;
+	}
+
+	void VulkanDevice::BindDescriptorHeaps(VkCommandBuffer commandBuffer) const {
 		m_DescriptorManager->BindDescriptorHeaps(commandBuffer);
     }
 
@@ -490,11 +507,12 @@ namespace RealRHI {
             .synchronization2 = VK_TRUE,
             .dynamicRendering = VK_TRUE,
         };
-        VkPhysicalDeviceVulkan12Features enabledVk12Features{
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-            .pNext = &enabledVk13Features,
-			.bufferDeviceAddress = VK_TRUE
-        };
+		VkPhysicalDeviceVulkan12Features enabledVk12Features{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+			.pNext = &enabledVk13Features,
+		};
+		enabledVk12Features.bufferDeviceAddress = VK_TRUE;
+		enabledVk12Features.timelineSemaphore = VK_TRUE;
         VkPhysicalDeviceFeatures deviceFeatures{
             .samplerAnisotropy = VK_TRUE,
         };
@@ -515,8 +533,9 @@ namespace RealRHI {
 
         volkLoadDevice(m_Device);
 
-        vkGetDeviceQueue(m_Device, m_GraphicsQueueFamily, 0, &m_GraphicsQueue);
-        vkGetDeviceQueue(m_Device, m_PresentQueueFamily, 0, &m_PresentQueue);
+        if (!CreateCommandQueues()) {
+            return false;
+        }
 
         return true;
     }
@@ -530,25 +549,43 @@ namespace RealRHI {
         std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
         vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
 
-        int queueFamilyIndex = 0;
-        for (const auto& queueFamily : queueFamilies) {
-            if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT
-                && SDL_Vulkan_GetPresentationSupport(m_Instance, device, queueFamilyIndex)) {
+        for (uint32_t queueFamilyIndex = 0; queueFamilyIndex < queueFamilyCount; ++queueFamilyIndex) {
+            const auto& queueFamily = queueFamilies[queueFamilyIndex];
+
+            if (!indices.graphicsFamily.has_value() && (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
                 indices.graphicsFamily = queueFamilyIndex;
-                // TODO: Add proper present queue support for different queue families
-                // For simplicity, we assume graphics and present queues are in the same family.
-                // This works for most hardware but may need to be improved for some configurations.
+            }
+
+            if (SDL_Vulkan_GetPresentationSupport(m_Instance, device, queueFamilyIndex) && !indices.presentFamily.has_value()) {
                 indices.presentFamily = queueFamilyIndex;
             }
 
             if (indices.IsComplete()) {
                 break;
             }
+        }
 
-            queueFamilyIndex++;
+        if (!indices.presentFamily.has_value() && indices.graphicsFamily.has_value()) {
+            indices.presentFamily = indices.graphicsFamily;
         }
 
         return indices;
+    }
+
+    bool VulkanDevice::CreateCommandQueues() {
+        vkGetDeviceQueue(m_Device, m_GraphicsQueueFamily, 0, &m_GraphicsQueue);
+        vkGetDeviceQueue(m_Device, m_PresentQueueFamily, 0, &m_PresentQueue);
+
+        m_Queues.clear();
+        m_GraphicsCommandQueue = new VulkanCommandQueue(this, m_GraphicsQueueFamily, 0, m_GraphicsQueue);
+        m_Queues[QueueId{ m_GraphicsQueueFamily, 0 }] = m_GraphicsCommandQueue;
+
+        if (m_PresentQueueFamily != m_GraphicsQueueFamily) {
+            auto* presentQueue = new VulkanCommandQueue(this, m_PresentQueueFamily, 0, m_PresentQueue);
+            m_Queues[QueueId{ m_PresentQueueFamily, 0 }] = presentQueue;
+        }
+
+        return true;
     }
 
     bool VulkanDevice::CreateAllocator() {

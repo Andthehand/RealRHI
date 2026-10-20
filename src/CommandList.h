@@ -10,12 +10,21 @@
 #include <cstdint>
 
 namespace RealRHI {
+    enum class CommandListState {
+        Initial,
+        Recording,
+        Executable,
+        Pending
+    };
+
     class CommandList : public RefCounted {
     public:
         virtual ~CommandList() = default;
 
         virtual Result Begin() = 0;
         virtual Result End() = 0;
+        virtual Result Reset() = 0;
+        virtual CommandListState GetState() const = 0;
 
         virtual void BeginRendering(const RenderingInfo& renderingInfo) = 0;
         virtual void EndRendering() = 0;
