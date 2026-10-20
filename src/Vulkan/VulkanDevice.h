@@ -7,6 +7,7 @@
 
 #include <array>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <unordered_map>
 
@@ -42,6 +43,7 @@ namespace RealRHI {
 		uint32_t GetPresentQueueFamily() const { return m_PresentQueueFamily; }
 		VulkanCommandQueue* GetGraphicsCommandQueue() const { return m_GraphicsCommandQueue; }
 		VulkanCommandQueue* GetCommandQueue(const QueueId& queueId) const;
+		std::mutex& GetCommandPoolMutex() const { return m_CommandPoolMutex; }
 
 		// Pools
 		VkCommandPool GetCommandPool() const { return m_CommandPool; }
@@ -103,6 +105,7 @@ namespace RealRHI {
 			std::unordered_map<QueueId, VulkanCommandQueue*> m_Queues;
 
 			// Pools
+			mutable std::mutex m_CommandPoolMutex;
 			VkCommandPool m_CommandPool = VK_NULL_HANDLE;
 			std::unique_ptr<VulkanDescriptorManager> m_DescriptorManager;
 

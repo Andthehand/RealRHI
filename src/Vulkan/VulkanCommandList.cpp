@@ -15,8 +15,9 @@ namespace RealRHI {
     }
 
     VulkanCommandList::~VulkanCommandList() {
-        std::scoped_lock lock(m_StateMutex);
+        std::scoped_lock stateLock(m_StateMutex);
         if (m_CommandBuffer != VK_NULL_HANDLE && m_State != CommandListState::Pending) {
+            std::scoped_lock poolLock(m_Device->GetCommandPoolMutex());
             vkFreeCommandBuffers(m_Device->GetDevice(), m_Device->GetCommandPool(), 1, &m_CommandBuffer);
             m_CommandBuffer = VK_NULL_HANDLE;
         }
@@ -41,6 +42,7 @@ namespace RealRHI {
             .commandBufferCount = 1,
         };
 
+        std::scoped_lock poolLock(m_Device->GetCommandPoolMutex());
         if (vkAllocateCommandBuffers(m_Device->GetDevice(), &allocInfo, &m_CommandBuffer) != VK_SUCCESS) {
             m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to allocate Vulkan command buffer.");
             return Result::Failed;
@@ -114,6 +116,7 @@ namespace RealRHI {
 
         {
             std::scoped_lock lock(m_StateMutex);
+            std::scoped_lock poolLock(m_Device->GetCommandPoolMutex());
             VkResult resetResult = vkResetCommandBuffer(m_CommandBuffer, 0);
             if (resetResult != VK_SUCCESS) {
                 m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to reset Vulkan command buffer.");

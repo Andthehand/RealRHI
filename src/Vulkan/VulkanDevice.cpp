@@ -13,6 +13,7 @@
 
 #include <set>
 #include <iostream>
+#include <limits>
 
 namespace RealRHI {
 	VulkanDevice::~VulkanDevice() {
@@ -195,6 +196,10 @@ namespace RealRHI {
             return;
         }
 
+        if (frame.imageIndex == std::numeric_limits<uint32_t>::max() || frame.backBufferView == nullptr) {
+            return;
+        }
+
         auto* vkSC = static_cast<VulkanSwapchain*>(sc);
         auto* vkCmd = dynamic_cast<VulkanCommandList*>(cmd);
         if (vkCmd == nullptr) {
@@ -224,12 +229,19 @@ namespace RealRHI {
         };
 
         std::array<CommandList*, 1> tracked = { cmd };
-        m_GraphicsCommandQueue->SubmitTracked(
+        const VkFence fence = vkSC->GetFence(frame.frameIndex);
+
+        const SubmissionToken token = m_GraphicsCommandQueue->SubmitTracked(
             { cmdInfos.data(), cmdInfos.size() },
             { &waitInfo, 1 },
             { &signalInfo, 1 },
             tracked,
-            vkSC->GetFence(frame.frameIndex));
+            fence);
+        if (!token.IsValid()) {
+            if (fence != VK_NULL_HANDLE) {
+                vkResetFences(m_Device, 1, &fence);
+            }
+        }
     }
 
     Result VulkanDevice::ImmediateSubmit(CommandList* cmd) const {

@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <algorithm>
+#include <limits>
 
 namespace RealRHI {
     VulkanSwapchain::VulkanSwapchain(const VulkanDevice* device) : m_Device(device) {
@@ -235,24 +236,51 @@ namespace RealRHI {
 
     FrameContext VulkanSwapchain::BeginFrame() {
         const uint32_t frameIdx = m_CurrentFrameIndex;
+        VkFence fence = m_FrameSync[frameIdx].fence;
 
-        vkWaitForFences(m_Device->GetDevice(), 1, &m_FrameSync[frameIdx].fence, VK_TRUE, UINT64_MAX);
-        vkResetFences(m_Device->GetDevice(), 1, &m_FrameSync[frameIdx].fence);
+        if (fence != VK_NULL_HANDLE) {
+            VkFenceStatus fenceStatus = vkGetFenceStatus(m_Device->GetDevice(), fence);
+            if (fenceStatus == VK_NOT_READY) {
+                vkWaitForFences(m_Device->GetDevice(), 1, &fence, VK_TRUE, UINT64_MAX);
+            }
+        }
 
-        uint32_t imageIndex = 0;
+        if (m_Swapchain == VK_NULL_HANDLE || m_SwapchainExtent.width == 0 || m_SwapchainExtent.height == 0) {
+            return FrameContext{ .frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max(), .backBufferView = nullptr, .width = 0, .height = 0 };
+        }
+
+        uint32_t imageIndex = std::numeric_limits<uint32_t>::max();
         VkResult result = vkAcquireNextImageKHR(m_Device->GetDevice(), m_Swapchain, UINT64_MAX,
             m_FrameSync[frameIdx].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
-        if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
             RecreateSwapchain();
-            result = vkAcquireNextImageKHR(m_Device->GetDevice(), m_Swapchain, UINT64_MAX, m_FrameSync[frameIdx].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
-            
+            if (m_Swapchain == VK_NULL_HANDLE || m_SwapchainExtent.width == 0 || m_SwapchainExtent.height == 0) {
+                return FrameContext{ .frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max(), .backBufferView = nullptr, .width = 0, .height = 0 };
+            }
+
+            result = vkAcquireNextImageKHR(m_Device->GetDevice(), m_Swapchain, UINT64_MAX,
+                m_FrameSync[frameIdx].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+
             m_Device->SendDebugMessage(DebugSeverity::Trace, DebugMessageType::General, "Swapchain was out of date during image acquisition, recreated swapchain and retried.");
 
             if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
                 m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to acquire swapchain image after recreation.");
+                return FrameContext{ .frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max(), .backBufferView = nullptr, .width = 0, .height = 0 };
             }
-        } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+        } else if (result != VK_SUCCESS) {
             m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to acquire swapchain image.");
+            return FrameContext{ .frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max(), .backBufferView = nullptr, .width = 0, .height = 0 };
+        }
+
+        if (imageIndex >= m_SwapchainImages.size()) {
+            return FrameContext{ .frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max(), .backBufferView = nullptr, .width = 0, .height = 0 };
+        }
+
+        if (fence != VK_NULL_HANDLE) {
+            VkFenceStatus fenceStatus = vkGetFenceStatus(m_Device->GetDevice(), fence);
+            if (fenceStatus == VK_SUCCESS) {
+                vkResetFences(m_Device->GetDevice(), 1, &fence);
+            }
         }
 
         return FrameContext{
@@ -265,7 +293,15 @@ namespace RealRHI {
     }
 
     void VulkanSwapchain::Present(const FrameContext& frame) {
+        if (frame.imageIndex == std::numeric_limits<uint32_t>::max() || frame.backBufferView == nullptr || m_Swapchain == VK_NULL_HANDLE) {
+            return;
+        }
+
         const uint32_t imageIndex = frame.imageIndex;
+        if (imageIndex >= m_RenderFinishedSemaphores.size()) {
+            return;
+        }
+
         VkSemaphore waitSemaphore = m_RenderFinishedSemaphores[imageIndex];
 
         VkPresentInfoKHR presentInfo{
