@@ -1,6 +1,7 @@
 #include <SDL3/SDL.h>
 
 #include "Device.h"
+#include "FrameResources.h"
 #include "FrameContext.h"
 #include "Vulkan/VulkanDevice.h"
 #include "Vulkan/VulkanCommandQueue.h"
