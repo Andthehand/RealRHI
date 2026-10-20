@@ -559,11 +559,7 @@ namespace RealRHI {
         }
 
         volkLoadDevice(m_Device);
-
-        if (!CreateCommandQueues()) {
-            return false;
-        }
-
+        // Queues are created once in Init(), after logical device creation.
         return true;
     }
 
@@ -603,7 +599,10 @@ namespace RealRHI {
         vkGetDeviceQueue(m_Device, m_GraphicsQueueFamily, 0, &m_GraphicsQueue);
         vkGetDeviceQueue(m_Device, m_PresentQueueFamily, 0, &m_PresentQueue);
 
-        m_Queues.clear();
+        if (!m_Queues.empty()) {
+            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Command queues are already initialized.");
+            return false;
+        }
         m_GraphicsCommandQueue = new VulkanCommandQueue(this, m_GraphicsQueueFamily, 0, m_GraphicsQueue);
         m_Queues[QueueId{ m_GraphicsQueueFamily, 0 }] = m_GraphicsCommandQueue;
 
