@@ -1,4 +1,5 @@
 #include "VulkanSwapchain.h"
+#include "VulkanCommandQueue.h"
 #include "VulkanConvertions.h"
 
 #include <iostream>
