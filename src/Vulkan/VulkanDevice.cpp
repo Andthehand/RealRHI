@@ -238,13 +238,15 @@ namespace RealRHI {
         VkSemaphoreSubmitInfo waitInfo{
             .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
             .semaphore = vkSC->GetImageAvailableSemaphore(frame.frameIndex),
-            .stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            // Include the pre-render image layout transition in the acquire wait.
+            .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
         };
 
         VkSemaphoreSubmitInfo signalInfo{
             .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
             .semaphore = vkSC->GetRenderFinishedSemaphore(frame.imageIndex),
-            .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
+            // The post-render transition is a pipeline barrier, not a graphics stage.
+            .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
         };
 
         std::array<CommandList*, 1> tracked = { cmd };
