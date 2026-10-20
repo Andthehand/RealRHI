@@ -141,7 +141,7 @@ namespace RealRHI {
 		}
 
 		std::unique_lock submitLock(m_SubmissionMutex);
-		const uint64_t submissionValue = m_NextValue;
+		const uint64_t submissionValue = m_NextFrameValue;
 		signalInfos.push_back({
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
 			.semaphore = m_TimelineSemaphore,
@@ -165,7 +165,7 @@ namespace RealRHI {
 			return {};
 		}
 
-		++m_NextValue;
+		++m_NextFrameValue;
 		m_PendingSubmissions[submissionValue] = std::move(retainedLists);
 		for (CommandList* commandList : trackedLists) {
 			if (commandList != nullptr) {
@@ -187,7 +187,7 @@ namespace RealRHI {
 		{
 			std::scoped_lock lock(m_SubmissionMutex);
 			lastCompletedValue = m_LastCompletedValue;
-			isStillPending = token.value < m_NextValue && m_PendingSubmissions.find(token.value) != m_PendingSubmissions.end();
+			isStillPending = token.value < m_NextFrameValue && m_PendingSubmissions.find(token.value) != m_PendingSubmissions.end();
 		}
 
 		if (token.value <= lastCompletedValue) {
@@ -222,7 +222,7 @@ namespace RealRHI {
 		{
 			std::scoped_lock lock(m_SubmissionMutex);
 			lastCompletedValue = m_LastCompletedValue;
-			isStillPending = token.value < m_NextValue && m_PendingSubmissions.find(token.value) != m_PendingSubmissions.end();
+			isStillPending = token.value < m_NextFrameValue && m_PendingSubmissions.find(token.value) != m_PendingSubmissions.end();
 		}
 
 		if (token.value <= lastCompletedValue) {
@@ -250,7 +250,7 @@ namespace RealRHI {
 		{
 			std::scoped_lock lock(m_SubmissionMutex);
 			vkQueueWaitIdle(m_Queue);
-			lastSubmitted = m_NextValue - 1;
+			lastSubmitted = m_NextFrameValue - 1;
 		}
 		if (lastSubmitted != 0) FinalizeCompleted(lastSubmitted);
 	}

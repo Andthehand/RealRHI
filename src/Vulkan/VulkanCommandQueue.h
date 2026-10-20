@@ -43,8 +43,9 @@ namespace RealRHI {
         uint32_t m_FamilyIndex = 0;
         uint32_t m_QueueIndex = 0;
 
+		// mutable because we need to allow const methods to check completion status and finalize completed command lists
         mutable std::mutex m_SubmissionMutex;
-        uint64_t m_NextValue = 1;
+        uint64_t m_NextFrameValue = 1;
         mutable std::unordered_map<uint64_t, std::vector<Ref<CommandList>>> m_PendingSubmissions;
         mutable uint64_t m_LastCompletedValue = 0;
     };
