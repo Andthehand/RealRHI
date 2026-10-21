@@ -15,6 +15,7 @@
 #include <set>
 #include <iostream>
 #include <limits>
+#include <cstring>
 
 namespace RealRHI {
 	VulkanDevice::~VulkanDevice() {
@@ -351,13 +352,43 @@ namespace RealRHI {
             extensions.push_back(sdlExtensions[i]);
         }
         
+        VkValidationFeatureEnableEXT syncValidation =
+            VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT;
+        VkValidationFeaturesEXT validationFeatures{
+            .sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT,
+            .enabledValidationFeatureCount = 1,
+            .pEnabledValidationFeatures = &syncValidation,
+        };
+
         if (enableValidationLayer) {
             extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
             layers.push_back("VK_LAYER_KHRONOS_validation");
+
+            uint32_t extensionCount = 0;
+            constexpr const char* layerName = "VK_LAYER_KHRONOS_validation";
+            if (vkEnumerateInstanceExtensionProperties(layerName, &extensionCount, nullptr) != VK_SUCCESS)
+                return false;
+            std::vector<VkExtensionProperties> layerExtensions(extensionCount);
+            if (vkEnumerateInstanceExtensionProperties(layerName, &extensionCount, layerExtensions.data()) != VK_SUCCESS)
+                return false;
+            bool supported = false;
+            for (const auto& extension : layerExtensions) {
+                if (std::strcmp(extension.extensionName, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME) == 0) {
+                    supported = true;
+                    break;
+                }
+            }
+            if (!supported) {
+                SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                    "VK_EXT_validation_features is not advertised by the validation layer.");
+                return false;
+            }
+            extensions.push_back(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
         }
 
         VkInstanceCreateInfo createInfo{
             .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+            .pNext = enableValidationLayer ? &validationFeatures : nullptr,
             .pApplicationInfo = &appInfo,
             .enabledLayerCount = static_cast<uint32_t>(layers.size()),
             .ppEnabledLayerNames = layers.data(),
