@@ -25,9 +25,11 @@ namespace RealRHI {
 		VkImageView GetImageView() const { return m_ImageView; }
 		bool HasNativeImageView() const { return m_ImageView != VK_NULL_HANDLE; }
 		const VkImageViewCreateInfo& GetImageViewCreateInfo() const { return m_ImageViewCreateInfo; }
+        const VulkanTexture* GetTexture() const { return m_Texture; }
 	private:
 		VkImageViewCreateInfo GetImageViewCreateInfo(const TextureViewDesc& desc) const;
 		const VulkanDevice* m_Device = nullptr;
+        const VulkanTexture* m_Texture = nullptr;
 		VkImage m_Image = VK_NULL_HANDLE;
 		VkFormat m_Format = VK_FORMAT_UNDEFINED;
 

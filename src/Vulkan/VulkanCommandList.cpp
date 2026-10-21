@@ -8,6 +8,7 @@
 #include "VulkanConvertions.h"
 
 #include <mutex>
+#include <utility>
 
 namespace RealRHI {
 
@@ -93,6 +94,12 @@ namespace RealRHI {
         return Result::Success;
     }
 
+    void VulkanCommandList::RetainResource(RefCounted* resource) {
+        // The caller owns the command list while recording. GPU submissions
+        // retain the command list through queue completion tracking.
+        m_ReferencedResources.emplace_back(resource);
+    }
+
     Result VulkanCommandList::Reset() {
         CommandListState state = GetState();
         if (state == CommandListState::Pending || state == CommandListState::Recording) {
@@ -115,6 +122,11 @@ namespace RealRHI {
             m_State = CommandListState::Initial;
         }
 
+        // The native command buffer no longer references the old recording.
+        // Release outside the state mutex (destructors may invoke other locks).
+        std::vector<Ref<RefCounted>> released;
+        released.swap(m_ReferencedResources);
+        m_BoundPipeline = nullptr;
         return Result::Success;
     }
 
@@ -128,6 +140,7 @@ namespace RealRHI {
             }
 
             auto* textureView = static_cast<VulkanTextureView*>(attachment.target);
+            RetainResource(const_cast<VulkanTexture*>(textureView->GetTexture()));
 
             VkClearValue clearColor = { {{attachment.clearColor.r, attachment.clearColor.g, attachment.clearColor.b, attachment.clearColor.a}} };
             colorAttachmentInfos[i] = {
@@ -155,6 +168,7 @@ namespace RealRHI {
             }
 
             auto* textureView = static_cast<VulkanTextureView*>(attachment.target);
+            RetainResource(const_cast<VulkanTexture*>(textureView->GetTexture()));
 
             const VkImageAspectFlags aspectMask = textureView->GetImageViewCreateInfo().subresourceRange.aspectMask;
             const bool hasStencilAspect = (aspectMask & VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
@@ -239,6 +253,7 @@ namespace RealRHI {
     }
 
     void VulkanCommandList::BindPipeline(Pipeline* pipeline) {
+        RetainResource(pipeline);
         m_BoundPipeline = static_cast<VulkanPipeline*>(pipeline);
         vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_BoundPipeline->GetPipeline());
 
@@ -246,12 +261,14 @@ namespace RealRHI {
     }
 
     void VulkanCommandList::BindVertexBuffer(Buffer* vertexBuffer) {
+        RetainResource(vertexBuffer);
         VkBuffer vertexBuffers[] = { static_cast<VulkanBuffer*>(vertexBuffer)->GetBuffer() };
         VkDeviceSize offsets[] = { 0 };
         vkCmdBindVertexBuffers(m_CommandBuffer, 0, 1, vertexBuffers, offsets);
     }
 
     void VulkanCommandList::BindIndexBuffer(Buffer* indexBuffer) {
+        RetainResource(indexBuffer);
         vkCmdBindIndexBuffer(m_CommandBuffer, static_cast<VulkanBuffer*>(indexBuffer)->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
     }
 

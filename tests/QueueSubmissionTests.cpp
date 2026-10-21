@@ -95,6 +95,29 @@ int main() {
         frames.WaitAll();
     }
 
+    // Recording retains a vertex buffer until the command list is reset.
+    {
+        RealRHI::Ref<RealRHI::Buffer> buffer;
+        RealRHI::BufferDesc desc{};
+        desc.size = 64;
+        desc.usage = RealRHI::BufferUsage::Vertex;
+        Expect(device->CreateBuffer(desc, buffer) == RealRHI::Result::Success,
+               "Create lifetime-test vertex buffer");
+        RealRHI::Ref<RealRHI::CommandList> list;
+        Expect(device->CreateCommandList(allocator.Raw(), list) == RealRHI::Result::Success,
+               "Create lifetime-test command list");
+        Expect(list->Begin() == RealRHI::Result::Success, "Begin lifetime-test list");
+        const auto beforeBind = buffer->GetRefCount();
+        list->BindVertexBuffer(buffer.Raw());
+        Expect(buffer->GetRefCount() > beforeBind, "Command list retains bound buffer");
+        Expect(list->End() == RealRHI::Result::Success, "End lifetime-test list");
+        const auto token = graphicsQueue->Submit(*list);
+        Expect(token.IsValid(), "Submit lifetime-test list");
+        graphicsQueue->Wait(token);
+        Expect(list->Reset() == RealRHI::Result::Success, "Reset lifetime-test list");
+        Expect(buffer->GetRefCount() == beforeBind, "Reset releases bound buffer");
+    }
+
     std::cout << "QueueSubmissionTests passed" << std::endl;
     return 0;
 }

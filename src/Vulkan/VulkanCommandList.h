@@ -7,6 +7,7 @@
 #include <volk.h>
 
 #include <mutex>
+#include <vector>
 
 namespace RealRHI {
 	class VulkanCommandList : public CommandList {
@@ -53,6 +54,9 @@ namespace RealRHI {
 		const VulkanDevice* m_Device;
         Ref<VulkanCommandAllocator> m_Allocator;
 		VulkanPipeline* m_BoundPipeline = nullptr;
+        // Retain objects referenced by the current executable recording.
+        std::vector<Ref<RefCounted>> m_ReferencedResources;
+        void RetainResource(RefCounted* resource);
 		mutable std::mutex m_StateMutex;
 		CommandListState m_State = CommandListState::Initial;
 		QueueId m_QueueId{};
