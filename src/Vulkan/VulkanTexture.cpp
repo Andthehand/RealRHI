@@ -151,8 +151,12 @@ namespace RealRHI {
     }
 
     Result VulkanTexture::UploadData(const void* data, uint32_t size) {
+        Ref<VulkanCommandAllocator> commandAllocator;
+        Result res = VulkanCommandAllocator::Create(m_Device, commandAllocator);
+        if (res != Result::Success) return res;
+
         Ref<VulkanCommandList> commandList;
-        Result res = VulkanCommandList::Create(m_Device, commandList);
+        res = VulkanCommandList::Create(m_Device, commandAllocator, commandList);
         if (res != Result::Success) {
             return res;
         }

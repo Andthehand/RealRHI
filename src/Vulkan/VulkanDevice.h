@@ -43,10 +43,8 @@ namespace RealRHI {
 		uint32_t GetPresentQueueFamily() const { return m_PresentQueueFamily; }
 		VulkanCommandQueue* GetGraphicsCommandQueue() const { return m_GraphicsCommandQueue; }
 		VulkanCommandQueue* GetCommandQueue(const QueueId& queueId) const;
-		std::mutex& GetCommandPoolMutex() const { return m_CommandPoolMutex; }
 
 		// Pools
-		VkCommandPool GetCommandPool() const { return m_CommandPool; }
 
 		// Allocator
 		VmaAllocator GetAllocator() const { return m_Allocator; }
@@ -63,7 +61,6 @@ namespace RealRHI {
 		Result CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) const override;
 		Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) const override;
 		Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const override;
-		Result CreateCommandList(Ref<CommandList>& outCommandList) const override;
         Result CreateCommandAllocator(Ref<CommandAllocator>& outAllocator) const override;
         Result CreateCommandList(CommandAllocator* allocator, Ref<CommandList>& outCommandList) const override;
 
@@ -86,7 +83,6 @@ namespace RealRHI {
 		QueueFamilyIndices FindQueueFamilies(VkPhysicalDevice device);
 		bool CreateAllocator();
 		bool CreateCommandQueues();
-		Result CreateCommandPool();
 
 		static VKAPI_ATTR VkBool32 VulkanDebugCallback(
 			VkDebugUtilsMessageSeverityFlagBitsEXT severity,
@@ -107,8 +103,6 @@ namespace RealRHI {
 			std::unordered_map<QueueId, VulkanCommandQueue*> m_Queues;
 
 			// Pools
-			mutable std::mutex m_CommandPoolMutex;
-			VkCommandPool m_CommandPool = VK_NULL_HANDLE;
 			std::unique_ptr<VulkanDescriptorManager> m_DescriptorManager;
 
 			// Allocator
