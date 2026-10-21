@@ -161,6 +161,36 @@ int main() {
                "Reset releases bindless resource");
     }
 
+    // Deferred retirement holds a resource until its submitted GPU work ends.
+    {
+        RealRHI::Ref<RealRHI::Buffer> resource;
+        RealRHI::BufferDesc desc{};
+        desc.size = 64;
+        desc.usage = RealRHI::BufferUsage::Storage;
+        Expect(device->CreateBuffer(desc, resource) == RealRHI::Result::Success,
+               "Create deferred lifetime buffer");
+        RealRHI::Ref<RealRHI::CommandList> list;
+        Expect(device->CreateCommandList(allocator.Raw(), list) == RealRHI::Result::Success,
+               "Create deferred lifetime list");
+        Expect(list->Begin() == RealRHI::Result::Success, "Begin deferred lifetime list");
+        Expect(list->UseResource(resource.Raw()) == RealRHI::Result::Success,
+               "Declare bindless resource use");
+        Expect(list->End() == RealRHI::Result::Success, "End deferred lifetime list");
+        const auto token = graphicsQueue->Submit(*list);
+        Expect(token.IsValid(), "Submit deferred lifetime list");
+        Expect(device->RetireResource(resource.As<RealRHI::RefCounted>(), {token})
+                   == RealRHI::Result::Success, "Retire bindless resource");
+        const auto countWithRetirement = resource->GetRefCount();
+        Expect(countWithRetirement >= 3, "Deferred queue holds resource");
+        graphicsQueue->Wait(token);
+        Expect(list->Reset() == RealRHI::Result::Success, "Reset deferred lifetime list");
+        Expect(resource->GetRefCount() == countWithRetirement - 1,
+               "Command list releases its resource reference");
+        device->ProcessDeferredDeletions();
+        Expect(resource->GetRefCount() == countWithRetirement - 2,
+               "Deferred queue releases resource after completion");
+    }
+
     std::cout << "QueueSubmissionTests passed" << std::endl;
     return 0;
 }

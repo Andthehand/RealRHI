@@ -61,6 +61,18 @@ namespace RealRHI {
         // Defer backend-owned cleanup until all supplied GPU submissions complete.
         virtual void DeferDeletion(std::vector<SubmissionToken> dependencies, std::function<void()> destroy) const = 0;
         virtual void ProcessDeferredDeletions() = 0;
+        // Retains the resource and its native handles until all declared GPU
+        // submissions finish. Use this for shader-indexed bindless resources.
+        Result RetireResource(Ref<RefCounted> resource, std::vector<SubmissionToken> dependencies) const {
+            if (!resource || dependencies.empty()) return Result::Failed;
+            for (const auto& token : dependencies)
+                if (!token.IsValid()) return Result::Failed;
+            auto retained = std::make_shared<Ref<RefCounted>>(std::move(resource));
+            DeferDeletion(std::move(dependencies),
+                [retained]() mutable { retained->Reset(); });
+            return Result::Success;
+        }
+
 
 		static Result Create(const DeviceDesc& desc, std::unique_ptr<Device>& outDevice);
 	};
