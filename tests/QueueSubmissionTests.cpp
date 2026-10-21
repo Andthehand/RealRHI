@@ -1,6 +1,7 @@
 #include "Device.h"
 #include "Queue.h"
 #include "FrameResources.h"
+#include "DeferredDeletionQueue.h"
 #include "Vulkan/VulkanDevice.h"
 #include "Vulkan/VulkanCommandQueue.h"
 
@@ -116,6 +117,21 @@ int main() {
         graphicsQueue->Wait(token);
         Expect(list->Reset() == RealRHI::Result::Success, "Reset lifetime-test list");
         Expect(buffer->GetRefCount() == beforeBind, "Reset releases bound buffer");
+    }
+
+    // Deferred cleanup waits for all dependencies, not merely one queue value.
+    {
+        RealRHI::DeferredDeletionQueue deletions;
+        int destroyed = 0;
+        const RealRHI::SubmissionToken first{.queue = {0, 0}, .value = 4};
+        const RealRHI::SubmissionToken second{.queue = {1, 0}, .value = 7};
+        deletions.Enqueue({first, second}, [&] { ++destroyed; });
+        deletions.Process([&](const auto& token) { return token == first; });
+        Expect(destroyed == 0 && deletions.PendingCount() == 1,
+               "Deletion must wait for all queue dependencies");
+        deletions.Process([](const auto&) { return true; });
+        Expect(destroyed == 1 && deletions.PendingCount() == 0,
+               "Completed deletion runs exactly once");
     }
 
     std::cout << "QueueSubmissionTests passed" << std::endl;

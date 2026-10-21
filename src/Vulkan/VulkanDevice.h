@@ -1,6 +1,7 @@
 #pragma once
 #include "Device.h"
 #include "Queue.h"
+#include "DeferredDeletionQueue.h"
 
 #include <volk.h>
 #include <vma/vk_mem_alloc.h>
@@ -71,6 +72,8 @@ namespace RealRHI {
 		Result Submit(CommandList* cmd, Swapchain* swapchain, const FrameContext& frame, SubmissionToken* outToken = nullptr) override;
 		Result ImmediateSubmit(CommandList* cmd) const override;
 		void WaitIdle() override;
+        void DeferDeletion(std::vector<SubmissionToken> dependencies, std::function<void()> destroy) override;
+        void ProcessDeferredDeletions() override;
 
 		// Properties
 		VkPhysicalDeviceDescriptorHeapPropertiesEXT GetDescriptorHeapProperties() const;
@@ -101,6 +104,7 @@ namespace RealRHI {
 			VkQueue m_PresentQueue = VK_NULL_HANDLE;
 			VulkanCommandQueue* m_GraphicsCommandQueue = nullptr;
 			std::unordered_map<QueueId, VulkanCommandQueue*> m_Queues;
+            DeferredDeletionQueue m_DeferredDeletions;
 
 			// Pools
 			std::unique_ptr<VulkanDescriptorManager> m_DescriptorManager;
