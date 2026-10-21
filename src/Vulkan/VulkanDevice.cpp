@@ -194,6 +194,10 @@ namespace RealRHI {
 		return result;
 	}
 
+	CommandQueue* VulkanDevice::GetGraphicsCommandQueue() const {
+		return m_GraphicsCommandQueue;
+	}
+
 	VulkanCommandQueue* VulkanDevice::GetCommandQueue(const QueueId& queueId) const {
 		auto it = m_Queues.find(queueId);
 		return it == m_Queues.end() ? nullptr : it->second;
