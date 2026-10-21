@@ -49,6 +49,8 @@ namespace RealRHI {
 		virtual Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) const = 0;
 		virtual Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const = 0;
 		virtual Result CreateCommandAllocator(Ref<CommandAllocator>& outAllocator) const = 0;
+        // Non-owning queue access; the device retains ownership.
+        virtual CommandQueue* GetGraphicsCommandQueue() const = 0;
 		virtual Result CreateCommandList(CommandAllocator* allocator, Ref<CommandList>& outCommandList) const = 0;
 
 		virtual Result Submit(CommandList* cmd, Swapchain* swapchain, const FrameContext& frame, SubmissionToken* outToken = nullptr) = 0;

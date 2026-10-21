@@ -41,7 +41,7 @@ namespace RealRHI {
 		VkQueue GetPresentQueue() const { return m_PresentQueue; }
 		uint32_t GetGraphicsQueueFamily() const { return m_GraphicsQueueFamily; }
 		uint32_t GetPresentQueueFamily() const { return m_PresentQueueFamily; }
-		VulkanCommandQueue* GetGraphicsCommandQueue() const { return m_GraphicsCommandQueue; }
+		VulkanCommandQueue* GetGraphicsCommandQueue() const override { return m_GraphicsCommandQueue; }
 		VulkanCommandQueue* GetCommandQueue(const QueueId& queueId) const;
 
 		// Pools
