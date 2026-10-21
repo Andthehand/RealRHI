@@ -3,8 +3,6 @@
 #include "Device.h"
 #include "FrameResources.h"
 #include "FrameContext.h"
-#include "Vulkan/VulkanDevice.h"
-#include "Vulkan/VulkanCommandQueue.h"
 
 #include <iostream>
 #include <vector>
@@ -99,7 +97,7 @@ void CreateVertexBuffer() {
 }
 
 bool CreateCommandLists() {
-    auto* queue = static_cast<RealRHI::VulkanDevice*>(device.get())->GetGraphicsCommandQueue();
+    auto* queue = device->GetGraphicsCommandQueue();
     if (!queue) {
         return false;
     }
