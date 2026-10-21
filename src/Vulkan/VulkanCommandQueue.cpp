@@ -52,8 +52,10 @@ namespace RealRHI {
 
 		std::vector<VkCommandBufferSubmitInfo> commandBufferInfos;
 		commandBufferInfos.reserve(submitInfo.commandLists.size());
+
 		std::vector<CommandList*> trackedLists;
 		trackedLists.reserve(submitInfo.commandLists.size());
+
 		std::unordered_set<CommandList*> duplicateListTracker;
 		duplicateListTracker.reserve(submitInfo.commandLists.size());
 
@@ -167,11 +169,13 @@ namespace RealRHI {
 
 		++m_NextFrameValue;
 		m_PendingSubmissions[submissionValue] = std::move(retainedLists);
+
 		for (CommandList* commandList : trackedLists) {
 			if (commandList != nullptr) {
 				static_cast<VulkanCommandList*>(commandList)->SetState(CommandListState::Pending);
 			}
 		}
+
 		submitLock.unlock();
 
 		return SubmissionToken{ .queue = GetQueueId(), .value = submissionValue };
@@ -184,7 +188,9 @@ namespace RealRHI {
 
 		{
 			std::scoped_lock lock(m_SubmissionMutex);
-			if (token.value >= m_NextFrameValue) return false;
+			if (token.value >= m_NextFrameValue) {
+				return false;
+			}
 		}
 		uint64_t completed = 0;
 		if (vkGetSemaphoreCounterValue(m_Device->GetDevice(), m_TimelineSemaphore, &completed) != VK_SUCCESS) {
@@ -240,6 +246,7 @@ namespace RealRHI {
 			vkQueueWaitIdle(m_Queue);
 			lastSubmitted = m_NextFrameValue - 1;
 		}
+
 		if (lastSubmitted != 0) {
 			FinalizeCompleted(lastSubmitted);
 		}
@@ -254,7 +261,7 @@ namespace RealRHI {
 			auto it = m_PendingSubmissions.begin();
 			while (it != m_PendingSubmissions.end()) {
 				if (it->first <= completedValue) {
-					// make_move_iterator is used to move the Ref<CommandList> objects instead of copying them, 
+					// make_move_iterator is used to move the Ref<CommandList> objects instead of copying them,
 					// which is more efficient and avoids unnecessary reference count increments/decrements.
 					completedLists.insert(
 						completedLists.end(),

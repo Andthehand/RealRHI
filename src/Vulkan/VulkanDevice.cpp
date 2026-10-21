@@ -61,10 +61,10 @@ namespace RealRHI {
 		m_ShaderDirectory = desc.shaderDirectory;
 		m_DebugCallback = desc.debugCallback;
 
-        if (!SDL_Init(SDL_INIT_VIDEO)) {
+		if (!SDL_Init(SDL_INIT_VIDEO)) {
 			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to init SDL video.");
-            return Result::Failed;
-        }
+			return Result::Failed;
+		}
 		if (!SDL_Vulkan_LoadLibrary(nullptr)) {
 			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to load Vulkan library via SDL.");
 			return Result::Failed;
@@ -77,20 +77,20 @@ namespace RealRHI {
 
 		if (!CreateInstance(desc.applicationName, desc.enableValidationLayers)) {
 			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan instance.");
-            return Result::Failed;
-        }
+			return Result::Failed;
+		}
 
-        if (desc.enableValidationLayers) {
-            if (!SetupDebugMessenger()) {
+		if (desc.enableValidationLayers) {
+			if (!SetupDebugMessenger()) {
 				SendDebugMessage(DebugSeverity::Error, DebugMessageType::Validation, "Failed to setup Vulkan debug messenger.");
-                return Result::Failed;
-            }
-        }
+				return Result::Failed;
+			}
+		}
 
-        if (!PickPhysicalDevice()) {
+		if (!PickPhysicalDevice()) {
 			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to pick Vulkan physical device.");
-            return Result::Failed;
-        }
+			return Result::Failed;
+		}
 
 		if (!CreateLogicalDevice()) {
 			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan logical device.");
@@ -99,106 +99,112 @@ namespace RealRHI {
 
 		if (!CreateCommandQueues()) {
 			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan command queues.");
-            return Result::Failed;
-        }
+			return Result::Failed;
+		}
 
 		if (!CreateAllocator()) {
 			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan memory allocator.");
-            return Result::Failed;
-        }
+			return Result::Failed;
+		}
 
-        if (CreateCommandPool() != Result::Success) {
-            return Result::Failed;
-        }
+		if (CreateCommandPool() != Result::Success) {
+			return Result::Failed;
+		}
 
-        m_DescriptorManager = std::make_unique<VulkanDescriptorManager>(this);
+		m_DescriptorManager = std::make_unique<VulkanDescriptorManager>(this);
 		if (m_DescriptorManager->Init() != Result::Success) {
 			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to initialize Vulkan descriptor manager.");
-            return Result::Failed;
-        }
+			return Result::Failed;
+		}
 
 		return Result::Success;
 	}
 
-    Result VulkanDevice::CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) const {
-        Ref<VulkanWindow> vkWindow;
-        Result res = VulkanWindow::Create(this, desc, vkWindow);
-        if (res == Result::Success) {
-            outWindow = vkWindow.template As<Window>();
-        }
+	Result VulkanDevice::CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) const {
+		Ref<VulkanWindow> vkWindow;
+		Result res = VulkanWindow::Create(this, desc, vkWindow);
+		if (res == Result::Success) {
+			outWindow = vkWindow.template As<Window>();
+		}
 
-        return res;
-    }
+		return res;
+	}
 
-    Result VulkanDevice::CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) const {
-        Ref<VulkanShader> vkShader;
-        Result res = VulkanShader::Create(this, desc, vkShader);
-        if (res == Result::Success) {
-            outShader = vkShader.template As<Shader>();
-        }
+	Result VulkanDevice::CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) const {
+		Ref<VulkanShader> vkShader;
+		Result res = VulkanShader::Create(this, desc, vkShader);
+		if (res == Result::Success) {
+			outShader = vkShader.template As<Shader>();
+		}
 
-        return res;
-    }
+		return res;
+	}
 
-    Result VulkanDevice::CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) const {
-        Ref<VulkanPipeline> vkPipeline;
-        Result res = VulkanPipeline::Create(this, desc, vkPipeline);
-        if (res == Result::Success) {
-            outPipeline = vkPipeline.template As<Pipeline>();
-        }
+	Result VulkanDevice::CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) const {
+		Ref<VulkanPipeline> vkPipeline;
+		Result res = VulkanPipeline::Create(this, desc, vkPipeline);
+		if (res == Result::Success) {
+			outPipeline = vkPipeline.template As<Pipeline>();
+		}
 
-        return res;
-    }
+		return res;
+	}
 
-    Result VulkanDevice::CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) const {
-        Ref<VulkanSwapchain> vkSwapchain;
-        Result res = VulkanSwapchain::Create(this, desc, vkSwapchain);
-        if (res == Result::Success) {
-            outSwapchain = vkSwapchain.template As<Swapchain>();
-        }
+	Result VulkanDevice::CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) const {
+		Ref<VulkanSwapchain> vkSwapchain;
+		Result res = VulkanSwapchain::Create(this, desc, vkSwapchain);
+		if (res == Result::Success) {
+			outSwapchain = vkSwapchain.template As<Swapchain>();
+		}
 
-        return res;
-    }
+		return res;
+	}
 
-    Result VulkanDevice::CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) const {
-        Ref<VulkanBuffer> vkBuffer;
-        Result res = VulkanBuffer::Create(this, desc, vkBuffer);
-        if (res == Result::Success) {
-            outBuffer = vkBuffer.template As<Buffer>();
-        }
+	Result VulkanDevice::CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) const {
+		Ref<VulkanBuffer> vkBuffer;
+		Result res = VulkanBuffer::Create(this, desc, vkBuffer);
+		if (res == Result::Success) {
+			outBuffer = vkBuffer.template As<Buffer>();
+		}
 
-        return res;
-    }
+		return res;
+	}
 
-    Result VulkanDevice::CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const {
-        Ref<VulkanTexture> vkTexture;
-        Result res = VulkanTexture::Create(this, desc, vkTexture);
-        if (res == Result::Success) {
-            outTexture = vkTexture.template As<Texture>();
-        }
+	Result VulkanDevice::CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const {
+		Ref<VulkanTexture> vkTexture;
+		Result res = VulkanTexture::Create(this, desc, vkTexture);
+		if (res == Result::Success) {
+			outTexture = vkTexture.template As<Texture>();
+		}
 
-        return res;
-    }
+		return res;
+	}
 
 	Result VulkanDevice::CreateCommandList(Ref<CommandList>& outCommandList) const {
 		return VulkanCommandList::Create(this, (Ref<VulkanCommandList>&)outCommandList);
 	}
 
-    Result VulkanDevice::CreateCommandAllocator(Ref<CommandAllocator>& outAllocator) const {
-        Ref<VulkanCommandAllocator> allocator;
-        const Result result = VulkanCommandAllocator::Create(this, allocator);
-        if (result == Result::Success) outAllocator = allocator.As<CommandAllocator>();
-        return result;
-    }
+	Result VulkanDevice::CreateCommandAllocator(Ref<CommandAllocator>& outAllocator) const {
+		Ref<VulkanCommandAllocator> allocator;
+		const Result result = VulkanCommandAllocator::Create(this, allocator);
+		if (result == Result::Success) {
+			outAllocator = allocator.As<CommandAllocator>();
+		}
+		return result;
+	}
 
-    Result VulkanDevice::CreateCommandList(CommandAllocator* allocator, Ref<CommandList>& outCommandList) const {
-        auto* vkAllocator = dynamic_cast<VulkanCommandAllocator*>(allocator);
-        if (vkAllocator == nullptr || vkAllocator->GetDevice() != this) return Result::Failed;
-        Ref<VulkanCommandList> list;
-        const Result result = VulkanCommandList::Create(this, Ref<VulkanCommandAllocator>(vkAllocator), list);
-        if (result == Result::Success) outCommandList = list.As<CommandList>();
-        return result;
-    }
+	Result VulkanDevice::CreateCommandList(CommandAllocator* allocator, Ref<CommandList>& outCommandList) const {
+		auto* vkAllocator = dynamic_cast<VulkanCommandAllocator*>(allocator);
+		if (vkAllocator == nullptr || vkAllocator->GetDevice() != this) {
+			return Result::Failed;
+		}
+		Ref<VulkanCommandList> list;
+		const Result result = VulkanCommandList::Create(this, Ref<VulkanCommandAllocator>(vkAllocator), list);
+		if (result == Result::Success) {
+			outCommandList = list.As<CommandList>();
+		}
+		return result;
+	}
 
 	VulkanCommandQueue* VulkanDevice::GetCommandQueue(const QueueId& queueId) const {
 		auto it = m_Queues.find(queueId);
@@ -207,122 +213,129 @@ namespace RealRHI {
 
 	void VulkanDevice::BindDescriptorHeaps(VkCommandBuffer commandBuffer) const {
 		m_DescriptorManager->BindDescriptorHeaps(commandBuffer);
-    }
+	}
 
-    Result VulkanDevice::Submit(CommandList* cmd, Swapchain* sc, const FrameContext& frame, SubmissionToken* outToken) {
-        if (outToken) *outToken = {};
-        if (cmd == nullptr || sc == nullptr || m_GraphicsCommandQueue == nullptr) {
-            return Result::Failed;
-        }
 
-        if (frame.imageIndex == std::numeric_limits<uint32_t>::max() || frame.backBufferView == nullptr) {
-            return Result::Failed;
-        }
+	Result VulkanDevice::Submit(CommandList* cmd, Swapchain* sc, const FrameContext& frame, SubmissionToken* outToken) {
+		if (outToken) {
+			*outToken = {};
+		}
+		if (cmd == nullptr || sc == nullptr || m_GraphicsCommandQueue == nullptr) {
+			return Result::Failed;
+		}
 
-        auto* vkSC = static_cast<VulkanSwapchain*>(sc);
-        auto* vkCmd = dynamic_cast<VulkanCommandList*>(cmd);
-        if (vkCmd == nullptr) {
-            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Submit received a command list from the wrong backend.");
-            return Result::Failed;
-        }
+		if (frame.imageIndex == std::numeric_limits<uint32_t>::max() || frame.backBufferView == nullptr) {
+			return Result::Failed;
+		}
 
-        VkCommandBuffer preCmdBuf = vkSC->RecordPreTransitionCmd(frame.frameIndex, frame.imageIndex);
-        VkCommandBuffer postCmdBuf = vkSC->RecordPostTransitionCmd(frame.frameIndex, frame.imageIndex);
+		auto* vkSC = static_cast<VulkanSwapchain*>(sc);
+		auto* vkCmd = dynamic_cast<VulkanCommandList*>(cmd);
+		if (vkCmd == nullptr) {
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Submit received a command list from the wrong backend.");
+			return Result::Failed;
+		}
 
-        std::array<VkCommandBufferSubmitInfo, 3> cmdInfos = {
-            VkCommandBufferSubmitInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = preCmdBuf },
-            VkCommandBufferSubmitInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = vkCmd->GetCommandBuffer() },
-            VkCommandBufferSubmitInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = postCmdBuf },
-        };
+		VkCommandBuffer preCmdBuf = vkSC->RecordPreTransitionCmd(frame.frameIndex, frame.imageIndex);
+		VkCommandBuffer postCmdBuf = vkSC->RecordPostTransitionCmd(frame.frameIndex, frame.imageIndex);
 
-        VkSemaphoreSubmitInfo waitInfo{
-            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-            .semaphore = vkSC->GetImageAvailableSemaphore(frame.frameIndex),
-            .stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        };
+		std::array<VkCommandBufferSubmitInfo, 3> cmdInfos = {
+			VkCommandBufferSubmitInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = preCmdBuf },
+			VkCommandBufferSubmitInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = vkCmd->GetCommandBuffer() },
+			VkCommandBufferSubmitInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = postCmdBuf },
+		};
 
-        VkSemaphoreSubmitInfo signalInfo{
-            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-            .semaphore = vkSC->GetRenderFinishedSemaphore(frame.imageIndex),
-            .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
-        };
+		VkSemaphoreSubmitInfo waitInfo{
+			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+			.semaphore = vkSC->GetImageAvailableSemaphore(frame.frameIndex),
+			// Include the pre-render image layout transition in the acquire wait.
+			.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+		};
 
-        std::array<CommandList*, 1> tracked = { cmd };
+		VkSemaphoreSubmitInfo signalInfo{
+			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+			.semaphore = vkSC->GetRenderFinishedSemaphore(frame.imageIndex),
+			// The post-render transition is a pipeline barrier, not a graphics stage.
+			.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+		};
 
-        if (!vkSC->PrepareFrameSubmission(frame.frameIndex)) {
-            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Frame was not ready for submission.");
-            return Result::Failed;
-        }
+		std::array<CommandList*, 1> tracked = { cmd };
 
-        const SubmissionToken token = m_GraphicsCommandQueue->SubmitTracked(
-            { cmdInfos.data(), cmdInfos.size() },
-            { &waitInfo, 1 },
-            { &signalInfo, 1 },
-            tracked);
-        vkSC->FinishFrameSubmission(frame.frameIndex, token);
-        if (outToken && token.IsValid()) *outToken = token;
-        return token.IsValid() ? Result::Success : Result::Failed;
-    }
+		if (!vkSC->PrepareFrameSubmission(frame.frameIndex)) {
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Frame was not ready for submission.");
+			return Result::Failed;
+		}
 
-    Result VulkanDevice::ImmediateSubmit(CommandList* cmd) const {
-        if (cmd == nullptr || m_GraphicsCommandQueue == nullptr) {
-            return Result::Failed;
-        }
+		const SubmissionToken token = m_GraphicsCommandQueue->SubmitTracked(
+			{ cmdInfos.data(), cmdInfos.size() },
+			{ &waitInfo, 1 },
+			{ &signalInfo, 1 },
+			tracked);
+		vkSC->FinishFrameSubmission(frame.frameIndex, token);
+		if (outToken && token.IsValid()) {
+			*outToken = token;
+		}
+		return token.IsValid() ? Result::Success : Result::Failed;
+	}
 
-        auto* vkCmd = dynamic_cast<VulkanCommandList*>(cmd);
-        if (vkCmd == nullptr) {
-            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "ImmediateSubmit received a command list from the wrong backend.");
-            return Result::Failed;
-        }
+	Result VulkanDevice::ImmediateSubmit(CommandList* cmd) const {
+		if (cmd == nullptr || m_GraphicsCommandQueue == nullptr) {
+			return Result::Failed;
+		}
 
-        VkCommandBufferSubmitInfo cmdInfo{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-            .commandBuffer = vkCmd->GetCommandBuffer(),
-        };
+		auto* vkCmd = dynamic_cast<VulkanCommandList*>(cmd);
+		if (vkCmd == nullptr) {
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "ImmediateSubmit received a command list from the wrong backend.");
+			return Result::Failed;
+		}
 
-        VkFenceCreateInfo fenceInfo{
-            .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-        };
+		VkCommandBufferSubmitInfo cmdInfo{
+			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+			.commandBuffer = vkCmd->GetCommandBuffer(),
+		};
 
-        VkFence fence = VK_NULL_HANDLE;
-        if (vkCreateFence(m_Device, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
-            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create fence for immediate submit.");
-            return Result::Failed;
-        }
+		VkFenceCreateInfo fenceInfo{
+			.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+		};
 
-        std::array<CommandList*, 1> tracked = { cmd };
-        const SubmissionToken token = m_GraphicsCommandQueue->SubmitTracked(
-            { &cmdInfo, 1 },
-            {},
-            {},
-            tracked,
-            fence);
+		VkFence fence = VK_NULL_HANDLE;
+		if (vkCreateFence(m_Device, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create fence for immediate submit.");
+			return Result::Failed;
+		}
 
-        if (token.value == 0) {
-            vkDestroyFence(m_Device, fence, nullptr);
-            return Result::Failed;
-        }
+		std::array<CommandList*, 1> tracked = { cmd };
+		const SubmissionToken token = m_GraphicsCommandQueue->SubmitTracked(
+			{ &cmdInfo, 1 },
+			{},
+			{},
+			tracked,
+			fence);
 
-        if (vkWaitForFences(m_Device, 1, &fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
-            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to wait for fence during immediate submit.");
-            vkDestroyFence(m_Device, fence, nullptr);
-            return Result::Failed;
-        }
+		if (token.value == 0) {
+			vkDestroyFence(m_Device, fence, nullptr);
+			return Result::Failed;
+		}
 
-        m_GraphicsCommandQueue->Wait(token);
-        vkDestroyFence(m_Device, fence, nullptr);
-        return Result::Success;
-    }
+		if (vkWaitForFences(m_Device, 1, &fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to wait for fence during immediate submit.");
+			vkDestroyFence(m_Device, fence, nullptr);
+			return Result::Failed;
+		}
 
-    void VulkanDevice::WaitIdle() {
-        if (m_GraphicsCommandQueue != nullptr) {
-            m_GraphicsCommandQueue->WaitIdle();
-        }
-        vkDeviceWaitIdle(m_Device);
-    }
+		m_GraphicsCommandQueue->Wait(token);
+		vkDestroyFence(m_Device, fence, nullptr);
+		return Result::Success;
+	}
 
-    Result Device::Create(const DeviceDesc& desc, std::unique_ptr<Device>& outDevice) {
-        std::unique_ptr<VulkanDevice> device = std::make_unique<VulkanDevice>();
+	void VulkanDevice::WaitIdle() {
+		if (m_GraphicsCommandQueue != nullptr) {
+			m_GraphicsCommandQueue->WaitIdle();
+		}
+		vkDeviceWaitIdle(m_Device);
+	}
+
+	Result Device::Create(const DeviceDesc& desc, std::unique_ptr<Device>& outDevice) {
+		std::unique_ptr<VulkanDevice> device = std::make_unique<VulkanDevice>();
 		Result res = device->Init(desc);
 		if (res != Result::Success) {
 			return res;
@@ -330,9 +343,9 @@ namespace RealRHI {
 
 		outDevice = std::move(device);
 		return Result::Success;
-    }
+	}
 
-    bool VulkanDevice::CreateInstance(const char* appName, bool enableValidationLayer) {
+	bool VulkanDevice::CreateInstance(const char* appName, bool enableValidationLayer) {
         VkApplicationInfo appInfo{
             .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
             .pApplicationName = appName,
@@ -366,11 +379,13 @@ namespace RealRHI {
 
             uint32_t extensionCount = 0;
             constexpr const char* layerName = "VK_LAYER_KHRONOS_validation";
-            if (vkEnumerateInstanceExtensionProperties(layerName, &extensionCount, nullptr) != VK_SUCCESS)
+            if (vkEnumerateInstanceExtensionProperties(layerName, &extensionCount, nullptr) != VK_SUCCESS) {
                 return false;
+            }
             std::vector<VkExtensionProperties> layerExtensions(extensionCount);
-            if (vkEnumerateInstanceExtensionProperties(layerName, &extensionCount, layerExtensions.data()) != VK_SUCCESS)
+            if (vkEnumerateInstanceExtensionProperties(layerName, &extensionCount, layerExtensions.data()) != VK_SUCCESS) {
                 return false;
+            }
             bool supported = false;
             for (const auto& extension : layerExtensions) {
                 if (std::strcmp(extension.extensionName, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME) == 0) {
@@ -477,24 +492,28 @@ namespace RealRHI {
 		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Protected descriptor heaps: " + std::to_string(descriptorHeapProperties.protectedDescriptorHeaps)).c_str());
 		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, "End of heap properties.");
 
-        // Must support required queues
-        QueueFamilyIndices indices = FindQueueFamilies(device);
-        if (!indices.IsComplete())
-            return 0;
+		// Must support required queues
+		QueueFamilyIndices indices = FindQueueFamilies(device);
+		if (!indices.IsComplete()) {
+			return 0;
+		}
 
-        int score = 0;
+		int score = 0;
 
 		// Must support required features
-        if (descriptorHeapProperties.bufferDescriptorSize > 0)
+		if (descriptorHeapProperties.bufferDescriptorSize > 0) {
 			score += 1000;
+		}
 
-        // Prefer discrete GPU
-        if (properties2.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
-            score += 1000;
+		// Prefer discrete GPU
+		if (properties2.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+			score += 1000;
+		}
 
-        // Slight preference for integrated if no discrete
-        if (properties2.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)
-            score += 100;
+		// Slight preference for integrated if no discrete
+		if (properties2.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
+			score += 100;
+		}
 
         // Prefer larger max image dimension (usually stronger GPU)
         score += properties2.properties.limits.maxImageDimension2D;
@@ -506,8 +525,9 @@ namespace RealRHI {
         uint32_t deviceCount = 0;
         vkEnumeratePhysicalDevices(m_Instance, &deviceCount, nullptr);
 
-        if (deviceCount == 0)
+        if (deviceCount == 0) {
             return false;
+        }
 
         std::vector<VkPhysicalDevice> devices(deviceCount);
         vkEnumeratePhysicalDevices(m_Instance, &deviceCount, devices.data());
@@ -530,8 +550,9 @@ namespace RealRHI {
             }
         }
 
-        if (bestDevice == VK_NULL_HANDLE)
+        if (bestDevice == VK_NULL_HANDLE) {
             return false;
+        }
 
         m_PhysicalDevice = bestDevice;
 

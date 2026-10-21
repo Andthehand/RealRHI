@@ -17,6 +17,8 @@ This library is written to be easy for another engineer to read and reason about
 - Write for a human reader first. Do not optimize for cleverness if it makes the code harder to understand.
 - Follow the current style of explicit initialization, direct control flow, and clear ownership boundaries.
 - Match the existing tab-based indentation and brace placement used in the library's C++ headers and Vulkan implementation files.
+- Keep spacing consistent and readable throughout the codebase: use whitespace deliberately around operators, after commas, and add clear newlines between logical blocks so the intent remains obvious at a glance.
+- Always use braces for `if` statements, even when there is only one statement after them, to keep the control flow explicit and easy to audit.
 - Keep functions and classes focused on a single concern, and avoid creating layers of indirection that hide the true behavior.
 - Prefer straightforward logic and small, readable condition blocks over dense metaprogramming or hidden state.
 
