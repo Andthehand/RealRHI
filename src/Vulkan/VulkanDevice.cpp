@@ -203,7 +203,7 @@ namespace RealRHI {
 		return m_GraphicsCommandQueue;
 	}
 
-    void VulkanDevice::DeferDeletion(std::vector<SubmissionToken> dependencies, std::function<void()> destroy) {
+    void VulkanDevice::DeferDeletion(std::vector<SubmissionToken> dependencies, std::function<void()> destroy) const {
         m_DeferredDeletions.Enqueue(std::move(dependencies), std::move(destroy));
     }
 
