@@ -33,8 +33,11 @@ int main() {
     auto* graphicsQueue = static_cast<RealRHI::VulkanDevice*>(device.get())->GetGraphicsCommandQueue();
     Expect(graphicsQueue != nullptr, "Graphics queue was not created");
 
+    RealRHI::Ref<RealRHI::CommandAllocator> allocator;
+    Expect(device->CreateCommandAllocator(allocator) == RealRHI::Result::Success, "Create command allocator");
+
     RealRHI::Ref<RealRHI::CommandList> firstList;
-    Expect(device->CreateCommandList(firstList) == RealRHI::Result::Success, "Create first command list");
+    Expect(device->CreateCommandList(allocator.Raw(), firstList) == RealRHI::Result::Success, "Create first command list");
     Expect(firstList->Begin() == RealRHI::Result::Success, "Begin first command list");
     Expect(firstList->End() == RealRHI::Result::Success, "End first command list");
 
@@ -45,7 +48,7 @@ int main() {
     Expect(firstList->GetState() == RealRHI::CommandListState::Executable, "Command list returned to executable state");
 
     RealRHI::Ref<RealRHI::CommandList> secondList;
-    Expect(device->CreateCommandList(secondList) == RealRHI::Result::Success, "Create second command list");
+    Expect(device->CreateCommandList(allocator.Raw(), secondList) == RealRHI::Result::Success, "Create second command list");
     Expect(secondList->Begin() == RealRHI::Result::Success, "Begin second command list");
     Expect(secondList->End() == RealRHI::Result::Success, "End second command list");
 
@@ -57,8 +60,8 @@ int main() {
 
     RealRHI::Ref<RealRHI::CommandList> listA;
     RealRHI::Ref<RealRHI::CommandList> listB;
-    Expect(device->CreateCommandList(listA) == RealRHI::Result::Success, "Create list A");
-    Expect(device->CreateCommandList(listB) == RealRHI::Result::Success, "Create list B");
+    Expect(device->CreateCommandList(allocator.Raw(), listA) == RealRHI::Result::Success, "Create list A");
+    Expect(device->CreateCommandList(allocator.Raw(), listB) == RealRHI::Result::Success, "Create list B");
     Expect(listA->Begin() == RealRHI::Result::Success, "Begin list A");
     Expect(listA->End() == RealRHI::Result::Success, "End list A");
     Expect(listB->Begin() == RealRHI::Result::Success, "Begin list B");

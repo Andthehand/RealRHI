@@ -30,10 +30,6 @@ namespace RealRHI {
 			m_DescriptorManager->Cleanup();
 		}
 
-		if (m_CommandPool != VK_NULL_HANDLE) {
-			vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
-		}
-
 		if (m_Device != VK_NULL_HANDLE) {
 			// Ensure all GPU work is complete before destroying device resources
 			vkDeviceWaitIdle(m_Device);
@@ -107,10 +103,6 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
-		if (CreateCommandPool() != Result::Success) {
-			return Result::Failed;
-		}
-
 		m_DescriptorManager = std::make_unique<VulkanDescriptorManager>(this);
 		if (m_DescriptorManager->Init() != Result::Success) {
 			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to initialize Vulkan descriptor manager.");
@@ -178,10 +170,6 @@ namespace RealRHI {
 		}
 
 		return res;
-	}
-
-	Result VulkanDevice::CreateCommandList(Ref<CommandList>& outCommandList) const {
-		return VulkanCommandList::Create(this, (Ref<VulkanCommandList>&)outCommandList);
 	}
 
 	Result VulkanDevice::CreateCommandAllocator(Ref<CommandAllocator>& outAllocator) const {
@@ -700,21 +688,6 @@ namespace RealRHI {
         };
 
         return vmaCreateAllocator(&allocatorCI, &m_Allocator) == VK_SUCCESS;
-    }
-
-    Result VulkanDevice::CreateCommandPool() {
-        VkCommandPoolCreateInfo poolInfo{
-            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-            .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-            .queueFamilyIndex = m_GraphicsQueueFamily,
-        };
-
-        if (vkCreateCommandPool(m_Device, &poolInfo, nullptr, &m_CommandPool) != VK_SUCCESS) {
-            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan command pool.");
-            return Result::Failed;
-        }
-
-		return Result::Success;
     }
 
     VKAPI_ATTR VkBool32 VulkanDevice::VulkanDebugCallback(

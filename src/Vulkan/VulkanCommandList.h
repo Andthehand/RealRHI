@@ -11,11 +11,8 @@
 namespace RealRHI {
 	class VulkanCommandList : public CommandList {
 	public:
-		VulkanCommandList(const VulkanDevice* device);
         VulkanCommandList(const VulkanDevice* device, Ref<VulkanCommandAllocator> allocator);
 		~VulkanCommandList();
-
-		static Result Create(const VulkanDevice* device, Ref<VulkanCommandList>& outCommandList);
         static Result Create(const VulkanDevice* device, Ref<VulkanCommandAllocator> allocator, Ref<VulkanCommandList>& outCommandList);
 		Result Init();
 

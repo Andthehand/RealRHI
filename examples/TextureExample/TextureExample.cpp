@@ -223,10 +223,15 @@ void CreateTextures() {
 
 bool CreateCommandLists() {
     auto* queue = static_cast<RealRHI::VulkanDevice*>(device.get())->GetGraphicsCommandQueue();
-    if (!queue) return false;
+    if (!queue) {
+        return false;
+    }
     auto resources = std::make_unique<RealRHI::FrameResources>();
-    if (resources->Initialize(*device, *queue, swapchain->GetMaxFramesInFlight()) != RealRHI::Result::Success) return false;
+    if (resources->Initialize(*device, *queue, swapchain->GetMaxFramesInFlight()) != RealRHI::Result::Success) {
+        return false;
+    }
     frameResources = std::move(resources);
+
     return true;
 }
 
@@ -366,7 +371,9 @@ int main() {
             }
         }
 
-        if (!DrawFrame()) break;
+        if (!DrawFrame()) {
+            break;
+        }
     }
 
     Cleanup();
