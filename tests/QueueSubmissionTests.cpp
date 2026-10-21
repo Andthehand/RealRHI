@@ -1,5 +1,6 @@
 #include "Device.h"
 #include "Queue.h"
+#include "FrameResources.h"
 #include "Vulkan/VulkanDevice.h"
 #include "Vulkan/VulkanCommandQueue.h"
 
@@ -69,6 +70,27 @@ int main() {
     graphicsQueue->Wait(combinedToken);
     Expect(listA->Reset() == RealRHI::Result::Success, "Reset list A after combined completion");
     Expect(listB->Reset() == RealRHI::Result::Success, "Reset list B after combined completion");
+
+    // Two independent execution slots, reused only after their GPU tokens complete.
+    {
+        RealRHI::FrameResources frames;
+        Expect(frames.Initialize(*device, *graphicsQueue, 2) == RealRHI::Result::Success,
+               "Create two frame resource slots");
+        for (uint32_t i = 0; i < 8; ++i) {
+            const uint32_t slot = i % frames.GetSlotCount();
+            RealRHI::CommandList* cmd = nullptr;
+            Expect(frames.BeginSlot(slot, cmd) == RealRHI::Result::Success,
+                   "Recycle completed frame slot");
+            Expect(cmd != nullptr, "Frame slot returned a command list");
+            Expect(cmd->Begin() == RealRHI::Result::Success, "Begin recycled command list");
+            Expect(cmd->End() == RealRHI::Result::Success, "End recycled command list");
+            const auto token = graphicsQueue->Submit(*cmd);
+            Expect(token.IsValid(), "Submit recycled command list");
+            Expect(frames.TrackSubmission(slot, token) == RealRHI::Result::Success,
+                   "Track frame slot submission");
+        }
+        frames.WaitAll();
+    }
 
     std::cout << "QueueSubmissionTests passed" << std::endl;
     return 0;
