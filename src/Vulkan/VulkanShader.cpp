@@ -239,11 +239,15 @@ namespace RealRHI {
 
 		// 1. Load module
 		m_SlangModule = LoadModule(desc, diagnostics);
-		if (!m_SlangModule) return Result::Failed;
+		if (!m_SlangModule) {
+			return Result::Failed;
+		}
 
 		// 2. Compose program (entry points)
 		auto composedProgram = ComposeProgram(m_SlangModule, diagnostics);
-		if (!composedProgram) return Result::Failed;
+		if (!composedProgram) {
+			return Result::Failed;
+		}
 
 		// 3. Reflect layout
 		m_BufferLayout = ReflectLayout(composedProgram, m_EntryPoints, diagnostics);
@@ -253,14 +257,18 @@ namespace RealRHI {
 
 		// 4. Link program
 		auto linkedProgram = LinkProgram(composedProgram, diagnostics);
-		if (!linkedProgram) return Result::Failed;
+		if (!linkedProgram) {
+			return Result::Failed;
+		}
 
 		composedProgram->getLayout()->toJson(diagnostics.writeRef());
 		CheckSlangDiagnostics(diagnostics);
 
 		// 5. Create Vulkan module
 		m_ShaderModule = CreateVkShaderModule(linkedProgram);
-		if (!m_ShaderModule) return Result::Failed;
+		if (!m_ShaderModule) {
+			return Result::Failed;
+		}
 
 		return Result::Success;
 	}
@@ -275,8 +283,9 @@ namespace RealRHI {
 			)
 		);
 
-		if (!CheckSlangDiagnostics(diagnostics))
+		if (!CheckSlangDiagnostics(diagnostics)) {
 			return nullptr;
+		}
 
 		return module;
 	}
@@ -286,6 +295,7 @@ namespace RealRHI {
 			Slang::ComPtr<slang::IBlob>& diagnostics) {
 		const uint32_t entryCount = module->getDefinedEntryPointCount();
 		std::vector<Slang::ComPtr<slang::IComponentType>> componentsToLink(entryCount + 1);
+
 		// The module itself is the first component to link, which ensures that any shared code (e.g., functions, types) is included in the linking process even if not directly referenced by entry points.
 		componentsToLink[0] = Slang::ComPtr<slang::IComponentType>(module);
 
@@ -303,8 +313,9 @@ namespace RealRHI {
 			composedProgram.writeRef(),
 			diagnostics.writeRef());
 
-		if (!CheckSlangDiagnostics(diagnostics))
+		if (!CheckSlangDiagnostics(diagnostics)) {
 			return nullptr;
+		}
 
 		return composedProgram;
 	}
@@ -315,8 +326,9 @@ namespace RealRHI {
 		Slang::ComPtr<slang::IBlob>& diagnostics) {
 		slang::ProgramLayout* programLayout = composedProgram->getLayout(0, diagnostics.writeRef());
 
-		if (!CheckSlangDiagnostics(diagnostics))
+		if (!CheckSlangDiagnostics(diagnostics)) {
 			return {};
+		}
 
 		const uint32_t entryCount = programLayout->getEntryPointCount();
 		outEntryPoints.resize(entryCount);
@@ -349,8 +361,9 @@ namespace RealRHI {
 		slang::IComponentType* composedProgram,
 		Slang::ComPtr<slang::IBlob>& diagnostics) {
 		slang::ProgramLayout* programLayout = composedProgram->getLayout(0, diagnostics.writeRef());
-		if (!CheckSlangDiagnostics(diagnostics))
+		if (!CheckSlangDiagnostics(diagnostics)) {
 			return {};
+		}
 
 		DescriptorsDesc result;
 		DescriptorSetBuilderContext context{
@@ -387,8 +400,9 @@ namespace RealRHI {
 			diagnostics.writeRef()
 		);
 
-		if (!CheckSlangDiagnostics(diagnostics))
+		if (!CheckSlangDiagnostics(diagnostics)) {
 			return nullptr;
+		}
 
 		return linkedProgram;
 	}

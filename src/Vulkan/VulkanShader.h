@@ -18,10 +18,12 @@ namespace RealRHI {
 
 	protected:
 		friend class VulkanPipeline;
+
 		VkShaderModule GetShaderModule() const { return m_ShaderModule; }
 		const std::vector<EntryPoint>& GetEntryPoints() const { return m_EntryPoints; }
 		const BufferLayout& GetBufferLayout() const { return m_BufferLayout; }
 		const DescriptorsDesc& GetDescriptorsDesc() const { return m_DescriptorsDesc; }
+
 	private:
 		Slang::ComPtr<slang::IModule> LoadModule(
 			const ShaderDesc& desc,

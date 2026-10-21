@@ -34,10 +34,11 @@ namespace RealRHI {
 		return Result::Success;
     }
 
-    bool VulkanWindow::CreateVulkanSurface(VkSurfaceKHR* surface) const {
-        return SDL_Vulkan_CreateSurface(m_Window, m_Device->GetInstance(), nullptr, surface);
-    }
-    void VulkanWindow::DestroyVulkanSurface(VkSurfaceKHR surface) const {
+	bool VulkanWindow::CreateVulkanSurface(VkSurfaceKHR* surface) const {
+		return SDL_Vulkan_CreateSurface(m_Window, m_Device->GetInstance(), nullptr, surface);
+	}
+
+	void VulkanWindow::DestroyVulkanSurface(VkSurfaceKHR surface) const {
 		SDL_Vulkan_DestroySurface(m_Device->GetInstance(), surface, nullptr);
-    }
+	}
 }

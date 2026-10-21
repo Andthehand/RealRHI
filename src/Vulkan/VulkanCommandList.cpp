@@ -20,7 +20,9 @@ namespace RealRHI {
     VulkanCommandList::~VulkanCommandList() {
         std::scoped_lock stateLock(m_StateMutex);
         if (m_CommandBuffer != VK_NULL_HANDLE && m_State != CommandListState::Pending) {
-            if (m_Allocator) m_Allocator->Free(m_CommandBuffer);
+            if (m_Allocator) {
+                m_Allocator->Free(m_CommandBuffer);
+            }
             else {
                 std::scoped_lock poolLock(m_Device->GetCommandPoolMutex());
                 vkFreeCommandBuffers(m_Device->GetDevice(), m_Device->GetCommandPool(), 1, &m_CommandBuffer);
@@ -41,18 +43,27 @@ namespace RealRHI {
     }
 
     Result VulkanCommandList::Create(const VulkanDevice* device, Ref<VulkanCommandAllocator> allocator, Ref<VulkanCommandList>& out) {
-        if (!allocator || allocator->GetDevice() != device) return Result::Failed;
+        if (!allocator || allocator->GetDevice() != device) {
+            return Result::Failed;
+        }
+
         Ref<VulkanCommandList> list = Ref<VulkanCommandList>::Create(device, std::move(allocator));
-        if (list->Init() != Result::Success) return Result::Failed;
+        if (list->Init() != Result::Success) {
+            return Result::Failed;
+        }
+
         out = list;
         return Result::Success;
     }
 
     Result VulkanCommandList::Init() {
         if (m_Allocator) {
-            if (m_Allocator->Allocate(m_CommandBuffer) != VK_SUCCESS) return Result::Failed;
+            if (m_Allocator->Allocate(m_CommandBuffer) != VK_SUCCESS) {
+                return Result::Failed;
+            }
             return Result::Success;
         }
+
         VkCommandBufferAllocateInfo allocInfo{
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
             .commandPool = m_Device->GetCommandPool(),
@@ -135,12 +146,16 @@ namespace RealRHI {
         {
             std::scoped_lock lock(m_StateMutex);
             std::unique_lock<std::mutex> poolLock(m_Device->GetCommandPoolMutex(), std::defer_lock);
-            if (!m_Allocator) poolLock.lock();
+            if (!m_Allocator) {
+                poolLock.lock();
+            }
+
             VkResult resetResult = m_Allocator ? m_Allocator->ResetBuffer(m_CommandBuffer) : vkResetCommandBuffer(m_CommandBuffer, 0);
             if (resetResult != VK_SUCCESS) {
                 m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to reset Vulkan command buffer.");
                 return Result::Failed;
             }
+
             m_State = CommandListState::Initial;
         }
 
@@ -175,6 +190,7 @@ namespace RealRHI {
         };
         const VkRenderingAttachmentInfo* pDepthAttachment = nullptr;
         const VkRenderingAttachmentInfo* pStencilAttachment = nullptr;
+
         if (renderingInfo.hasDepth) {
             const auto& attachment = renderingInfo.depthAttachment;
             if (attachment.target == nullptr) {
@@ -202,6 +218,7 @@ namespace RealRHI {
                 .storeOp = Utils::StoreOpToVkStoreOp(attachment.depthStoreOp),
                 .clearValue = clearValue,
             };
+
             if ((aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) {
                 pDepthAttachment = &depthAttachmentInfo;
             }

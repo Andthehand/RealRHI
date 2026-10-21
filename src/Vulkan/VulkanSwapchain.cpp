@@ -230,7 +230,9 @@ namespace RealRHI {
     }
 
     FrameContext VulkanSwapchain::BeginFrame() {
-        if (m_FrameFailed) return FrameContext{ .imageIndex = std::numeric_limits<uint32_t>::max() };
+        if (m_FrameFailed) {
+            return FrameContext{ .imageIndex = std::numeric_limits<uint32_t>::max() };
+        }
         const uint32_t frameIdx = m_CurrentFrameIndex;
 
         auto& sync = m_FrameSync[frameIdx];
@@ -293,14 +295,18 @@ namespace RealRHI {
     }
 
     bool VulkanSwapchain::PrepareFrameSubmission(uint32_t frameIndex) {
-        if (frameIndex >= m_FrameSync.size()) return false;
+        if (frameIndex >= m_FrameSync.size()) {
+            return false;
+        }
         auto& sync = m_FrameSync[frameIndex];
         return !m_FrameFailed && !sync.submissionPending && !sync.submitted;
     }
 
     void VulkanSwapchain::FinishFrameSubmission(uint32_t frameIndex, SubmissionToken token) {
         const bool success = token.IsValid();
-        if (frameIndex >= m_FrameSync.size()) return;
+        if (frameIndex >= m_FrameSync.size()) {
+            return;
+        }
         auto& sync = m_FrameSync[frameIndex];
         if (success) {
             sync.completionToken = token;
@@ -321,7 +327,9 @@ namespace RealRHI {
             return;
         }
 
-        if (m_FrameFailed || frame.frameIndex >= m_FrameSync.size() || !m_FrameSync[frame.frameIndex].submitted) return;
+        if (m_FrameFailed || frame.frameIndex >= m_FrameSync.size() || !m_FrameSync[frame.frameIndex].submitted) {
+            return;
+        }
         const uint32_t imageIndex = frame.imageIndex;
         if (imageIndex >= m_RenderFinishedSemaphores.size()) {
             return;

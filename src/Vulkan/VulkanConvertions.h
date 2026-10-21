@@ -135,23 +135,45 @@ namespace RealRHI::Utils {
     // ---------------------- RenderingInfo ---------------
 
     // ---------------------- BufferDesc -------------------
-    constexpr VkBufferUsageFlags BufferUsageToVkBufferUsage(BufferUsage usage) {
-        VkBufferUsageFlags flags = 0;
-        if (Any(usage & BufferUsage::Vertex)) flags         |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-        if (Any(usage & BufferUsage::Index)) flags          |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-        if (Any(usage & BufferUsage::Uniform)) flags        |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        if (Any(usage & BufferUsage::Storage)) flags        |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-        if (Any(usage & BufferUsage::TransferSrc)) flags    |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-        if (Any(usage & BufferUsage::TransferDst)) flags    |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-        if (Any(usage & BufferUsage::Indirect)) flags       |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
-        if (Any(usage & BufferUsage::Heap)) flags           |= VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT;
-		if (Any(usage & BufferUsage::Addressable)) flags    |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-        return flags;
+	constexpr VkBufferUsageFlags BufferUsageToVkBufferUsage(BufferUsage usage) {
+		VkBufferUsageFlags flags = 0;
+		if (Any(usage & BufferUsage::Vertex)) {
+			flags |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+		}
+		if (Any(usage & BufferUsage::Index)) {
+			flags |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+		}
+		if (Any(usage & BufferUsage::Uniform)) {
+			flags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+		}
+		if (Any(usage & BufferUsage::Storage)) {
+			flags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+		}
+		if (Any(usage & BufferUsage::TransferSrc)) {
+			flags |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+		}
+		if (Any(usage & BufferUsage::TransferDst)) {
+			flags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+		}
+		if (Any(usage & BufferUsage::Indirect)) {
+			flags |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+		}
+		if (Any(usage & BufferUsage::Heap)) {
+			flags |= VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT;
+		}
+		if (Any(usage & BufferUsage::Addressable)) {
+			flags |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+		}
+		return flags;
 	}
 
 	constexpr VkDescriptorType BufferUsageToVkDescriptorType(BufferUsage usage) {
-		if (Any(usage & BufferUsage::Uniform)) return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		if (Any(usage & BufferUsage::Storage)) return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		if (Any(usage & BufferUsage::Uniform)) {
+			return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		}
+		if (Any(usage & BufferUsage::Storage)) {
+			return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		}
 		return VK_DESCRIPTOR_TYPE_MAX_ENUM;
 	}
 
@@ -192,18 +214,34 @@ namespace RealRHI::Utils {
 	// ---------------------- TextureFormat ----------------
     constexpr VkImageUsageFlags TextureUsageToVkImageUsage(TextureUsage usage) {
         VkImageUsageFlags flags = 0;
-        if (Any(usage & TextureUsage::ShaderResource)) flags |= VK_IMAGE_USAGE_SAMPLED_BIT;
-        if (Any(usage & TextureUsage::RenderTarget)) flags |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-        if (Any(usage & TextureUsage::DepthStencil)) flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-        if (Any(usage & TextureUsage::Storage)) flags |= VK_IMAGE_USAGE_STORAGE_BIT;
-        if (Any(usage & TextureUsage::TransferSrc)) flags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-        if (Any(usage & TextureUsage::TransferDst)) flags |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        if (Any(usage & TextureUsage::ShaderResource)) {
+            flags |= VK_IMAGE_USAGE_SAMPLED_BIT;
+        }
+        if (Any(usage & TextureUsage::RenderTarget)) {
+            flags |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        }
+        if (Any(usage & TextureUsage::DepthStencil)) {
+            flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        }
+        if (Any(usage & TextureUsage::Storage)) {
+            flags |= VK_IMAGE_USAGE_STORAGE_BIT;
+        }
+        if (Any(usage & TextureUsage::TransferSrc)) {
+            flags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        }
+        if (Any(usage & TextureUsage::TransferDst)) {
+            flags |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        }
         return flags;
     }
 
     constexpr VkImageType TextureDescToVkImageType(const TextureDesc& desc) {
-        if (desc.depth > 1) return VK_IMAGE_TYPE_3D;
-        if (desc.height > 1) return VK_IMAGE_TYPE_2D;
+        if (desc.depth > 1) {
+            return VK_IMAGE_TYPE_3D;
+        }
+        if (desc.height > 1) {
+            return VK_IMAGE_TYPE_2D;
+        }
         return VK_IMAGE_TYPE_1D;
     }
 

@@ -69,7 +69,7 @@ namespace RealRHI {
 		};
 
 		// Write the descriptor to descriptorMemory
-		if(vkWriteResourceDescriptorsEXT(
+		if (vkWriteResourceDescriptorsEXT(
 			m_Device->GetDevice(),
 			1,
 			&descriptorInfo,
@@ -122,7 +122,7 @@ namespace RealRHI {
 		};
 
 		// Write the descriptor to descriptorMemory
-		if(vkWriteResourceDescriptorsEXT(
+		if (vkWriteResourceDescriptorsEXT(
 			m_Device->GetDevice(),
 			1,
 			&descriptorInfo,
@@ -163,7 +163,7 @@ namespace RealRHI {
 			.size = m_SamplerDescriptorSize,
 		};
 
-		if(vkWriteSamplerDescriptorsEXT(
+		if (vkWriteSamplerDescriptorsEXT(
 			m_Device->GetDevice(),
 			1,
 			&samplerCI,
