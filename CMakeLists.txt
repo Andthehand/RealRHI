@@ -22,12 +22,15 @@ find_library(SDL_LIBRARY NAMES SDL3 HINTS "$ENV{VULKAN_SDK}/lib" REQUIRED)
 
 # Create RealRHI library
 set(REALRHI_HEADERS
+    "src/CommandAllocator.h"
+    "src/Vulkan/VulkanCommandAllocator.h"
     "src/Vulkan/VulkanDevice.h"
     "src/Queue.h"
 
   "src/Swapchain.h" "src/Texture.h" "src/Buffer.h" "src/Pipeline.h" "src/CommandList.h" "src/Device.h" "src/BufferDesc.h" "src/PipelineDesc.h" "src/TextureDesc.h" "src/DeviceDesc.h" "src/Vulkan/VulkanSwapchain.h" "src/SwapchainDesc.h"   "src/Shader.h" "src/Vulkan/VulkanShader.h" "src/Window.h" "src/Vulkan/VulkanWindow.h" "src/WindowDesc.h" "src/Vulkan/VulkanPipeline.h"  "src/Vulkan/VulkanConvertions.h" "src/TextureFormat.h" "src/ShaderDesc.h" "src/Vulkan/VulkanBuffer.h" "src/RenderingInfo.h" "src/Vulkan/VulkanCommandList.h" "src/Vulkan/VulkanCommandQueue.h" "src/TextureView.h" "src/Vulkan/VulkanTexture.h" "src/Vulkan/VulkanTextureView.h" "src/TextureViewDesc.h" "src/FrameContext.h" "src/RefCounted.h" "src/Vulkan/DescriptorsDesc.h" "src/Vulkan/VulkanDescriptorHeaps.h" "src/Vulkan/VulkanDescriptorManager.h")
 
 set(REALRHI_SOURCES
+    "src/Vulkan/VulkanCommandAllocator.cpp"
     "src/Vulkan/VulkanDevice.cpp"
     "src/Vulkan/VulkanCommandQueue.cpp"
 

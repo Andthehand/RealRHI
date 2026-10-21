@@ -2,6 +2,7 @@
 #include "CommandList.h"
 #include "VulkanDevice.h"
 #include "VulkanPipeline.h"
+#include "VulkanCommandAllocator.h"
 
 #include <volk.h>
 
@@ -11,9 +12,11 @@ namespace RealRHI {
 	class VulkanCommandList : public CommandList {
 	public:
 		VulkanCommandList(const VulkanDevice* device);
+        VulkanCommandList(const VulkanDevice* device, Ref<VulkanCommandAllocator> allocator);
 		~VulkanCommandList();
 
 		static Result Create(const VulkanDevice* device, Ref<VulkanCommandList>& outCommandList);
+        static Result Create(const VulkanDevice* device, Ref<VulkanCommandAllocator> allocator, Ref<VulkanCommandList>& outCommandList);
 		Result Init();
 
 		Result Begin() override;
@@ -51,11 +54,12 @@ namespace RealRHI {
 		VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
 	private:
 		const VulkanDevice* m_Device;
+        Ref<VulkanCommandAllocator> m_Allocator;
 		VulkanPipeline* m_BoundPipeline = nullptr;
 		mutable std::mutex m_StateMutex;
 		CommandListState m_State = CommandListState::Initial;
 		QueueId m_QueueId{};
 
-		VkCommandBuffer m_CommandBuffer;
+		VkCommandBuffer m_CommandBuffer = VK_NULL_HANDLE;
 	};
 }

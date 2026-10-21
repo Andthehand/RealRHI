@@ -64,6 +64,8 @@ namespace RealRHI {
 		Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) const override;
 		Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const override;
 		Result CreateCommandList(Ref<CommandList>& outCommandList) const override;
+        Result CreateCommandAllocator(Ref<CommandAllocator>& outAllocator) const override;
+        Result CreateCommandList(CommandAllocator* allocator, Ref<CommandList>& outCommandList) const override;
 
 		// TODO: Temp?
 		void BindDescriptorHeaps(VkCommandBuffer commandBuffer) const;
