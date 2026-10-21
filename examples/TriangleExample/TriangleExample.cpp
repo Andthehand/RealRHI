@@ -1,7 +1,10 @@
 #include <SDL3/SDL.h>
 
 #include "Device.h"
+#include "FrameResources.h"
 #include "FrameContext.h"
+#include "Vulkan/VulkanDevice.h"
+#include "Vulkan/VulkanCommandQueue.h"
 
 #include <iostream>
 #include <vector>
@@ -25,7 +28,7 @@ RealRHI::Ref<RealRHI::Window> window;
 RealRHI::Ref<RealRHI::Swapchain> swapchain;
 RealRHI::Ref<RealRHI::Pipeline> pipeline;
 RealRHI::Ref<RealRHI::Buffer> vertexBuffer;
-std::vector<RealRHI::Ref<RealRHI::CommandList>> commandLists;
+std::unique_ptr<RealRHI::FrameResources> frameResources;
 
 void CreateSwapChain() {
     RealRHI::Result result = device->CreateWindow({
@@ -95,14 +98,13 @@ void CreateVertexBuffer() {
     }
 }
 
-void CreateCommandLists() {
-    commandLists.resize(swapchain->GetMaxFramesInFlight());
-    for (auto& cmd : commandLists) {
-        RealRHI::Result result = device->CreateCommandList(cmd);
-        if (result != RealRHI::Result::Success) {
-            std::cerr << "Failed to create command list" << std::endl;
-        }
-    }
+bool CreateCommandLists() {
+    auto* queue = static_cast<RealRHI::VulkanDevice*>(device.get())->GetGraphicsCommandQueue();
+    if (!queue) return false;
+    auto resources = std::make_unique<RealRHI::FrameResources>();
+    if (resources->Initialize(*device, *queue, swapchain->GetMaxFramesInFlight()) != RealRHI::Result::Success) return false;
+    frameResources = std::move(resources);
+    return true;
 }
 
 bool RecordCommandBuffer(RealRHI::CommandList* cmd, const RealRHI::FrameContext& frame) {
@@ -166,13 +168,23 @@ bool DrawFrame() {
         std::cerr << "Frame acquisition returned no backbuffer; stopping to avoid unsafe semaphore reuse." << std::endl;
         return false;
     }
-    auto* cmd = commandLists[frame.frameIndex].Raw();
+    RealRHI::CommandList* cmd = nullptr;
+    if (frameResources->BeginSlot(frame.frameIndex, cmd) != RealRHI::Result::Success) {
+        std::cerr << "Failed to recycle frame command list" << std::endl;
+        return false;
+    }
     if (!RecordCommandBuffer(cmd, frame)) {
+        frameResources->CancelSlot(frame.frameIndex);
         std::cerr << "Frame command recording failed." << std::endl;
         return false;
     }
-    if (device->Submit(cmd, swapchain.Raw(), frame) != RealRHI::Result::Success) {
+    RealRHI::SubmissionToken token{};
+    if (device->Submit(cmd, swapchain.Raw(), frame, &token) != RealRHI::Result::Success) {
         std::cerr << "Frame submission failed." << std::endl;
+        return false;
+    }
+    if (frameResources->TrackSubmission(frame.frameIndex, token) != RealRHI::Result::Success) {
+        std::cerr << "Failed to track frame submission" << std::endl;
         return false;
     }
     swapchain->Present(frame);
@@ -184,7 +196,7 @@ void Cleanup() {
 
     pipeline.Reset();
     vertexBuffer.Reset();
-    commandLists.clear();
+    frameResources.reset();
     swapchain.Reset();
     device.reset();
 }
@@ -216,7 +228,10 @@ int main() {
     CreateVertexBuffer();
     std::cout << " Vertex buffer created" << std::endl;
 
-    CreateCommandLists();
+    if (!CreateCommandLists()) {
+        std::cerr << "Failed to initialize frame resources" << std::endl;
+        return -1;
+    }
     std::cout << " Command lists created" << std::endl;
 
     std::cout << std::endl << "Rendering triangle..." << std::endl;

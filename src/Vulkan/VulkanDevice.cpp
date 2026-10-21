@@ -208,7 +208,8 @@ namespace RealRHI {
 		m_DescriptorManager->BindDescriptorHeaps(commandBuffer);
     }
 
-    Result VulkanDevice::Submit(CommandList* cmd, Swapchain* sc, const FrameContext& frame) {
+    Result VulkanDevice::Submit(CommandList* cmd, Swapchain* sc, const FrameContext& frame, SubmissionToken* outToken) {
+        if (outToken) *outToken = {};
         if (cmd == nullptr || sc == nullptr || m_GraphicsCommandQueue == nullptr) {
             return Result::Failed;
         }
@@ -258,6 +259,7 @@ namespace RealRHI {
             { &signalInfo, 1 },
             tracked);
         vkSC->FinishFrameSubmission(frame.frameIndex, token);
+        if (outToken && token.IsValid()) *outToken = token;
         return token.IsValid() ? Result::Success : Result::Failed;
     }
 
