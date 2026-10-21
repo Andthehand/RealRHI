@@ -134,6 +134,33 @@ int main() {
                "Completed deletion runs exactly once");
     }
 
+    // Explicit bindless registrations retain shader-visible resources even
+    // when no CPU-side binding command identifies the descriptor index.
+    {
+        RealRHI::Ref<RealRHI::Buffer> bindless;
+        RealRHI::BufferDesc desc{};
+        desc.size = 64;
+        desc.usage = RealRHI::BufferUsage::Storage;
+        Expect(device->CreateBuffer(desc, bindless) == RealRHI::Result::Success,
+               "Create bindless lifetime buffer");
+        RealRHI::Ref<RealRHI::CommandList> list;
+        Expect(device->CreateCommandList(allocator.Raw(), list) == RealRHI::Result::Success,
+               "Create bindless lifetime command list");
+        Expect(list->Begin() == RealRHI::Result::Success, "Begin bindless lifetime list");
+        const auto initialReferences = bindless->GetRefCount();
+        Expect(list->UseResource(bindless.Raw()) == RealRHI::Result::Success,
+               "Register bindless resource");
+        Expect(bindless->GetRefCount() > initialReferences,
+               "Bindless registration retains resource");
+        Expect(list->End() == RealRHI::Result::Success, "End bindless lifetime list");
+        const auto token = graphicsQueue->Submit(*list);
+        Expect(token.IsValid(), "Submit bindless lifetime list");
+        graphicsQueue->Wait(token);
+        Expect(list->Reset() == RealRHI::Result::Success, "Reset bindless lifetime list");
+        Expect(bindless->GetRefCount() == initialReferences,
+               "Reset releases bindless resource");
+    }
+
     std::cout << "QueueSubmissionTests passed" << std::endl;
     return 0;
 }

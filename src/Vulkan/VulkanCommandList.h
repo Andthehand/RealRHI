@@ -35,6 +35,8 @@ namespace RealRHI {
 		void SetViewport(const Viewport& vp);
 		void SetScissor(const Rect& rect);
 
+        Result UseResource(Texture* texture) override;
+        Result UseResource(Buffer* buffer) override;
 		void BindPipeline(Pipeline* pipeline) override;
 		void BindVertexBuffer(Buffer* vertexBuffer) override;
 		void BindIndexBuffer(Buffer* indexBuffer) override;

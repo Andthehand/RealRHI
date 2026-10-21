@@ -252,6 +252,22 @@ namespace RealRHI {
         vkCmdSetScissor(m_CommandBuffer, 0, 1, &scissor);
     }
 
+    Result VulkanCommandList::UseResource(Texture* texture) {
+        if (texture == nullptr || GetState() != CommandListState::Recording) return Result::Failed;
+        auto* resource = dynamic_cast<VulkanTexture*>(texture);
+        if (resource == nullptr || resource->GetDevice() != m_Device) return Result::Failed;
+        RetainResource(resource);
+        return Result::Success;
+    }
+
+    Result VulkanCommandList::UseResource(Buffer* buffer) {
+        if (buffer == nullptr || GetState() != CommandListState::Recording) return Result::Failed;
+        auto* resource = dynamic_cast<VulkanBuffer*>(buffer);
+        if (resource == nullptr || resource->GetDevice() != m_Device) return Result::Failed;
+        RetainResource(resource);
+        return Result::Success;
+    }
+
     void VulkanCommandList::BindPipeline(Pipeline* pipeline) {
         RetainResource(pipeline);
         m_BoundPipeline = static_cast<VulkanPipeline*>(pipeline);
