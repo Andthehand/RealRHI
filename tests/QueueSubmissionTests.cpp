@@ -24,8 +24,8 @@ int main() {
     RealRHI::DeviceDesc desc{};
     desc.applicationName = "RealRHI Submission Tests";
     desc.shaderDirectory = std::filesystem::current_path() / "assets" / "shaders";
-    desc.enableValidationLayers = false;
-    desc.enableDebug = false;
+    desc.enableValidationLayers = true;
+    desc.enableDebug = true;
 
     std::unique_ptr<RealRHI::Device> device;
     const RealRHI::Result createResult = RealRHI::Device::Create(desc, device);
@@ -190,6 +190,55 @@ int main() {
         graphicsQueue->Wait(second);
         Expect(list->Reset() == RealRHI::Result::Success,
                "Reset releases retained resources after resubmission");
+    }
+
+
+    // Invalid barrier ranges must fail without recording a Vulkan command.
+    {
+        RealRHI::Ref<RealRHI::Buffer> buffer;
+        RealRHI::BufferDesc desc{};
+        desc.size = 64;
+        desc.usage = RealRHI::BufferUsage::TransferDst;
+        Expect(device->CreateBuffer(desc, buffer) == RealRHI::Result::Success,
+               "Create invalid-range barrier test buffer");
+
+        RealRHI::Ref<RealRHI::CommandList> list;
+        Expect(device->CreateCommandList(allocator.Raw(), list) == RealRHI::Result::Success,
+               "Create invalid-range barrier test list");
+        Expect(list->Begin() == RealRHI::Result::Success, "Begin invalid-range barrier test list");
+
+        RealRHI::BarrierDesc barriers;
+        barriers.buffers.push_back({
+            .buffer = buffer.Raw(),
+            .before = { RealRHI::PipelineStage::Transfer, RealRHI::ResourceAccess::TransferWrite },
+            .after = { RealRHI::PipelineStage::Transfer, RealRHI::ResourceAccess::TransferRead },
+            .offset = 60,
+            .size = 16,
+        });
+        Expect(list->Barrier(barriers) != RealRHI::Result::Success,
+               "Reject out-of-bounds buffer barrier");
+
+        RealRHI::TextureDesc textureDesc{};
+        textureDesc.width = 4;
+        textureDesc.height = 4;
+        textureDesc.mipLevels = 1;
+        textureDesc.arrayLayers = 1;
+        textureDesc.format = RealRHI::TextureFormat::RGBA8_UNorm;
+        textureDesc.usage = RealRHI::TextureUsage::TransferDst;
+
+        RealRHI::Ref<RealRHI::Texture> texture;
+        Expect(device->CreateTexture(textureDesc, texture) == RealRHI::Result::Success,
+               "Create invalid-range barrier test texture");
+        barriers.buffers.clear();
+        barriers.textures.push_back({
+            .texture = texture.Raw(),
+            .oldLayout = RealRHI::TextureLayout::Undefined,
+            .newLayout = RealRHI::TextureLayout::TransferDst,
+            .subresources = { .baseMipLevel = 1, .mipLevelCount = 1, .baseArrayLayer = 0, .arrayLayerCount = 1 },
+        });
+        Expect(list->Barrier(barriers) != RealRHI::Result::Success,
+               "Reject out-of-bounds texture mip barrier");
+        Expect(list->End() == RealRHI::Result::Success, "End invalid-range barrier test list");
     }
 
     std::cout << "QueueSubmissionTests passed" << std::endl;
