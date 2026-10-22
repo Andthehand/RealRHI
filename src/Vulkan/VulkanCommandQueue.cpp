@@ -61,7 +61,7 @@ namespace RealRHI {
 
 		for (CommandList* commandList : submitInfo.commandLists) {
 			auto* vkCommandList = dynamic_cast<VulkanCommandList*>(commandList);
-			if (vkCommandList == nullptr || vkCommandList->GetDevice() != m_Device || vkCommandList->GetQueueId() != GetQueueId()) {
+			if (vkCommandList == nullptr || vkCommandList->GetQueueId() != GetQueueId()) {
 				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Command list was created for a different queue family or index.");
 				return {};
 			}
@@ -124,7 +124,7 @@ namespace RealRHI {
 		duplicateListTracker.reserve(trackedLists.size());
 		for (CommandList* commandList : trackedLists) {
 			auto* vkCommandList = dynamic_cast<VulkanCommandList*>(commandList);
-			if (vkCommandList == nullptr || vkCommandList->GetDevice() != m_Device || vkCommandList->GetQueueId() != GetQueueId()) {
+			if (vkCommandList == nullptr || vkCommandList->GetQueueId() != GetQueueId()) {
 				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Tried to submit a command list to the wrong queue.");
 				return {};
 			}
@@ -143,6 +143,17 @@ namespace RealRHI {
 		}
 
 		std::unique_lock submitLock(m_SubmissionMutex);
+        // Check the complete batch before submitting. No global state changes
+        // are published unless vkQueueSubmit2 succeeds.
+        std::scoped_lock stateLock(m_Device->GetStateTrackingMutex());
+		VulkanCommandList::LayoutMap predictedLayouts;
+        for (CommandList* commandList : trackedLists) {
+            if (!static_cast<VulkanCommandList*>(commandList)->ValidateSubmissionLayouts(predictedLayouts)) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                    "Submission rejected: texture layout differs from the recorded initial layout.");
+                return {};
+            }
+        }
 		const uint64_t submissionValue = m_NextFrameValue;
 		signalInfos.push_back({
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
@@ -167,6 +178,9 @@ namespace RealRHI {
 			return {};
 		}
 
+		for (CommandList* commandList : trackedLists) {
+			static_cast<VulkanCommandList*>(commandList)->CommitSubmissionLayouts();
+		}
 		++m_NextFrameValue;
 		m_PendingSubmissions[submissionValue] = std::move(retainedLists);
 

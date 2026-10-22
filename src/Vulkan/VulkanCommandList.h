@@ -8,6 +8,7 @@
 
 #include <mutex>
 #include <vector>
+#include <unordered_map>
 
 namespace RealRHI {
 	class VulkanCommandList : public CommandList {
@@ -20,14 +21,6 @@ namespace RealRHI {
 		Result Begin() override;
 		Result End() override;
 		Result Reset() override;
-		CommandListState GetState() const override {
-			std::scoped_lock lock(m_StateMutex);
-			return m_State;
-		}
-		void SetState(CommandListState state) {
-			std::scoped_lock lock(m_StateMutex);
-			m_State = state;
-		}
 
 		void BeginRendering(const RenderingInfo& renderingInfo) override;
 		void EndRendering() override;
@@ -52,7 +45,14 @@ namespace RealRHI {
 		void DrawIndexed(uint32_t indexCount) override;
 
 		QueueId GetQueueId() const { return m_QueueId; }
-		const VulkanDevice* GetDevice() const { return m_Device; }
+		CommandListState GetState() const override {
+			std::scoped_lock lock(m_StateMutex);
+			return m_State;
+		}
+		void SetState(CommandListState state) {
+			std::scoped_lock lock(m_StateMutex);
+			m_State = state;
+		}
 
 	protected:
 		friend class VulkanDevice;
@@ -60,15 +60,55 @@ namespace RealRHI {
 		friend class VulkanCommandQueue;
 		VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
 	private:
+		struct SubresourceKey {
+			const VulkanTexture* texture = nullptr;
+			uint32_t mipLevel = 0;
+			uint32_t arrayLayer = 0;
+
+			bool operator==(const SubresourceKey&) const = default;
+		};
+
+		struct SubresourceKeyHash {
+			size_t operator()(const SubresourceKey& key) const {
+				return std::hash<const VulkanTexture*>{}(key.texture) ^
+					(static_cast<size_t>(key.mipLevel) << 16) ^
+					static_cast<size_t>(key.arrayLayer);
+			}
+		};
+		using LayoutMap = std::unordered_map<SubresourceKey, TextureLayout, SubresourceKeyHash>;
+
+		TextureLayout GetExpectedLayout(const VulkanTexture* texture, uint32_t mip, uint32_t layer) const;
+		// Check if the recorded layouts match the expected layouts at submission time, and update the predicted layouts accordingly.
+		bool ValidateSubmissionLayouts(LayoutMap& predicted) const;
+		
+		// Only called by the command queue after submission is complete. 
+		// Updates the submitted layouts of textures based on the recorded layouts during command recording.
+		void CommitSubmissionLayouts() const;
+	private:
+		// Retain a reference to a resource to ensure it remains valid for the lifetime of this command list.
 		void RetainResource(RefCounted* resource);
+
+		// Register the expected layout of a texture subresource during command recording.
+		void RegisterRequiredLayout(const VulkanTexture* texture, uint32_t mipLevel, uint32_t baseLayer,
+			uint32_t layerCount, TextureLayout expected);
+
+		// Check if the expected layout of a texture subresource has been recorded during command recording.
+		bool HasRecordedLayout(const VulkanTexture* texture, uint32_t mipLevel, uint32_t baseLayer,
+			uint32_t layerCount, TextureLayout expected) const;
+
 	private:
 		const VulkanDevice* m_Device;
         Ref<VulkanCommandAllocator> m_Allocator;
 		
+		const QueueId m_QueueId{};
 		mutable std::mutex m_StateMutex;
 		std::vector<Ref<RefCounted>> m_ReferencedResources;
 		CommandListState m_State = CommandListState::Initial;
-		QueueId m_QueueId{};
+
+		// Initial layout = the layout that was expected at the start of recording for a given subresource.
+		// Recorded layout = the layout that was recorded for a given subresource during command recording.
+		LayoutMap m_InitialLayouts;
+		LayoutMap m_RecordedLayouts;
 
 		VkCommandBuffer m_CommandBuffer = VK_NULL_HANDLE;
 	};

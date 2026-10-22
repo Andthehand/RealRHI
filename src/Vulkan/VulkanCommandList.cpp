@@ -10,6 +10,7 @@
 
 #include <mutex>
 #include <algorithm>
+#include <unordered_set>
 #include <utility>
 
 namespace RealRHI {
@@ -27,7 +28,7 @@ namespace RealRHI {
     }
 
     Result VulkanCommandList::Create(const VulkanDevice* device, Ref<VulkanCommandAllocator> allocator, Ref<VulkanCommandList>& out) {
-        if (!allocator || allocator->GetDevice() != device) {
+        if (!allocator) {
             return Result::Failed;
         }
 
@@ -143,6 +144,8 @@ namespace RealRHI {
         // Release outside the state mutex (destructors may invoke other locks).
         std::vector<Ref<RefCounted>> released;
         released.swap(m_ReferencedResources);
+        m_RecordedLayouts.clear();
+        m_InitialLayouts.clear();
         return Result::Success;
     }
 
@@ -274,7 +277,7 @@ namespace RealRHI {
 		}
 
 		auto* resource = dynamic_cast<VulkanTexture*>(texture);
-		if (resource == nullptr || resource->GetDevice() != m_Device) {
+		if (resource == nullptr) {
 			return Result::Failed;
 		}
 
@@ -288,7 +291,7 @@ namespace RealRHI {
 		}
 
 		auto* resource = dynamic_cast<VulkanBuffer*>(buffer);
-		if (resource == nullptr || resource->GetDevice() != m_Device) {
+		if (resource == nullptr) {
 			return Result::Failed;
 		}
 
@@ -351,6 +354,52 @@ namespace RealRHI {
 		return Result::Success;
 	}
 
+	TextureLayout VulkanCommandList::GetExpectedLayout(const VulkanTexture* texture, uint32_t mip, uint32_t layer) const {
+		const auto it = m_RecordedLayouts.find({ texture, mip, layer });
+		return it != m_RecordedLayouts.end() ? it->second : texture->GetSubmittedLayout(mip, layer);
+	}
+
+	bool VulkanCommandList::ValidateSubmissionLayouts(LayoutMap& predicted) const {
+		for (const auto& [key, layout] : m_InitialLayouts) {
+			const auto it = predicted.find(key);
+			const TextureLayout current = it != predicted.end() ? it->second :
+				key.texture->GetSubmittedLayout(key.mipLevel, key.arrayLayer);
+			if (layout != TextureLayout::Undefined && current != layout) {
+				return false;
+			}
+		}
+		for (const auto& [key, layout] : m_RecordedLayouts) {
+			predicted[key] = layout;
+		}
+		return true;
+	}
+
+	void VulkanCommandList::CommitSubmissionLayouts() const {
+		for (const auto& [key, layout] : m_RecordedLayouts) {
+			const_cast<VulkanTexture*>(key.texture)->SetSubmittedLayout(key.mipLevel, key.arrayLayer, layout);
+		}
+	}
+
+	void VulkanCommandList::RegisterRequiredLayout(const VulkanTexture* texture, uint32_t mipLevel,
+		uint32_t baseLayer, uint32_t layerCount, TextureLayout expected) {
+		for (uint32_t layer = baseLayer; layer < baseLayer + layerCount; ++layer) {
+			const SubresourceKey key{ texture, mipLevel, layer };
+			if (!m_RecordedLayouts.contains(key)) {
+				m_InitialLayouts.emplace(key, expected);
+			}
+		}
+	}
+
+	bool VulkanCommandList::HasRecordedLayout(const VulkanTexture* texture, uint32_t mipLevel,
+		uint32_t baseLayer, uint32_t layerCount, TextureLayout expected) const {
+		for (uint32_t layer = baseLayer; layer < baseLayer + layerCount; ++layer) {
+			if (expected != TextureLayout::Undefined && GetExpectedLayout(texture, mipLevel, layer) != expected) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	Result VulkanCommandList::CopyBufferToTexture(Buffer* source, Texture* destination, const BufferTextureCopyRegion& region) {
 		if (GetState() != CommandListState::Recording ||
 			region.width == 0 || region.height == 0 || region.depth == 0 || region.layerCount == 0) {
@@ -362,7 +411,8 @@ namespace RealRHI {
 		auto* sourceBuffer = dynamic_cast<VulkanBuffer*>(source);
 		auto* destinationTexture = dynamic_cast<VulkanTexture*>(destination);
 		if (sourceBuffer == nullptr || destinationTexture == nullptr ||
-			destinationTexture->m_Layout != TextureLayout::TransferDst ||
+			!HasRecordedLayout(destinationTexture, region.mipLevel, region.baseArrayLayer,
+                region.layerCount, TextureLayout::TransferDst) ||
 			region.mipLevel >= destinationTexture->m_MipLevels ||
 			region.baseArrayLayer >= destinationTexture->m_ArrayLayers ||
 			region.layerCount > destinationTexture->m_ArrayLayers - region.baseArrayLayer) {
@@ -383,6 +433,8 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
+		RegisterRequiredLayout(destinationTexture, region.mipLevel, region.baseArrayLayer,
+			region.layerCount, TextureLayout::TransferDst);
 		RetainResource(sourceBuffer);
 		RetainResource(destinationTexture);
 		VkBufferImageCopy copyRegion{
@@ -410,11 +462,13 @@ namespace RealRHI {
 		auto* texture = dynamic_cast<VulkanTexture*>(source);
 		auto* buffer = dynamic_cast<VulkanBuffer*>(destination);
 		if (texture == nullptr || buffer == nullptr ||
-			texture->GetDevice() != m_Device || buffer->GetDevice() != m_Device ||
+
 			region.mipLevel >= texture->m_MipLevels ||
 			region.baseArrayLayer >= texture->m_ArrayLayers ||
 			region.layerCount > texture->m_ArrayLayers - region.baseArrayLayer ||
-			region.bufferOffset >= buffer->GetSize()) {
+			region.bufferOffset >= buffer->GetSize() ||
+            !HasRecordedLayout(texture, region.mipLevel, region.baseArrayLayer,
+                region.layerCount, TextureLayout::TransferSrc)) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "CopyTextureToBuffer failed: Invalid source texture, destination buffer, or subresource range.");
 			return Result::Failed;
 		}
@@ -440,6 +494,8 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
+		RegisterRequiredLayout(texture, region.mipLevel, region.baseArrayLayer,
+			region.layerCount, TextureLayout::TransferSrc);
 		RetainResource(texture);
 		RetainResource(buffer);
 		VkBufferImageCopy copyRegion{
@@ -467,7 +523,7 @@ namespace RealRHI {
 		auto* sourceTexture = dynamic_cast<VulkanTexture*>(source);
 		auto* destinationTexture = dynamic_cast<VulkanTexture*>(destination);
 		if (sourceTexture == nullptr || destinationTexture == nullptr ||
-			sourceTexture->GetDevice() != m_Device || destinationTexture->GetDevice() != m_Device ||
+
 			sourceTexture == destinationTexture ||
 			sourceTexture->m_Format != destinationTexture->m_Format ||
 			sourceTexture->m_Format != VK_FORMAT_R8G8B8A8_UNORM ||
@@ -476,7 +532,11 @@ namespace RealRHI {
 			region.sourceBaseArrayLayer >= sourceTexture->m_ArrayLayers ||
 			region.destinationBaseArrayLayer >= destinationTexture->m_ArrayLayers ||
 			region.layerCount > sourceTexture->m_ArrayLayers - region.sourceBaseArrayLayer ||
-			region.layerCount > destinationTexture->m_ArrayLayers - region.destinationBaseArrayLayer) {
+			region.layerCount > destinationTexture->m_ArrayLayers - region.destinationBaseArrayLayer ||
+            !HasRecordedLayout(sourceTexture, region.sourceMipLevel, region.sourceBaseArrayLayer,
+                region.layerCount, TextureLayout::TransferSrc) ||
+            !HasRecordedLayout(destinationTexture, region.destinationMipLevel, region.destinationBaseArrayLayer,
+                region.layerCount, TextureLayout::TransferDst)) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "CopyTexture failed: Invalid textures, formats, or subresource range.");
 			return Result::Failed;
 		}
@@ -492,6 +552,10 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
+		RegisterRequiredLayout(sourceTexture, region.sourceMipLevel, region.sourceBaseArrayLayer,
+			region.layerCount, TextureLayout::TransferSrc);
+		RegisterRequiredLayout(destinationTexture, region.destinationMipLevel, region.destinationBaseArrayLayer,
+			region.layerCount, TextureLayout::TransferDst);
 		RetainResource(sourceTexture);
 		RetainResource(destinationTexture);
 		VkImageCopy copyRegion{
@@ -538,7 +602,7 @@ namespace RealRHI {
 
 		for (const BufferBarrier& barrier : barriers.buffers) {
 			auto* buffer = dynamic_cast<VulkanBuffer*>(barrier.buffer);
-			if (buffer == nullptr || buffer->GetDevice() != m_Device ||
+			if (buffer == nullptr || 
 				barrier.size == 0 || barrier.offset >= buffer->GetSize() ||
 				barrier.size > buffer->GetSize() - barrier.offset) {
 				return Result::Failed;
@@ -560,7 +624,7 @@ namespace RealRHI {
 
 		for (const TextureBarrier& barrier : barriers.textures) {
 			auto* texture = dynamic_cast<VulkanTexture*>(barrier.texture);
-			if (texture == nullptr || texture->GetDevice() != m_Device ||
+			if (texture == nullptr || 
 				barrier.subresources.mipLevelCount == 0 || barrier.subresources.arrayLayerCount == 0 ||
 				barrier.subresources.baseMipLevel >= texture->m_MipLevels ||
 				barrier.subresources.mipLevelCount > texture->m_MipLevels - barrier.subresources.baseMipLevel ||
@@ -568,6 +632,16 @@ namespace RealRHI {
 				barrier.subresources.arrayLayerCount > texture->m_ArrayLayers - barrier.subresources.baseArrayLayer) {
 				return Result::Failed;
 			}
+
+            for (uint32_t mip = barrier.subresources.baseMipLevel;
+                mip < barrier.subresources.baseMipLevel + barrier.subresources.mipLevelCount; ++mip) {
+                if (!HasRecordedLayout(texture, mip, barrier.subresources.baseArrayLayer,
+                    barrier.subresources.arrayLayerCount, barrier.oldLayout)) {
+                    m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                        "Texture barrier old layout disagrees with an earlier transition in this command list.");
+                    return Result::Failed;
+                }
+            }
 
 			imageBarriers.push_back({
 				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
@@ -589,6 +663,39 @@ namespace RealRHI {
 				},
 			});
 		}
+
+        // Reject overlapping ranges: barriers within one dependency are not sequential.
+        std::unordered_set<SubresourceKey, SubresourceKeyHash> touched;
+        for (const TextureBarrier& barrier : barriers.textures) {
+            auto* texture = static_cast<VulkanTexture*>(barrier.texture);
+            for (uint32_t mip = barrier.subresources.baseMipLevel;
+                mip < barrier.subresources.baseMipLevel + barrier.subresources.mipLevelCount; ++mip) {
+                for (uint32_t layer = barrier.subresources.baseArrayLayer;
+                    layer < barrier.subresources.baseArrayLayer + barrier.subresources.arrayLayerCount; ++layer) {
+                    if (!touched.insert({ texture, mip, layer }).second) {
+                        m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                            "Overlapping texture barriers must be recorded in separate calls.");
+                        return Result::Failed;
+                    }
+                }
+            }
+        }
+
+        // Update the command list's layout knowledge only after all barriers validate.
+        for (const TextureBarrier& barrier : barriers.textures) {
+            auto* texture = static_cast<VulkanTexture*>(barrier.texture);
+            for (uint32_t mip = barrier.subresources.baseMipLevel;
+                mip < barrier.subresources.baseMipLevel + barrier.subresources.mipLevelCount; ++mip) {
+                for (uint32_t layer = barrier.subresources.baseArrayLayer;
+                    layer < barrier.subresources.baseArrayLayer + barrier.subresources.arrayLayerCount; ++layer) {
+                    const SubresourceKey key{ texture, mip, layer };
+                    if (!m_RecordedLayouts.contains(key)) {
+                        m_InitialLayouts.emplace(key, barrier.oldLayout);
+                    }
+                    m_RecordedLayouts[key] = barrier.newLayout;
+                }
+            }
+        }
 
 		for (const BufferBarrier& barrier : barriers.buffers) {
 			RetainResource(barrier.buffer);

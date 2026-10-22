@@ -41,10 +41,10 @@ namespace RealRHI {
 
 	Result VulkanTexture::Init(const TextureDesc& desc) {
 		m_Format = Utils::TextureFormatToVkFormat(desc.format);
-		m_Layout = TextureLayout::Undefined;
 		m_Usage = desc.usage;
 		m_MipLevels = desc.mipLevels;
 		m_ArrayLayers = desc.arrayLayers;
+		m_SubresourceLayouts.assign(m_MipLevels * m_ArrayLayers, TextureLayout::Undefined);
 		m_ImageExtent = {
 			.width = desc.width,
 			.height = desc.height,
@@ -62,7 +62,7 @@ namespace RealRHI {
             .tiling = VK_IMAGE_TILING_OPTIMAL,
             .usage = Utils::TextureUsageToVkImageUsage(desc.usage),
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE, // I don't think we'll ever support sharing buffers between queues
-            .initialLayout = Utils::TextureLayoutToVkImageLayout(m_Layout),
+            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
         };
 
         // Always allocate images on dedicated GPU memory
@@ -114,43 +114,37 @@ namespace RealRHI {
     }
 
     Result VulkanTexture::ChangeLayout(CommandList* cmd, TextureLayout newLayout) {
-		VulkanCommandList* vkCmd = static_cast<VulkanCommandList*>(cmd);
-
-        VkImageSubresourceRange subresourceRange{
-            .aspectMask = Utils::TextureFormatToVkImageAspect(Utils::VkFormatToTextureFormat(m_Format)), // TODO: Clean this up?
-            .baseMipLevel = 0, //TODO: look into
-            .levelCount = m_MipLevels,
-            .baseArrayLayer = 0, //TODO: look into
-            .layerCount = m_ArrayLayers,
-        };
-
-        VkImageMemoryBarrier2 barrier{
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-            .srcStageMask = Utils::TextureLayoutToVkPipelineStageFlags(m_Layout),
-            .srcAccessMask = Utils::TextureLayoutToVkAccessFlags(m_Layout),
-            .dstStageMask = Utils::TextureLayoutToVkPipelineStageFlags(newLayout),
-            .dstAccessMask = Utils::TextureLayoutToVkAccessFlags(newLayout),
-            .oldLayout = Utils::TextureLayoutToVkImageLayout(m_Layout),
-            .newLayout = Utils::TextureLayoutToVkImageLayout(newLayout),
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = m_Image,
-            .subresourceRange = subresourceRange,
-        };
-
-        VkDependencyInfo depInfo{
-            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .imageMemoryBarrierCount = 1,
-            .pImageMemoryBarriers = &barrier,
-        };
-
-        if (vkCmd->UseResource(this) != Result::Success) {
+        auto* commandList = dynamic_cast<VulkanCommandList*>(cmd);
+        if (commandList == nullptr || 
+            commandList->GetState() != CommandListState::Recording) {
             return Result::Failed;
         }
 
-        vkCmdPipelineBarrier2(vkCmd->GetCommandBuffer(), &depInfo);
-		m_Layout = newLayout;
-
+        // A full-texture transition can only use one old layout. Split
+        // mixed-layout textures into individual subresource transitions.
+        for (uint32_t mip = 0; mip < m_MipLevels; ++mip) {
+            for (uint32_t layer = 0; layer < m_ArrayLayers; ++layer) {
+                const TextureLayout oldLayout = commandList->GetExpectedLayout(this, mip, layer);
+                BarrierDesc barriers;
+                barriers.textures.push_back({
+                    .texture = this,
+                    .before = {
+                        .stages = oldLayout == TextureLayout::Undefined ? PipelineStage::None : PipelineStage::AllCommands,
+                        .access = oldLayout == TextureLayout::Undefined ? ResourceAccess::None : ResourceAccess::MemoryRead | ResourceAccess::MemoryWrite,
+                    },
+                    .after = {
+                        .stages = PipelineStage::AllCommands,
+                        .access = ResourceAccess::MemoryRead | ResourceAccess::MemoryWrite,
+                    },
+                    .oldLayout = oldLayout,
+                    .newLayout = newLayout,
+                    .subresources = { mip, 1, layer, 1 },
+                });
+                if (commandList->Barrier(barriers) != Result::Success) {
+                    return Result::Failed;
+                }
+            }
+        }
         return Result::Success;
     }
 
@@ -170,7 +164,9 @@ namespace RealRHI {
             return res;
         }
 
-        ChangeLayout(commandList.Raw(), TextureLayout::TransferDst);
+        if (ChangeLayout(commandList.Raw(), TextureLayout::TransferDst) != Result::Success) {
+            return Result::Failed;
+        }
 
         BufferDesc stagingBufferDesc{
             .size = size,
@@ -196,7 +192,9 @@ namespace RealRHI {
         if (commandList->CopyBufferToTexture(transferBuffer.Raw(), this, copyRegion) != Result::Success) {
             return Result::Failed;
         }
-        ChangeLayout(commandList.Raw(), TextureLayout::ShaderRead);
+        if (ChangeLayout(commandList.Raw(), TextureLayout::ShaderRead) != Result::Success) {
+            return Result::Failed;
+        }
 
         res = commandList->End();
         if (res != Result::Success) {
@@ -219,7 +217,7 @@ namespace RealRHI {
 
 	Result VulkanTexture::InitSwapChainTexture(VkFormat format, VkImage image) {
 		m_IsExternal = true;
-		m_Layout = TextureLayout::Undefined;
+		m_SubresourceLayouts.assign(1, TextureLayout::Undefined);
 		m_Usage = TextureUsage::RenderTarget;
 		m_Format = format;
 		m_Image = image;

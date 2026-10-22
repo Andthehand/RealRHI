@@ -7,13 +7,13 @@
 #include "VulkanTextureView.h"
 
 #include <volk.h>
+#include <vector>
 #include <vma/vk_mem_alloc.h>
 
 namespace RealRHI {
 	class VulkanTexture : public Texture {
 	public:
 		VulkanTexture(const VulkanDevice* device);
-        const VulkanDevice* GetDevice() const { return m_Device; }
 		~VulkanTexture();
 
 		static Result Create(const VulkanDevice* device, const TextureDesc& desc, Ref<VulkanTexture>& outTexture);
@@ -46,12 +46,24 @@ namespace RealRHI {
 		Result InitSwapChainTexture(VkFormat format, VkImage image);
 
 		VkSamplerCreateInfo GetSampler(); // TODO: Add sampler desc
+
+	private:
+		TextureLayout GetSubmittedLayout(uint32_t mip, uint32_t layer) const {
+			std::scoped_lock lock(m_Device->GetStateTrackingMutex());
+			return m_SubresourceLayouts[mip * m_ArrayLayers + layer];
+		}
+		void SetSubmittedLayout(uint32_t mip, uint32_t layer, TextureLayout layout) {
+			std::scoped_lock lock(m_Device->GetStateTrackingMutex());
+			m_SubresourceLayouts[mip * m_ArrayLayers + layer] = layout;
+		}
+
 	private:
 		const VulkanDevice* m_Device = nullptr;
 		VkImage m_Image = VK_NULL_HANDLE;
 		VmaAllocation m_Allocation = VK_NULL_HANDLE;
 
-		TextureLayout m_Layout = TextureLayout::Undefined;
+		// Submission-ordered state; never modified during command recording.
+		std::vector<TextureLayout> m_SubresourceLayouts;
 		TextureUsage m_Usage = TextureUsage::None;
 		VkFormat m_Format = VK_FORMAT_UNDEFINED;
 		bool m_IsExternal = false; // Whether the image is owned by us or external (e.g. swapchain)
