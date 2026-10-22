@@ -115,7 +115,7 @@ namespace RealRHI {
 
     Result VulkanTexture::ChangeLayout(CommandList* cmd, TextureLayout newLayout) {
         auto* commandList = dynamic_cast<VulkanCommandList*>(cmd);
-        if (commandList == nullptr || commandList->GetDevice() != m_Device ||
+        if (commandList == nullptr || 
             commandList->GetState() != CommandListState::Recording) {
             return Result::Failed;
         }

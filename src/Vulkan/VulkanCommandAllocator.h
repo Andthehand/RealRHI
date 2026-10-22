@@ -20,7 +20,6 @@ namespace RealRHI {
 
         VkCommandPool GetPool() const { return m_Pool; }
         uint32_t GetQueueFamilyIndex() const { return m_Family; }
-        const VulkanDevice* GetDevice() const { return m_Device; }
     private:
         const VulkanDevice* m_Device;
         VkCommandPool m_Pool = VK_NULL_HANDLE;

@@ -27,7 +27,7 @@ namespace RealRHI {
     }
 
     Result VulkanCommandList::Create(const VulkanDevice* device, Ref<VulkanCommandAllocator> allocator, Ref<VulkanCommandList>& out) {
-        if (!allocator || allocator->GetDevice() != device) {
+        if (!allocator) {
             return Result::Failed;
         }
 
@@ -276,7 +276,7 @@ namespace RealRHI {
 		}
 
 		auto* resource = dynamic_cast<VulkanTexture*>(texture);
-		if (resource == nullptr || resource->GetDevice() != m_Device) {
+		if (resource == nullptr) {
 			return Result::Failed;
 		}
 
@@ -290,7 +290,7 @@ namespace RealRHI {
 		}
 
 		auto* resource = dynamic_cast<VulkanBuffer*>(buffer);
-		if (resource == nullptr || resource->GetDevice() != m_Device) {
+		if (resource == nullptr) {
 			return Result::Failed;
 		}
 
@@ -461,7 +461,7 @@ namespace RealRHI {
 		auto* texture = dynamic_cast<VulkanTexture*>(source);
 		auto* buffer = dynamic_cast<VulkanBuffer*>(destination);
 		if (texture == nullptr || buffer == nullptr ||
-			texture->GetDevice() != m_Device || buffer->GetDevice() != m_Device ||
+
 			region.mipLevel >= texture->m_MipLevels ||
 			region.baseArrayLayer >= texture->m_ArrayLayers ||
 			region.layerCount > texture->m_ArrayLayers - region.baseArrayLayer ||
@@ -522,7 +522,7 @@ namespace RealRHI {
 		auto* sourceTexture = dynamic_cast<VulkanTexture*>(source);
 		auto* destinationTexture = dynamic_cast<VulkanTexture*>(destination);
 		if (sourceTexture == nullptr || destinationTexture == nullptr ||
-			sourceTexture->GetDevice() != m_Device || destinationTexture->GetDevice() != m_Device ||
+
 			sourceTexture == destinationTexture ||
 			sourceTexture->m_Format != destinationTexture->m_Format ||
 			sourceTexture->m_Format != VK_FORMAT_R8G8B8A8_UNORM ||
@@ -601,7 +601,7 @@ namespace RealRHI {
 
 		for (const BufferBarrier& barrier : barriers.buffers) {
 			auto* buffer = dynamic_cast<VulkanBuffer*>(barrier.buffer);
-			if (buffer == nullptr || buffer->GetDevice() != m_Device ||
+			if (buffer == nullptr || 
 				barrier.size == 0 || barrier.offset >= buffer->GetSize() ||
 				barrier.size > buffer->GetSize() - barrier.offset) {
 				return Result::Failed;
@@ -623,7 +623,7 @@ namespace RealRHI {
 
 		for (const TextureBarrier& barrier : barriers.textures) {
 			auto* texture = dynamic_cast<VulkanTexture*>(barrier.texture);
-			if (texture == nullptr || texture->GetDevice() != m_Device ||
+			if (texture == nullptr || 
 				barrier.subresources.mipLevelCount == 0 || barrier.subresources.arrayLayerCount == 0 ||
 				barrier.subresources.baseMipLevel >= texture->m_MipLevels ||
 				barrier.subresources.mipLevelCount > texture->m_MipLevels - barrier.subresources.baseMipLevel ||

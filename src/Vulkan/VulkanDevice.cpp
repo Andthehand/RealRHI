@@ -188,7 +188,7 @@ namespace RealRHI {
 
 	Result VulkanDevice::CreateCommandList(CommandAllocator* allocator, Ref<CommandList>& outCommandList) const {
 		auto* vkAllocator = dynamic_cast<VulkanCommandAllocator*>(allocator);
-		if (vkAllocator == nullptr || vkAllocator->GetDevice() != this) {
+		if (vkAllocator == nullptr) {
 			return Result::Failed;
 		}
 		Ref<VulkanCommandList> list;

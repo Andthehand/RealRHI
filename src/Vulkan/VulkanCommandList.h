@@ -53,7 +53,6 @@ namespace RealRHI {
 		void DrawIndexed(uint32_t indexCount) override;
 
 		QueueId GetQueueId() const { return m_QueueId; }
-		const VulkanDevice* GetDevice() const { return m_Device; }
 
 	protected:
 		friend class VulkanDevice;
