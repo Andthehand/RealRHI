@@ -32,9 +32,7 @@ namespace RealRHI {
         VkBufferCreateInfo bufferInfo{
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .size = desc.size,
-            .usage = Utils::BufferUsageToVkBufferUsage(desc.usage) |
-                (Any(desc.usage & (BufferUsage::Storage | BufferUsage::Uniform))
-                    ? VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT : 0),
+            .usage = Utils::BufferUsageToVkBufferUsage(desc.usage),
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE, // I don't think we'll ever support sharing buffers between queues
         };
 
