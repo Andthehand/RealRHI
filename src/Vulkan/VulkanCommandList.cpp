@@ -8,6 +8,7 @@
 #include "VulkanConvertions.h"
 
 #include <mutex>
+#include <algorithm>
 #include <utility>
 
 namespace RealRHI {
@@ -307,6 +308,81 @@ namespace RealRHI {
         RetainResource(indexBuffer);
         vkCmdBindIndexBuffer(m_CommandBuffer, static_cast<VulkanBuffer*>(indexBuffer)->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
     }
+
+	Result VulkanCommandList::CopyBuffer(Buffer* source, Buffer* destination, const BufferCopyRegion& region) {
+		if (GetState() != CommandListState::Recording || region.size == 0) {
+			return Result::Failed;
+		}
+
+		auto* sourceBuffer = dynamic_cast<VulkanBuffer*>(source);
+		auto* destinationBuffer = dynamic_cast<VulkanBuffer*>(destination);
+		if (sourceBuffer == nullptr || destinationBuffer == nullptr ||
+			sourceBuffer->GetDevice() != m_Device || destinationBuffer->GetDevice() != m_Device) {
+			return Result::Failed;
+		}
+
+		if (region.sourceOffset > sourceBuffer->GetSize() ||
+			region.size > sourceBuffer->GetSize() - region.sourceOffset ||
+			region.destinationOffset > destinationBuffer->GetSize() ||
+			region.size > destinationBuffer->GetSize() - region.destinationOffset) {
+			return Result::Failed;
+		}
+
+		RetainResource(sourceBuffer);
+		RetainResource(destinationBuffer);
+
+		VkBufferCopy copyRegion{
+			.srcOffset = region.sourceOffset,
+			.dstOffset = region.destinationOffset,
+			.size = region.size,
+		};
+		vkCmdCopyBuffer(m_CommandBuffer, sourceBuffer->GetBuffer(), destinationBuffer->GetBuffer(), 1, &copyRegion);
+		return Result::Success;
+	}
+
+	Result VulkanCommandList::CopyBufferToTexture(Buffer* source, Texture* destination, const BufferTextureCopyRegion& region) {
+		if (GetState() != CommandListState::Recording ||
+			region.width == 0 || region.height == 0 || region.depth == 0 || region.layerCount == 0) {
+			return Result::Failed;
+		}
+
+		auto* sourceBuffer = dynamic_cast<VulkanBuffer*>(source);
+		auto* destinationTexture = dynamic_cast<VulkanTexture*>(destination);
+		if (sourceBuffer == nullptr || destinationTexture == nullptr ||
+			sourceBuffer->GetDevice() != m_Device || destinationTexture->GetDevice() != m_Device ||
+			destinationTexture->m_Layout != TextureLayout::TransferDst ||
+			region.mipLevel >= destinationTexture->m_MipLevels ||
+			region.baseArrayLayer >= destinationTexture->m_ArrayLayers ||
+			region.layerCount > destinationTexture->m_ArrayLayers - region.baseArrayLayer) {
+			return Result::Failed;
+		}
+
+		const VkExtent3D mipExtent{
+			.width = std::max(1u, destinationTexture->m_ImageExtent.width >> region.mipLevel),
+			.height = std::max(1u, destinationTexture->m_ImageExtent.height >> region.mipLevel),
+			.depth = std::max(1u, destinationTexture->m_ImageExtent.depth >> region.mipLevel),
+		};
+		if (region.width > mipExtent.width || region.height > mipExtent.height || region.depth > mipExtent.depth ||
+			region.bufferOffset >= sourceBuffer->GetSize()) {
+			return Result::Failed;
+		}
+
+		RetainResource(sourceBuffer);
+		RetainResource(destinationTexture);
+		VkBufferImageCopy copyRegion{
+			.bufferOffset = region.bufferOffset,
+			.imageSubresource = {
+				.aspectMask = Utils::TextureFormatToVkImageAspect(Utils::VkFormatToTextureFormat(destinationTexture->m_Format)),
+				.mipLevel = region.mipLevel,
+				.baseArrayLayer = region.baseArrayLayer,
+				.layerCount = region.layerCount,
+			},
+			.imageExtent = { region.width, region.height, region.depth },
+		};
+		vkCmdCopyBufferToImage(m_CommandBuffer, sourceBuffer->GetBuffer(), destinationTexture->m_Image,
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+		return Result::Success;
+	}
 
     void VulkanCommandList::Draw(uint32_t vertexCount) {
         vkCmdDraw(m_CommandBuffer, vertexCount, 1, 0, 0);

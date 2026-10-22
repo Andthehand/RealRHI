@@ -41,6 +41,9 @@ namespace RealRHI {
 		void BindVertexBuffer(Buffer* vertexBuffer) override;
 		void BindIndexBuffer(Buffer* indexBuffer) override;
 
+		Result CopyBuffer(Buffer* source, Buffer* destination, const BufferCopyRegion& region) override;
+		Result CopyBufferToTexture(Buffer* source, Texture* destination, const BufferTextureCopyRegion& region) override;
+
 		void Draw(uint32_t vertexCount) override;
 		void DrawIndexed(uint32_t indexCount) override;
 
