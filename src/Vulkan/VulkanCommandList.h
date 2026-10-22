@@ -75,12 +75,10 @@ namespace RealRHI {
 		};
 		using LayoutMap = std::unordered_map<SubresourceKey, TextureLayout, SubresourceKeyHash>;
 
-		// Functions
 		TextureLayout GetExpectedLayout(const VulkanTexture* texture, uint32_t mip, uint32_t layer) const;
 		bool ValidateSubmissionLayouts(LayoutMap& predicted) const;
 		void CommitSubmissionLayouts() const;
 	private:
-		// Functions
 		void RetainResource(RefCounted* resource);
 		void RegisterRequiredLayout(const VulkanTexture* texture, uint32_t mipLevel, uint32_t baseLayer,
 			uint32_t layerCount, TextureLayout expected);
@@ -88,7 +86,6 @@ namespace RealRHI {
 			uint32_t layerCount, TextureLayout expected) const;
 
 	private:
-		// Variables
 		std::unordered_map<SubresourceKey, TextureLayout, SubresourceKeyHash> m_RecordedLayouts;
 		std::unordered_map<SubresourceKey, TextureLayout, SubresourceKeyHash> m_InitialLayouts;
 		const VulkanDevice* m_Device;
