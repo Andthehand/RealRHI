@@ -22,6 +22,13 @@ This library is written to be easy for another engineer to read and reason about
 - Keep functions and classes focused on a single concern, and avoid creating layers of indirection that hide the true behavior.
 - Prefer straightforward logic and small, readable condition blocks over dense metaprogramming or hidden state.
 
+### Class member organization
+- Separate member function declarations from member variables in class headers.
+- Use distinct access-specifier sections with `// Functions` and `// Variables` comments, following the existing project convention.
+- Put helper functions under `private:` followed by `// Functions`, then start another `private:` section followed by `// Variables` for data members.
+- Keep nested types and aliases before declarations that depend on them. Do not expose internal implementation types publicly solely to resolve declaration ordering.
+- Apply the same separation to other access levels when appropriate; keep the order clear and consistent.
+
 ### Headers and includes
 - Use `#pragma once` for headers.
 - Keep local headers grouped first and standard library includes after them, as seen in the current code.
