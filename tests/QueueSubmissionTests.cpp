@@ -381,6 +381,67 @@ int main() {
         Expect(list->Reset() == RealRHI::Result::Success, "Reset tracked-layout list");
     }
 
+    // Submission state is committed in queue order, not during recording.
+    {
+        RealRHI::TextureDesc desc{};
+        desc.width = 4;
+        desc.height = 4;
+        desc.format = RealRHI::TextureFormat::RGBA8_UNorm;
+        desc.usage = RealRHI::TextureUsage::TransferSrc | RealRHI::TextureUsage::TransferDst;
+
+        RealRHI::Ref<RealRHI::Texture> texture;
+        Expect(device->CreateTexture(desc, texture) == RealRHI::Result::Success,
+               "Create submission-state texture");
+
+        RealRHI::Ref<RealRHI::CommandList> first;
+        RealRHI::Ref<RealRHI::CommandList> stale;
+        Expect(device->CreateCommandList(allocator.Raw(), first) == RealRHI::Result::Success,
+               "Create first state list");
+        Expect(device->CreateCommandList(allocator.Raw(), stale) == RealRHI::Result::Success,
+               "Create stale state list");
+
+        RealRHI::BarrierDesc transition;
+        transition.textures.push_back({
+            .texture = texture.Raw(),
+            .before = { RealRHI::PipelineStage::None, RealRHI::ResourceAccess::None },
+            .after = { RealRHI::PipelineStage::Transfer, RealRHI::ResourceAccess::TransferWrite },
+            .oldLayout = RealRHI::TextureLayout::Undefined,
+            .newLayout = RealRHI::TextureLayout::TransferDst,
+        });
+
+        Expect(first->Begin() == RealRHI::Result::Success, "Begin first state list");
+        Expect(first->Barrier(transition) == RealRHI::Result::Success, "Record first state transition");
+        Expect(first->End() == RealRHI::Result::Success, "End first state list");
+
+        Expect(stale->Begin() == RealRHI::Result::Success, "Begin stale state list");
+        Expect(stale->Barrier(transition) == RealRHI::Result::Success, "Record stale state transition");
+        Expect(stale->End() == RealRHI::Result::Success, "End stale state list");
+
+        const auto firstToken = graphicsQueue->Submit(*first);
+        Expect(firstToken.IsValid(), "Submit first state list");
+        Expect(!graphicsQueue->Submit(*stale).IsValid(),
+               "Reject stale command list without submitting it");
+        graphicsQueue->Wait(firstToken);
+
+        Expect(stale->Reset() == RealRHI::Result::Success, "Reset stale list");
+        transition.textures[0].oldLayout = RealRHI::TextureLayout::TransferDst;
+        transition.textures[0].newLayout = RealRHI::TextureLayout::TransferSrc;
+        transition.textures[0].before = {
+            RealRHI::PipelineStage::Transfer, RealRHI::ResourceAccess::TransferWrite
+        };
+        transition.textures[0].after = {
+            RealRHI::PipelineStage::Transfer, RealRHI::ResourceAccess::TransferRead
+        };
+        Expect(stale->Begin() == RealRHI::Result::Success, "Begin corrected state list");
+        Expect(stale->Barrier(transition) == RealRHI::Result::Success, "Record corrected transition");
+        Expect(stale->End() == RealRHI::Result::Success, "End corrected state list");
+        const auto secondToken = graphicsQueue->Submit(*stale);
+        Expect(secondToken.IsValid(), "Submit corrected state list");
+        graphicsQueue->Wait(secondToken);
+        Expect(stale->Reset() == RealRHI::Result::Success, "Reset corrected state list");
+        Expect(first->Reset() == RealRHI::Result::Success, "Reset first state list");
+    }
+
     std::cout << "QueueSubmissionTests passed" << std::endl;
     return 0;
 }

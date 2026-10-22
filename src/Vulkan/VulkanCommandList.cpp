@@ -144,6 +144,7 @@ namespace RealRHI {
         std::vector<Ref<RefCounted>> released;
         released.swap(m_ReferencedResources);
         m_RecordedLayouts.clear();
+        m_InitialLayouts.clear();
         return Result::Success;
     }
 
@@ -352,11 +353,46 @@ namespace RealRHI {
 		return Result::Success;
 	}
 
+	TextureLayout VulkanCommandList::GetExpectedLayout(const VulkanTexture* texture, uint32_t mip, uint32_t layer) const {
+		const auto it = m_RecordedLayouts.find({ texture, mip, layer });
+		return it != m_RecordedLayouts.end() ? it->second : texture->GetSubmittedLayout(mip, layer);
+	}
+
+	bool VulkanCommandList::ValidateSubmissionLayouts(LayoutMap& predicted) const {
+		for (const auto& [key, layout] : m_InitialLayouts) {
+			const auto it = predicted.find(key);
+			const TextureLayout current = it != predicted.end() ? it->second :
+				key.texture->GetSubmittedLayout(key.mipLevel, key.arrayLayer);
+			if (current != layout) {
+				return false;
+			}
+		}
+		for (const auto& [key, layout] : m_RecordedLayouts) {
+			predicted[key] = layout;
+		}
+		return true;
+	}
+
+	void VulkanCommandList::CommitSubmissionLayouts() const {
+		for (const auto& [key, layout] : m_RecordedLayouts) {
+			const_cast<VulkanTexture*>(key.texture)->SetSubmittedLayout(key.mipLevel, key.arrayLayer, layout);
+		}
+	}
+
+	void VulkanCommandList::RegisterRequiredLayout(const VulkanTexture* texture, uint32_t mipLevel,
+		uint32_t baseLayer, uint32_t layerCount, TextureLayout expected) {
+		for (uint32_t layer = baseLayer; layer < baseLayer + layerCount; ++layer) {
+			const SubresourceKey key{ texture, mipLevel, layer };
+			if (!m_RecordedLayouts.contains(key)) {
+				m_InitialLayouts.emplace(key, expected);
+			}
+		}
+	}
+
 	bool VulkanCommandList::HasRecordedLayout(const VulkanTexture* texture, uint32_t mipLevel,
 		uint32_t baseLayer, uint32_t layerCount, TextureLayout expected) const {
 		for (uint32_t layer = baseLayer; layer < baseLayer + layerCount; ++layer) {
-			const auto it = m_RecordedLayouts.find({ texture, mipLevel, layer });
-			if (it != m_RecordedLayouts.end() && it->second != expected) {
+			if (GetExpectedLayout(texture, mipLevel, layer) != expected) {
 				return false;
 			}
 		}
@@ -396,6 +432,8 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
+		RegisterRequiredLayout(destinationTexture, region.mipLevel, region.baseArrayLayer,
+			region.layerCount, TextureLayout::TransferDst);
 		RetainResource(sourceBuffer);
 		RetainResource(destinationTexture);
 		VkBufferImageCopy copyRegion{
@@ -455,6 +493,8 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
+		RegisterRequiredLayout(texture, region.mipLevel, region.baseArrayLayer,
+			region.layerCount, TextureLayout::TransferSrc);
 		RetainResource(texture);
 		RetainResource(buffer);
 		VkBufferImageCopy copyRegion{
@@ -511,6 +551,10 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
+		RegisterRequiredLayout(sourceTexture, region.sourceMipLevel, region.sourceBaseArrayLayer,
+			region.layerCount, TextureLayout::TransferSrc);
+		RegisterRequiredLayout(destinationTexture, region.destinationMipLevel, region.destinationBaseArrayLayer,
+			region.layerCount, TextureLayout::TransferDst);
 		RetainResource(sourceTexture);
 		RetainResource(destinationTexture);
 		VkImageCopy copyRegion{

@@ -7,6 +7,7 @@
 #include "VulkanTextureView.h"
 
 #include <volk.h>
+#include <vector>
 #include <vma/vk_mem_alloc.h>
 
 namespace RealRHI {
@@ -51,7 +52,14 @@ namespace RealRHI {
 		VkImage m_Image = VK_NULL_HANDLE;
 		VmaAllocation m_Allocation = VK_NULL_HANDLE;
 
-		TextureLayout m_Layout = TextureLayout::Undefined;
+		// Submission-ordered state; never modified during command recording.
+		std::vector<TextureLayout> m_SubresourceLayouts;
+		TextureLayout GetSubmittedLayout(uint32_t mip, uint32_t layer) const {
+			return m_SubresourceLayouts[mip * m_ArrayLayers + layer];
+		}
+		void SetSubmittedLayout(uint32_t mip, uint32_t layer, TextureLayout layout) {
+			m_SubresourceLayouts[mip * m_ArrayLayers + layer] = layout;
+		}
 		TextureUsage m_Usage = TextureUsage::None;
 		VkFormat m_Format = VK_FORMAT_UNDEFINED;
 		bool m_IsExternal = false; // Whether the image is owned by us or external (e.g. swapchain)
