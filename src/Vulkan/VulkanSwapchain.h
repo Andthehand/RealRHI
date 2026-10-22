@@ -48,6 +48,7 @@ namespace RealRHI {
 		VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities, VkExtent2D requestedExtent);
 
 		void RecreateSwapchain();
+		void CollectRetiredSwapchains();
 		void TransitionToColorAttachment(VkCommandBuffer cmdBuf, uint32_t imageIndex);
 		void TransitionToPresent(VkCommandBuffer cmdBuf, uint32_t imageIndex);
 	private:
@@ -66,6 +67,11 @@ namespace RealRHI {
 		VkSurfaceKHR m_Surface = VK_NULL_HANDLE;
 		VkSwapchainKHR m_Swapchain = VK_NULL_HANDLE;
 
+		struct RetiredSwapchain {
+			VkSwapchainKHR handle = VK_NULL_HANDLE;
+			std::vector<Ref<VulkanTexture>> images;
+		};
+		std::vector<RetiredSwapchain> m_RetiredSwapchains;
 		std::vector<Ref<VulkanTexture>> m_SwapchainImages;
 		std::vector<VkImageLayout> m_ImageLayouts;
 		TextureFormat m_SwapchainImageFormat = TextureFormat::Unknown;

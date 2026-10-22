@@ -23,6 +23,11 @@ namespace RealRHI {
             vkDestroyCommandPool(m_Device->GetDevice(), m_TransitionPool, nullptr);
         }
 
+        m_SwapchainImages.clear();
+        for (auto& retired : m_RetiredSwapchains) {
+            retired.images.clear();
+            vkDestroySwapchainKHR(m_Device->GetDevice(), retired.handle, nullptr);
+        }
         vkDestroySwapchainKHR(m_Device->GetDevice(), m_Swapchain, nullptr);
         m_Window->DestroyVulkanSurface(m_Surface);
     }
@@ -225,11 +230,33 @@ namespace RealRHI {
         }
     }
 
+    void VulkanSwapchain::CollectRetiredSwapchains() {
+        auto it = m_RetiredSwapchains.begin();
+        while (it != m_RetiredSwapchains.end()) {
+            bool referenced = false;
+            for (const auto& image : it->images) {
+                if (image->GetRefCount() > 1) {
+                    referenced = true;
+                    break;
+                }
+            }
+            if (referenced) {
+                ++it;
+                continue;
+            }
+
+            it->images.clear();
+            vkDestroySwapchainKHR(m_Device->GetDevice(), it->handle, nullptr);
+            it = m_RetiredSwapchains.erase(it);
+        }
+    }
+
     TextureView* VulkanSwapchain::GetBackBufferView(uint32_t imageIndex) {
         return m_SwapchainImages[imageIndex]->GetTextureView();
     }
 
     FrameContext VulkanSwapchain::BeginFrame() {
+        CollectRetiredSwapchains();
         if (m_FrameFailed) {
             return FrameContext{ .imageIndex = std::numeric_limits<uint32_t>::max() };
         }
