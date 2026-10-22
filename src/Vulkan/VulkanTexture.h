@@ -14,8 +14,8 @@ namespace RealRHI {
 	class VulkanTexture : public Texture {
 	public:
 		VulkanTexture(const VulkanDevice* device);
-        const VulkanDevice* GetDevice() const { return m_Device; }
 		~VulkanTexture();
+		const VulkanDevice* GetDevice() const { return m_Device; }
 
 		static Result Create(const VulkanDevice* device, const TextureDesc& desc, Ref<VulkanTexture>& outTexture);
 		Result Init(const TextureDesc& desc);
@@ -47,6 +47,15 @@ namespace RealRHI {
 		Result InitSwapChainTexture(VkFormat format, VkImage image);
 
 		VkSamplerCreateInfo GetSampler(); // TODO: Add sampler desc
+
+	private:
+		TextureLayout GetSubmittedLayout(uint32_t mip, uint32_t layer) const {
+			return m_SubresourceLayouts[mip * m_ArrayLayers + layer];
+		}
+		void SetSubmittedLayout(uint32_t mip, uint32_t layer, TextureLayout layout) {
+			m_SubresourceLayouts[mip * m_ArrayLayers + layer] = layout;
+		}
+
 	private:
 		const VulkanDevice* m_Device = nullptr;
 		VkImage m_Image = VK_NULL_HANDLE;
@@ -54,12 +63,6 @@ namespace RealRHI {
 
 		// Submission-ordered state; never modified during command recording.
 		std::vector<TextureLayout> m_SubresourceLayouts;
-		TextureLayout GetSubmittedLayout(uint32_t mip, uint32_t layer) const {
-			return m_SubresourceLayouts[mip * m_ArrayLayers + layer];
-		}
-		void SetSubmittedLayout(uint32_t mip, uint32_t layer, TextureLayout layout) {
-			m_SubresourceLayouts[mip * m_ArrayLayers + layer] = layout;
-		}
 		TextureUsage m_Usage = TextureUsage::None;
 		VkFormat m_Format = VK_FORMAT_UNDEFINED;
 		bool m_IsExternal = false; // Whether the image is owned by us or external (e.g. swapchain)
