@@ -184,23 +184,18 @@ namespace RealRHI {
             return res;
         }
 
-        VkImageSubresourceLayers subresourceRange{
-            .aspectMask = Utils::TextureFormatToVkImageAspect(Utils::VkFormatToTextureFormat(m_Format)), // TODO: Clean this up?
-            .mipLevel = 0, //TODO: look into
-            .baseArrayLayer = 0, //TODO: look into
-            .layerCount = m_ArrayLayers,
-        };
-
-        VkBufferImageCopy copyRegion = {
+        BufferTextureCopyRegion copyRegion{
             .bufferOffset = 0,
-            .bufferRowLength = 0,
-            .bufferImageHeight = 0,
-            .imageSubresource = subresourceRange,
-            .imageExtent = m_ImageExtent,
-
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = m_ArrayLayers,
+            .width = m_ImageExtent.width,
+            .height = m_ImageExtent.height,
+            .depth = m_ImageExtent.depth,
         };
-
-        vkCmdCopyBufferToImage(commandList->GetCommandBuffer(), transferBuffer->GetBuffer(), m_Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+        if (commandList->CopyBufferToTexture(transferBuffer.Raw(), this, copyRegion) != Result::Success) {
+            return Result::Failed;
+        }
         ChangeLayout(commandList.Raw(), TextureLayout::ShaderRead);
 
         res = commandList->End();

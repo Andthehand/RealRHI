@@ -10,6 +10,23 @@
 #include <cstdint>
 
 namespace RealRHI {
+    struct BufferCopyRegion {
+        uint64_t sourceOffset = 0;
+        uint64_t destinationOffset = 0;
+        uint64_t size = 0;
+    };
+
+    struct BufferTextureCopyRegion {
+        uint32_t width = 0;
+        uint32_t height = 0;
+        uint32_t depth = 1;
+
+        uint64_t bufferOffset = 0;
+        uint32_t mipLevel = 0;
+        uint32_t baseArrayLayer = 0;
+        uint32_t layerCount = 1;
+    };
+
     enum class CommandListState {
         Initial,
         Recording,
@@ -40,6 +57,9 @@ namespace RealRHI {
         virtual void BindPipeline(Pipeline* pipeline) = 0;
         virtual void BindVertexBuffer(Buffer* vertexBuffer) = 0;
 		virtual void BindIndexBuffer(Buffer* indexBuffer) = 0;
+
+        virtual Result CopyBuffer(Buffer* source, Buffer* destination, const BufferCopyRegion& region) = 0;
+        virtual Result CopyBufferToTexture(Buffer* source, Texture* destination, const BufferTextureCopyRegion& region) = 0;
 
         virtual void Draw(uint32_t vertexCount) = 0;
 		virtual void DrawIndexed(uint32_t indexCount) = 0;
