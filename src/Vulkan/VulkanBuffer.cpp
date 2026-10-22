@@ -56,6 +56,20 @@ namespace RealRHI {
 		return Result::Success;
     }
 
+    Result VulkanBuffer::ReadData(void* data, uint64_t size, uint64_t offset) const {
+        if (data == nullptr || offset > m_AllocInfo.size || size > m_AllocInfo.size - offset ||
+            m_AllocInfo.pMappedData == nullptr) {
+            return Result::InvalidParameter;
+        }
+
+        if (vmaInvalidateAllocation(m_Device->GetAllocator(), m_BufferMemory, offset, size) != VK_SUCCESS) {
+            return Result::Failed;
+        }
+
+        memcpy(data, static_cast<const char*>(m_AllocInfo.pMappedData) + offset, static_cast<size_t>(size));
+        return Result::Success;
+    }
+
     VkDeviceAddress VulkanBuffer::GetBufferDeviceAddress() const {
         VkBufferDeviceAddressInfo addrInfo{ 
             .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,

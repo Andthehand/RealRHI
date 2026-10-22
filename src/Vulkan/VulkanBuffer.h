@@ -21,6 +21,7 @@ namespace RealRHI {
 		uint64_t GetSize() const override { return m_AllocInfo.size; }
 
 		Result WriteData(const void* data, uint64_t size, uint64_t offset = 0) override;
+		Result ReadData(void* data, uint64_t size, uint64_t offset = 0) const override;
 	protected:
 		friend class VulkanCommandList;
 		friend class VulkanTexture;

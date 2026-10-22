@@ -400,6 +400,113 @@ namespace RealRHI {
 		return Result::Success;
 	}
 
+    Result VulkanCommandList::CopyTextureToBuffer(Texture* source, Buffer* destination, const BufferTextureCopyRegion& region) {
+        if (GetState() != CommandListState::Recording || region.width == 0 || region.height == 0 ||
+            region.depth == 0 || region.layerCount == 0) {
+            return Result::InvalidParameter;
+        }
+
+        auto* texture = dynamic_cast<VulkanTexture*>(source);
+        auto* buffer = dynamic_cast<VulkanBuffer*>(destination);
+        if (texture == nullptr || buffer == nullptr ||
+            texture->GetDevice() != m_Device || buffer->GetDevice() != m_Device ||
+            region.mipLevel >= texture->m_MipLevels ||
+            region.baseArrayLayer >= texture->m_ArrayLayers ||
+            region.layerCount > texture->m_ArrayLayers - region.baseArrayLayer ||
+            region.bufferOffset >= buffer->GetSize()) {
+            return Result::InvalidParameter;
+        }
+
+        const VkExtent3D mipExtent{
+            .width = std::max(1u, texture->m_ImageExtent.width >> region.mipLevel),
+            .height = std::max(1u, texture->m_ImageExtent.height >> region.mipLevel),
+            .depth = std::max(1u, texture->m_ImageExtent.depth >> region.mipLevel),
+        };
+        if (region.width > mipExtent.width || region.height > mipExtent.height ||
+            region.depth > mipExtent.depth) {
+            return Result::InvalidParameter;
+        }
+
+        // Initial readback supports tightly packed RGBA8 data. Other formats
+        // need format-aware block size and row pitch handling.
+        if (texture->m_Format != VK_FORMAT_R8G8B8A8_UNORM ||
+            region.width > UINT64_MAX / region.height / region.depth / region.layerCount / 4 ||
+            static_cast<uint64_t>(region.width) * region.height * region.depth * region.layerCount * 4 >
+                buffer->GetSize() - region.bufferOffset) {
+            return Result::InvalidParameter;
+        }
+
+        RetainResource(texture);
+        RetainResource(buffer);
+        VkBufferImageCopy copyRegion{
+            .bufferOffset = region.bufferOffset,
+            .imageSubresource = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel = region.mipLevel,
+                .baseArrayLayer = region.baseArrayLayer,
+                .layerCount = region.layerCount,
+            },
+            .imageExtent = { region.width, region.height, region.depth },
+        };
+        vkCmdCopyImageToBuffer(m_CommandBuffer, texture->m_Image,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer->GetBuffer(), 1, &copyRegion);
+        return Result::Success;
+    }
+
+    Result VulkanCommandList::CopyTexture(Texture* source, Texture* destination, const TextureCopyRegion& region) {
+        if (GetState() != CommandListState::Recording || region.width == 0 || region.height == 0 ||
+            region.depth == 0 || region.layerCount == 0) {
+            return Result::InvalidParameter;
+        }
+
+        auto* sourceTexture = dynamic_cast<VulkanTexture*>(source);
+        auto* destinationTexture = dynamic_cast<VulkanTexture*>(destination);
+        if (sourceTexture == nullptr || destinationTexture == nullptr ||
+            sourceTexture->GetDevice() != m_Device || destinationTexture->GetDevice() != m_Device ||
+            sourceTexture == destinationTexture ||
+            sourceTexture->m_Format != destinationTexture->m_Format ||
+            sourceTexture->m_Format != VK_FORMAT_R8G8B8A8_UNORM ||
+            region.sourceMipLevel >= sourceTexture->m_MipLevels ||
+            region.destinationMipLevel >= destinationTexture->m_MipLevels ||
+            region.sourceBaseArrayLayer >= sourceTexture->m_ArrayLayers ||
+            region.destinationBaseArrayLayer >= destinationTexture->m_ArrayLayers ||
+            region.layerCount > sourceTexture->m_ArrayLayers - region.sourceBaseArrayLayer ||
+            region.layerCount > destinationTexture->m_ArrayLayers - region.destinationBaseArrayLayer) {
+            return Result::InvalidParameter;
+        }
+
+        const auto fits = [&](const VulkanTexture* texture, uint32_t mipLevel) {
+            return region.width <= std::max(1u, texture->m_ImageExtent.width >> mipLevel) &&
+                region.height <= std::max(1u, texture->m_ImageExtent.height >> mipLevel) &&
+                region.depth <= std::max(1u, texture->m_ImageExtent.depth >> mipLevel);
+        };
+        if (!fits(sourceTexture, region.sourceMipLevel) ||
+            !fits(destinationTexture, region.destinationMipLevel)) {
+            return Result::InvalidParameter;
+        }
+
+        RetainResource(sourceTexture);
+        RetainResource(destinationTexture);
+        VkImageCopy copyRegion{
+            .srcSubresource = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel = region.sourceMipLevel,
+                .baseArrayLayer = region.sourceBaseArrayLayer,
+                .layerCount = region.layerCount,
+            },
+            .dstSubresource = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .mipLevel = region.destinationMipLevel,
+                .baseArrayLayer = region.destinationBaseArrayLayer,
+                .layerCount = region.layerCount,
+            },
+            .extent = { region.width, region.height, region.depth },
+        };
+        vkCmdCopyImage(m_CommandBuffer, sourceTexture->m_Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            destinationTexture->m_Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+        return Result::Success;
+    }
+
 	Result VulkanCommandList::Barrier(const BarrierDesc& barriers) {
 		if (GetState() != CommandListState::Recording) {
 			return Result::Failed;

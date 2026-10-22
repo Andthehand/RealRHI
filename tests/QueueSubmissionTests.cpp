@@ -241,6 +241,98 @@ int main() {
         Expect(list->End() == RealRHI::Result::Success, "End invalid-range barrier test list");
     }
 
+    // Verify texture-to-texture copies and GPU readback against CPU data.
+    {
+        constexpr uint32_t width = 8;
+        constexpr uint32_t height = 8;
+        std::array<uint8_t, width * height * 4> pixels{};
+        for (size_t i = 0; i < pixels.size(); ++i) {
+            pixels[i] = static_cast<uint8_t>((i * 17) & 0xff);
+        }
+
+        RealRHI::TextureDesc textureDesc{};
+        textureDesc.width = width;
+        textureDesc.height = height;
+        textureDesc.format = RealRHI::TextureFormat::RGBA8_UNorm;
+        textureDesc.usage = RealRHI::TextureUsage::ShaderResource |
+            RealRHI::TextureUsage::TransferSrc | RealRHI::TextureUsage::TransferDst;
+
+        RealRHI::Ref<RealRHI::Texture> source;
+        RealRHI::Ref<RealRHI::Texture> destination;
+        Expect(device->CreateTexture(textureDesc, source) == RealRHI::Result::Success,
+               "Create source transfer texture");
+        Expect(device->CreateTexture(textureDesc, destination) == RealRHI::Result::Success,
+               "Create destination transfer texture");
+        Expect(source->UploadData(pixels.data(), static_cast<uint32_t>(pixels.size())) == RealRHI::Result::Success,
+               "Upload source texture data");
+
+        RealRHI::BufferDesc readbackDesc{};
+        readbackDesc.size = pixels.size();
+        readbackDesc.usage = RealRHI::BufferUsage::TransferDst;
+        readbackDesc.memoryUsage = RealRHI::MemoryUsage::GPUToCPU;
+        RealRHI::Ref<RealRHI::Buffer> readback;
+        Expect(device->CreateBuffer(readbackDesc, readback) == RealRHI::Result::Success,
+               "Create texture readback buffer");
+
+        RealRHI::Ref<RealRHI::CommandList> list;
+        Expect(device->CreateCommandList(allocator.Raw(), list) == RealRHI::Result::Success,
+               "Create texture transfer list");
+        Expect(list->Begin() == RealRHI::Result::Success, "Begin texture transfer list");
+
+        RealRHI::BarrierDesc barriers;
+        barriers.textures.push_back({
+            .texture = source.Raw(),
+            .before = { RealRHI::PipelineStage::Transfer, RealRHI::ResourceAccess::TransferWrite },
+            .after = { RealRHI::PipelineStage::Transfer, RealRHI::ResourceAccess::TransferRead },
+            .oldLayout = RealRHI::TextureLayout::ShaderRead,
+            .newLayout = RealRHI::TextureLayout::TransferSrc,
+        });
+        barriers.textures.push_back({
+            .texture = destination.Raw(),
+            .before = { RealRHI::PipelineStage::None, RealRHI::ResourceAccess::None },
+            .after = { RealRHI::PipelineStage::Transfer, RealRHI::ResourceAccess::TransferWrite },
+            .oldLayout = RealRHI::TextureLayout::Undefined,
+            .newLayout = RealRHI::TextureLayout::TransferDst,
+        });
+        Expect(list->Barrier(barriers) == RealRHI::Result::Success,
+               "Prepare source and destination image layouts");
+
+        RealRHI::TextureCopyRegion copyRegion{};
+        copyRegion.width = width;
+        copyRegion.height = height;
+        Expect(list->CopyTexture(source.Raw(), destination.Raw(), copyRegion) == RealRHI::Result::Success,
+               "Copy texture to texture");
+
+        barriers.textures.clear();
+        barriers.textures.push_back({
+            .texture = destination.Raw(),
+            .before = { RealRHI::PipelineStage::Transfer, RealRHI::ResourceAccess::TransferWrite },
+            .after = { RealRHI::PipelineStage::Transfer, RealRHI::ResourceAccess::TransferRead },
+            .oldLayout = RealRHI::TextureLayout::TransferDst,
+            .newLayout = RealRHI::TextureLayout::TransferSrc,
+        });
+        Expect(list->Barrier(barriers) == RealRHI::Result::Success,
+               "Prepare destination texture for readback");
+
+        RealRHI::BufferTextureCopyRegion readbackRegion{};
+        readbackRegion.width = width;
+        readbackRegion.height = height;
+        Expect(list->CopyTextureToBuffer(destination.Raw(), readback.Raw(), readbackRegion) == RealRHI::Result::Success,
+               "Copy texture to readback buffer");
+        Expect(list->End() == RealRHI::Result::Success, "End texture transfer list");
+
+        const auto token = graphicsQueue->Submit(*list);
+        Expect(token.IsValid(), "Submit texture transfer commands");
+        graphicsQueue->Wait(token);
+        Expect(graphicsQueue->IsComplete(token), "Wait for texture transfer completion");
+
+        std::array<uint8_t, width * height * 4> actual{};
+        Expect(readback->ReadData(actual.data(), actual.size()) == RealRHI::Result::Success,
+               "Read mapped GPU readback data");
+        Expect(actual == pixels, "Texture copy and readback contents match original data");
+        Expect(list->Reset() == RealRHI::Result::Success, "Reset completed texture transfer list");
+    }
+
     std::cout << "QueueSubmissionTests passed" << std::endl;
     return 0;
 }
