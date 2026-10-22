@@ -7,6 +7,7 @@
 #include <memory>
 #include <vector>
 #include <mutex>
+#include <unordered_set>
 #include "Queue.h"
 
 namespace RealRHI {
@@ -38,6 +39,9 @@ namespace RealRHI {
 		std::unique_ptr<VulkanDescriptorHeaps> m_DescriptorHeaps;
 
 		// Resource Heap
+		std::unordered_set<uint32_t> m_AllocatedBufferDescriptors;
+		std::unordered_set<uint32_t> m_AllocatedImageDescriptors;
+		std::unordered_set<uint32_t> m_AllocatedSamplerDescriptors;
 		VkDeviceSize m_BufferDescriptorSize;
 		std::vector<uint32_t> m_FreeBufferDescriptors;
 		uint32_t m_NextBufferDescriptorIndex;
@@ -45,6 +49,7 @@ namespace RealRHI {
 		VkDeviceSize m_ImageDescriptorSize;
 		std::vector<uint32_t> m_FreeImageDescriptors;
 		uint32_t m_NextImageDescriptorIndex;
+		uint32_t m_ImageDescriptorCapacity = 0;
 
 		// Sampler Heap
 		VkDeviceSize m_SamplerDescriptorSize;
