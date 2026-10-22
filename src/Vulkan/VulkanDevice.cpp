@@ -19,6 +19,11 @@
 
 namespace RealRHI {
 	VulkanDevice::~VulkanDevice() {
+        if (m_Device != VK_NULL_HANDLE) {
+            // Complete submissions before callbacks destroy Vulkan resources.
+            vkDeviceWaitIdle(m_Device);
+            ProcessDeferredDeletions();
+        }
 		for (auto& [queueId, queue] : m_Queues) {
 			delete queue;
 		}
@@ -197,6 +202,18 @@ namespace RealRHI {
 	CommandQueue* VulkanDevice::GetGraphicsCommandQueue() const {
 		return m_GraphicsCommandQueue;
 	}
+
+    void VulkanDevice::DeferDeletion(std::vector<SubmissionToken> dependencies, std::function<void()> destroy) const {
+        m_DeferredDeletions.Enqueue(std::move(dependencies), std::move(destroy));
+    }
+
+    void VulkanDevice::ProcessDeferredDeletions() {
+        // Tokens identify their owning queue; queue index zero is valid.
+        m_DeferredDeletions.Process([this](const SubmissionToken& token) {
+            auto* queue = GetCommandQueue(token.queue);
+            return queue != nullptr && queue->IsComplete(token);
+        });
+    }
 
 	VulkanCommandQueue* VulkanDevice::GetCommandQueue(const QueueId& queueId) const {
 		auto it = m_Queues.find(queueId);

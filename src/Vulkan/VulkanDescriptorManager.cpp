@@ -39,6 +39,7 @@ namespace RealRHI {
 	}
 
 	uint32_t VulkanDescriptorManager::AllocateBufferDescriptor(const VulkanBuffer* buffer) {
+        std::scoped_lock lock(m_DescriptorMutex);
 		// Check if there are any free buffer descriptors available
 		uint32_t bufferDescriptorIndex;
 		if (!m_FreeBufferDescriptors.empty()) {
@@ -87,10 +88,13 @@ namespace RealRHI {
 	}
 
 	void VulkanDescriptorManager::FreeBufferDescriptor(uint32_t index) {
+        std::scoped_lock lock(m_DescriptorMutex);
+        if (index == UINT32_MAX || m_RetiredBuffers.contains(index)) return;
 		m_FreeBufferDescriptors.push_back(index);
 	}
 
 	uint32_t VulkanDescriptorManager::AllocateImageDescriptor(const VulkanTextureView* textureView, VkDescriptorType descriptorType, VkImageLayout descriptorAccessLayout) {
+        std::scoped_lock lock(m_DescriptorMutex);
 		// Check if there are any free image descriptors available
 		uint32_t imageDescriptorIndex;
 		if (!m_FreeImageDescriptors.empty()) {
@@ -143,10 +147,13 @@ namespace RealRHI {
 	}
 
 	void VulkanDescriptorManager::FreeImageDescriptor(uint32_t index) {
+        std::scoped_lock lock(m_DescriptorMutex);
+        if (index == UINT32_MAX || m_RetiredImages.contains(index)) return;
 		m_FreeImageDescriptors.push_back(index);
 	}
 
 	uint32_t VulkanDescriptorManager::AllocateSamplerDescriptor(const VkSamplerCreateInfo& samplerCI) {
+        std::scoped_lock lock(m_DescriptorMutex);
 		// Check if there are any free sampler descriptors available
 		uint32_t samplerDescriptorIndex;
 		if (!m_FreeSamplerDescriptors.empty()) {
@@ -180,6 +187,62 @@ namespace RealRHI {
 	}
 
 	void VulkanDescriptorManager::FreeSamplerDescriptor(uint32_t index) {
+        std::scoped_lock lock(m_DescriptorMutex);
+        if (index == UINT32_MAX || m_RetiredSamplers.contains(index)) return;
 		m_FreeSamplerDescriptors.push_back(index);
 	}
+    void VulkanDescriptorManager::RetireBufferDescriptor(uint32_t index, std::vector<SubmissionToken> dependencies) {
+        if (index == UINT32_MAX) return;
+        {
+            std::scoped_lock lock(m_DescriptorMutex);
+            if (!m_RetiredBuffers.insert(index).second) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                    "Descriptor slot has already been retired.");
+                return;
+            }
+        }
+        // Device shutdown processes callbacks before destroying the manager.
+        m_Device->DeferDeletion(std::move(dependencies), [this, index]() {
+            std::scoped_lock lock(m_DescriptorMutex);
+            m_RetiredBuffers.erase(index);
+            m_FreeBufferDescriptors.push_back(index);
+        });
+    }
+
+    void VulkanDescriptorManager::RetireImageDescriptor(uint32_t index, std::vector<SubmissionToken> dependencies) {
+        if (index == UINT32_MAX) return;
+        {
+            std::scoped_lock lock(m_DescriptorMutex);
+            if (!m_RetiredImages.insert(index).second) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                    "Descriptor slot has already been retired.");
+                return;
+            }
+        }
+        // Device shutdown processes callbacks before destroying the manager.
+        m_Device->DeferDeletion(std::move(dependencies), [this, index]() {
+            std::scoped_lock lock(m_DescriptorMutex);
+            m_RetiredImages.erase(index);
+            m_FreeImageDescriptors.push_back(index);
+        });
+    }
+
+    void VulkanDescriptorManager::RetireSamplerDescriptor(uint32_t index, std::vector<SubmissionToken> dependencies) {
+        if (index == UINT32_MAX) return;
+        {
+            std::scoped_lock lock(m_DescriptorMutex);
+            if (!m_RetiredSamplers.insert(index).second) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                    "Descriptor slot has already been retired.");
+                return;
+            }
+        }
+        // Device shutdown processes callbacks before destroying the manager.
+        m_Device->DeferDeletion(std::move(dependencies), [this, index]() {
+            std::scoped_lock lock(m_DescriptorMutex);
+            m_RetiredSamplers.erase(index);
+            m_FreeSamplerDescriptors.push_back(index);
+        });
+    }
+
 };

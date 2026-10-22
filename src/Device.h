@@ -28,6 +28,8 @@
 #include "Queue.h"
 
 #include <memory>
+#include <vector>
+#include <functional>
 #include <filesystem>
 
 #include "RefCounted.h"
@@ -56,6 +58,9 @@ namespace RealRHI {
 		virtual Result Submit(CommandList* cmd, Swapchain* swapchain, const FrameContext& frame, SubmissionToken* outToken = nullptr) = 0;
 		virtual Result ImmediateSubmit(CommandList* cmd) const = 0;
 		virtual void WaitIdle() = 0;
+        // Defer backend-owned cleanup until all supplied GPU submissions complete.
+        virtual void DeferDeletion(std::vector<SubmissionToken> dependencies, std::function<void()> destroy) const = 0;
+        virtual void ProcessDeferredDeletions() = 0;
 
 		static Result Create(const DeviceDesc& desc, std::unique_ptr<Device>& outDevice);
 	};

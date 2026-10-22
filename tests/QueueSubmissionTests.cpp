@@ -1,6 +1,7 @@
 #include "Device.h"
 #include "Queue.h"
 #include "FrameResources.h"
+#include "DeferredDeletionQueue.h"
 #include "Vulkan/VulkanDevice.h"
 #include "Vulkan/VulkanCommandQueue.h"
 
@@ -93,6 +94,71 @@ int main() {
                    "Track frame slot submission");
         }
         frames.WaitAll();
+    }
+
+    // Recording retains a vertex buffer until the command list is reset.
+    {
+        RealRHI::Ref<RealRHI::Buffer> buffer;
+        RealRHI::BufferDesc desc{};
+        desc.size = 64;
+        desc.usage = RealRHI::BufferUsage::Vertex;
+        Expect(device->CreateBuffer(desc, buffer) == RealRHI::Result::Success,
+               "Create lifetime-test vertex buffer");
+        RealRHI::Ref<RealRHI::CommandList> list;
+        Expect(device->CreateCommandList(allocator.Raw(), list) == RealRHI::Result::Success,
+               "Create lifetime-test command list");
+        Expect(list->Begin() == RealRHI::Result::Success, "Begin lifetime-test list");
+        const auto beforeBind = buffer->GetRefCount();
+        list->BindVertexBuffer(buffer.Raw());
+        Expect(buffer->GetRefCount() > beforeBind, "Command list retains bound buffer");
+        Expect(list->End() == RealRHI::Result::Success, "End lifetime-test list");
+        const auto token = graphicsQueue->Submit(*list);
+        Expect(token.IsValid(), "Submit lifetime-test list");
+        graphicsQueue->Wait(token);
+        Expect(list->Reset() == RealRHI::Result::Success, "Reset lifetime-test list");
+        Expect(buffer->GetRefCount() == beforeBind, "Reset releases bound buffer");
+    }
+
+    // Deferred cleanup waits for all dependencies, not merely one queue value.
+    {
+        RealRHI::DeferredDeletionQueue deletions;
+        int destroyed = 0;
+        const RealRHI::SubmissionToken first{.queue = {0, 0}, .value = 4};
+        const RealRHI::SubmissionToken second{.queue = {1, 0}, .value = 7};
+        deletions.Enqueue({first, second}, [&] { ++destroyed; });
+        deletions.Process([&](const auto& token) { return token == first; });
+        Expect(destroyed == 0 && deletions.PendingCount() == 1,
+               "Deletion must wait for all queue dependencies");
+        deletions.Process([](const auto&) { return true; });
+        Expect(destroyed == 1 && deletions.PendingCount() == 0,
+               "Completed deletion runs exactly once");
+    }
+
+    // Explicit bindless registrations retain shader-visible resources even
+    // when no CPU-side binding command identifies the descriptor index.
+    {
+        RealRHI::Ref<RealRHI::Buffer> bindless;
+        RealRHI::BufferDesc desc{};
+        desc.size = 64;
+        desc.usage = RealRHI::BufferUsage::Storage;
+        Expect(device->CreateBuffer(desc, bindless) == RealRHI::Result::Success,
+               "Create bindless lifetime buffer");
+        RealRHI::Ref<RealRHI::CommandList> list;
+        Expect(device->CreateCommandList(allocator.Raw(), list) == RealRHI::Result::Success,
+               "Create bindless lifetime command list");
+        Expect(list->Begin() == RealRHI::Result::Success, "Begin bindless lifetime list");
+        const auto initialReferences = bindless->GetRefCount();
+        Expect(list->UseResource(bindless.Raw()) == RealRHI::Result::Success,
+               "Register bindless resource");
+        Expect(bindless->GetRefCount() > initialReferences,
+               "Bindless registration retains resource");
+        Expect(list->End() == RealRHI::Result::Success, "End bindless lifetime list");
+        const auto token = graphicsQueue->Submit(*list);
+        Expect(token.IsValid(), "Submit bindless lifetime list");
+        graphicsQueue->Wait(token);
+        Expect(list->Reset() == RealRHI::Result::Success, "Reset bindless lifetime list");
+        Expect(bindless->GetRefCount() == initialReferences,
+               "Reset releases bindless resource");
     }
 
     std::cout << "QueueSubmissionTests passed" << std::endl;
