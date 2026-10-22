@@ -24,7 +24,8 @@ namespace RealRHI {
 		// Initialize descriptor indices
 		m_NextBufferDescriptorIndex = 0;
 		// For image descriptors, we start from the end of the heap and decrement
-		m_NextImageDescriptorIndex = (m_DescriptorHeaps->GetResourceHeap().heapSize - m_ImageDescriptorSize) / m_ImageDescriptorSize;
+		m_ImageDescriptorCapacity = static_cast<uint32_t>(m_DescriptorHeaps->GetResourceHeap().heapSize / m_ImageDescriptorSize);
+		m_NextImageDescriptorIndex = m_ImageDescriptorCapacity;
 		m_NextSamplerDescriptorIndex = 0;
 
 		return Result::Success;
@@ -47,6 +48,10 @@ namespace RealRHI {
 			m_FreeBufferDescriptors.pop_back();
 		}
 		else {
+			if ((static_cast<VkDeviceSize>(m_NextBufferDescriptorIndex) + 1) * m_BufferDescriptorSize >
+				static_cast<VkDeviceSize>(m_NextImageDescriptorIndex) * m_ImageDescriptorSize) {
+				return UINT32_MAX;
+			}
 			bufferDescriptorIndex = m_NextBufferDescriptorIndex++;
 		}
 
@@ -84,6 +89,7 @@ namespace RealRHI {
 
 		// Upload descriptorMemory to the m_DescriptorHeaps at the correct offset
 		m_DescriptorHeaps->GetResourceHeap().buffer->WriteData(descriptorMemory.data(), m_BufferDescriptorSize, bufferDescriptorIndex * m_BufferDescriptorSize);
+		m_AllocatedBufferDescriptors.insert(bufferDescriptorIndex);
 		return bufferDescriptorIndex;
 	}
 
@@ -92,6 +98,13 @@ namespace RealRHI {
 		if (index == UINT32_MAX) {
 			return;
 		}
+		
+		// Prevent double free or invalid index by checking if the index exists in the allocated set
+		if (!m_AllocatedBufferDescriptors.erase(index)) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Invalid or duplicate descriptor free.");
+			return;
+		}
+
 		m_FreeBufferDescriptors.push_back(index);
 	}
 
@@ -104,7 +117,12 @@ namespace RealRHI {
 			m_FreeImageDescriptors.pop_back();
 		}
 		else {
-			imageDescriptorIndex = m_NextImageDescriptorIndex--;
+			if (m_NextImageDescriptorIndex == 0 ||
+				static_cast<VkDeviceSize>(m_NextImageDescriptorIndex - 1) * m_ImageDescriptorSize <
+				static_cast<VkDeviceSize>(m_NextBufferDescriptorIndex) * m_BufferDescriptorSize) {
+				return UINT32_MAX;
+			}
+			imageDescriptorIndex = --m_NextImageDescriptorIndex;
 		}
 
 		VkImageDescriptorInfoEXT imageDescriptorInfo{
@@ -145,6 +163,7 @@ namespace RealRHI {
 
 			return UINT32_MAX;
 		}
+		m_AllocatedImageDescriptors.insert(imageDescriptorIndex);
 		return imageDescriptorIndex;
 	}
 
@@ -153,6 +172,13 @@ namespace RealRHI {
 		if (index == UINT32_MAX) {
 			return;
 		}
+
+		// Prevent double free or invalid index by checking if the index exists in the allocated set
+		if (!m_AllocatedImageDescriptors.erase(index)) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Invalid or duplicate descriptor free.");
+			return;
+		}
+
 		m_FreeImageDescriptors.push_back(index);
 	}
 
@@ -165,6 +191,10 @@ namespace RealRHI {
 			m_FreeSamplerDescriptors.pop_back();
 		}
 		else {
+			if ((static_cast<VkDeviceSize>(m_NextSamplerDescriptorIndex) + 1) * m_SamplerDescriptorSize >
+				m_DescriptorHeaps->GetSamplerHeap().heapSize) {
+				return UINT32_MAX;
+			}
 			samplerDescriptorIndex = m_NextSamplerDescriptorIndex++;
 		}
 
@@ -187,6 +217,7 @@ namespace RealRHI {
 		}
 
 		m_DescriptorHeaps->GetSamplerHeap().buffer->WriteData(descriptorMemory.data(), m_SamplerDescriptorSize, samplerDescriptorIndex * m_SamplerDescriptorSize);
+		m_AllocatedSamplerDescriptors.insert(samplerDescriptorIndex);
 		return samplerDescriptorIndex;
 	}
 
@@ -195,6 +226,13 @@ namespace RealRHI {
 		if (index == UINT32_MAX) {
 			return;
 		}
+
+		// Prevent double free or invalid index by checking if the index exists in the allocated set
+		if (!m_AllocatedSamplerDescriptors.erase(index)) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Invalid or duplicate descriptor free.");
+			return;
+		}
+
 		m_FreeSamplerDescriptors.push_back(index);
 	}
 
