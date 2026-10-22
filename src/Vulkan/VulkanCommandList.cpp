@@ -97,6 +97,9 @@ namespace RealRHI {
     void VulkanCommandList::RetainResource(RefCounted* resource) {
         // The caller owns the command list while recording. GPU submissions
         // retain the command list through queue completion tracking.
+        if (resource == nullptr) return;
+        for (const auto& retained : m_ReferencedResources)
+            if (retained.Raw() == resource) return;
         m_ReferencedResources.emplace_back(resource);
     }
 

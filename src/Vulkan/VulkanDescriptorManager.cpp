@@ -89,7 +89,7 @@ namespace RealRHI {
 
 	void VulkanDescriptorManager::FreeBufferDescriptor(uint32_t index) {
         std::scoped_lock lock(m_DescriptorMutex);
-        if (index == UINT32_MAX || m_RetiredBuffers.contains(index)) return;
+        if (index == UINT32_MAX) return;
 		m_FreeBufferDescriptors.push_back(index);
 	}
 
@@ -148,7 +148,7 @@ namespace RealRHI {
 
 	void VulkanDescriptorManager::FreeImageDescriptor(uint32_t index) {
         std::scoped_lock lock(m_DescriptorMutex);
-        if (index == UINT32_MAX || m_RetiredImages.contains(index)) return;
+        if (index == UINT32_MAX) return;
 		m_FreeImageDescriptors.push_back(index);
 	}
 
@@ -188,61 +188,8 @@ namespace RealRHI {
 
 	void VulkanDescriptorManager::FreeSamplerDescriptor(uint32_t index) {
         std::scoped_lock lock(m_DescriptorMutex);
-        if (index == UINT32_MAX || m_RetiredSamplers.contains(index)) return;
+        if (index == UINT32_MAX) return;
 		m_FreeSamplerDescriptors.push_back(index);
 	}
-    void VulkanDescriptorManager::RetireBufferDescriptor(uint32_t index, std::vector<SubmissionToken> dependencies) {
-        if (index == UINT32_MAX) return;
-        {
-            std::scoped_lock lock(m_DescriptorMutex);
-            if (!m_RetiredBuffers.insert(index).second) {
-                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
-                    "Descriptor slot has already been retired.");
-                return;
-            }
-        }
-        // Device shutdown processes callbacks before destroying the manager.
-        m_Device->DeferDeletion(std::move(dependencies), [this, index]() {
-            std::scoped_lock lock(m_DescriptorMutex);
-            m_RetiredBuffers.erase(index);
-            m_FreeBufferDescriptors.push_back(index);
-        });
-    }
-
-    void VulkanDescriptorManager::RetireImageDescriptor(uint32_t index, std::vector<SubmissionToken> dependencies) {
-        if (index == UINT32_MAX) return;
-        {
-            std::scoped_lock lock(m_DescriptorMutex);
-            if (!m_RetiredImages.insert(index).second) {
-                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
-                    "Descriptor slot has already been retired.");
-                return;
-            }
-        }
-        // Device shutdown processes callbacks before destroying the manager.
-        m_Device->DeferDeletion(std::move(dependencies), [this, index]() {
-            std::scoped_lock lock(m_DescriptorMutex);
-            m_RetiredImages.erase(index);
-            m_FreeImageDescriptors.push_back(index);
-        });
-    }
-
-    void VulkanDescriptorManager::RetireSamplerDescriptor(uint32_t index, std::vector<SubmissionToken> dependencies) {
-        if (index == UINT32_MAX) return;
-        {
-            std::scoped_lock lock(m_DescriptorMutex);
-            if (!m_RetiredSamplers.insert(index).second) {
-                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
-                    "Descriptor slot has already been retired.");
-                return;
-            }
-        }
-        // Device shutdown processes callbacks before destroying the manager.
-        m_Device->DeferDeletion(std::move(dependencies), [this, index]() {
-            std::scoped_lock lock(m_DescriptorMutex);
-            m_RetiredSamplers.erase(index);
-            m_FreeSamplerDescriptors.push_back(index);
-        });
-    }
 
 };

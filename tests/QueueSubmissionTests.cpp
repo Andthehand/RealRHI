@@ -161,6 +161,37 @@ int main() {
                "Reset releases bindless resource");
     }
 
+    // A recorded command list owns its bindless resource even after the
+    // application drops its reference, including across a second submission.
+    {
+        RealRHI::Ref<RealRHI::Buffer> resource;
+        RealRHI::BufferDesc desc{};
+        desc.size = 64;
+        desc.usage = RealRHI::BufferUsage::Storage;
+        Expect(device->CreateBuffer(desc, resource) == RealRHI::Result::Success,
+               "Create retained bindless buffer");
+        RealRHI::Ref<RealRHI::CommandList> list;
+        Expect(device->CreateCommandList(allocator.Raw(), list) == RealRHI::Result::Success,
+               "Create retained bindless list");
+        Expect(list->Begin() == RealRHI::Result::Success, "Begin retained bindless list");
+        Expect(list->UseResource(resource.Raw()) == RealRHI::Result::Success,
+               "Register bindless buffer");
+        const auto references = resource->GetRefCount();
+        Expect(list->UseResource(resource.Raw()) == RealRHI::Result::Success,
+               "Duplicate registration accepted");
+        Expect(resource->GetRefCount() == references, "Duplicate registration does not retain twice");
+        Expect(list->End() == RealRHI::Result::Success, "End retained bindless list");
+        resource.Reset();
+        const auto first = graphicsQueue->Submit(*list);
+        Expect(first.IsValid(), "Submit retained list");
+        graphicsQueue->Wait(first);
+        const auto second = graphicsQueue->Submit(*list);
+        Expect(second.IsValid(), "Resubmit retained list");
+        graphicsQueue->Wait(second);
+        Expect(list->Reset() == RealRHI::Result::Success,
+               "Reset releases retained resources after resubmission");
+    }
+
     std::cout << "QueueSubmissionTests passed" << std::endl;
     return 0;
 }
