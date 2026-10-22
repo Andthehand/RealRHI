@@ -47,7 +47,7 @@ namespace RealRHI {
 		VkPresentModeKHR ChooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
 		VkExtent2D ChooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities, VkExtent2D requestedExtent);
 
-		void RecreateSwapchain();
+		Result RecreateSwapchain();
 		void CollectRetiredSwapchains();
 		void TransitionToColorAttachment(VkCommandBuffer cmdBuf, uint32_t imageIndex);
 		void TransitionToPresent(VkCommandBuffer cmdBuf, uint32_t imageIndex);
