@@ -38,22 +38,26 @@ namespace RealRHI {
         mutable std::mutex m_DescriptorMutex;
 		std::unique_ptr<VulkanDescriptorHeaps> m_DescriptorHeaps;
 
+		// VkDeviceSize is used for sizes and offsets
+		// m_Free* is used for free descriptor indices to reuse them
+		// m_Allocated* is used for allocated descriptor indices to track them and prevent double frees
+
 		// Resource Heap
-		std::unordered_set<uint32_t> m_AllocatedBufferDescriptors;
-		std::unordered_set<uint32_t> m_AllocatedImageDescriptors;
-		std::unordered_set<uint32_t> m_AllocatedSamplerDescriptors;
 		VkDeviceSize m_BufferDescriptorSize;
 		std::vector<uint32_t> m_FreeBufferDescriptors;
+		std::unordered_set<uint32_t> m_AllocatedBufferDescriptors;
 		uint32_t m_NextBufferDescriptorIndex;
 
 		VkDeviceSize m_ImageDescriptorSize;
 		std::vector<uint32_t> m_FreeImageDescriptors;
+		std::unordered_set<uint32_t> m_AllocatedImageDescriptors;
 		uint32_t m_NextImageDescriptorIndex;
 		uint32_t m_ImageDescriptorCapacity = 0;
 
 		// Sampler Heap
 		VkDeviceSize m_SamplerDescriptorSize;
 		std::vector<uint32_t> m_FreeSamplerDescriptors;
+		std::unordered_set<uint32_t> m_AllocatedSamplerDescriptors;
 		uint32_t m_NextSamplerDescriptorIndex;
 	};
 }

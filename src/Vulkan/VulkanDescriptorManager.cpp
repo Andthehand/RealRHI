@@ -98,10 +98,13 @@ namespace RealRHI {
 		if (index == UINT32_MAX) {
 			return;
 		}
+		
+		// Prevent double free or invalid index by checking if the index exists in the allocated set
 		if (!m_AllocatedBufferDescriptors.erase(index)) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Invalid or duplicate descriptor free.");
 			return;
 		}
+
 		m_FreeBufferDescriptors.push_back(index);
 	}
 
@@ -169,10 +172,13 @@ namespace RealRHI {
 		if (index == UINT32_MAX) {
 			return;
 		}
+
+		// Prevent double free or invalid index by checking if the index exists in the allocated set
 		if (!m_AllocatedImageDescriptors.erase(index)) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Invalid or duplicate descriptor free.");
 			return;
 		}
+
 		m_FreeImageDescriptors.push_back(index);
 	}
 
@@ -220,10 +226,13 @@ namespace RealRHI {
 		if (index == UINT32_MAX) {
 			return;
 		}
+
+		// Prevent double free or invalid index by checking if the index exists in the allocated set
 		if (!m_AllocatedSamplerDescriptors.erase(index)) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Invalid or duplicate descriptor free.");
 			return;
 		}
+
 		m_FreeSamplerDescriptors.push_back(index);
 	}
 
