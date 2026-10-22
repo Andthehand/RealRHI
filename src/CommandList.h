@@ -7,6 +7,7 @@
 #include "Buffer.h"
 
 #include "RenderingInfo.h"
+#include "BarrierDesc.h"
 #include <cstdint>
 
 namespace RealRHI {
@@ -60,6 +61,8 @@ namespace RealRHI {
 
         virtual Result CopyBuffer(Buffer* source, Buffer* destination, const BufferCopyRegion& region) = 0;
         virtual Result CopyBufferToTexture(Buffer* source, Texture* destination, const BufferTextureCopyRegion& region) = 0;
+
+		virtual Result Barrier(const BarrierDesc& barriers) = 0;
 
         virtual void Draw(uint32_t vertexCount) = 0;
 		virtual void DrawIndexed(uint32_t indexCount) = 0;

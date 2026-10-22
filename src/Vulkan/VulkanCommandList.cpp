@@ -6,6 +6,7 @@
 #include "VulkanTexture.h"
 
 #include "VulkanConvertions.h"
+#include "VulkanBarrierConversions.h"
 
 #include <mutex>
 #include <algorithm>
@@ -396,6 +397,102 @@ namespace RealRHI {
 		};
 		vkCmdCopyBufferToImage(m_CommandBuffer, sourceBuffer->GetBuffer(), destinationTexture->m_Image,
 			                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+		return Result::Success;
+	}
+
+	Result VulkanCommandList::Barrier(const BarrierDesc& barriers) {
+		if (GetState() != CommandListState::Recording) {
+			return Result::Failed;
+		}
+
+		std::vector<VkMemoryBarrier2> memoryBarriers;
+		std::vector<VkBufferMemoryBarrier2> bufferBarriers;
+		std::vector<VkImageMemoryBarrier2> imageBarriers;
+		memoryBarriers.reserve(barriers.memory.size());
+		bufferBarriers.reserve(barriers.buffers.size());
+		imageBarriers.reserve(barriers.textures.size());
+
+		for (const MemoryBarrier& barrier : barriers.memory) {
+			memoryBarriers.push_back({
+				.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+				.srcStageMask = Utils::ToVkPipelineStages(barrier.before.stages),
+				.srcAccessMask = Utils::ToVkResourceAccess(barrier.before.access),
+				.dstStageMask = Utils::ToVkPipelineStages(barrier.after.stages),
+				.dstAccessMask = Utils::ToVkResourceAccess(barrier.after.access),
+			});
+		}
+
+		for (const BufferBarrier& barrier : barriers.buffers) {
+			auto* buffer = dynamic_cast<VulkanBuffer*>(barrier.buffer);
+			if (buffer == nullptr || buffer->GetDevice() != m_Device ||
+				barrier.size == 0 || barrier.offset >= buffer->GetSize() ||
+				barrier.size > buffer->GetSize() - barrier.offset) {
+				return Result::Failed;
+			}
+
+			bufferBarriers.push_back({
+				.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+				.srcStageMask = Utils::ToVkPipelineStages(barrier.before.stages),
+				.srcAccessMask = Utils::ToVkResourceAccess(barrier.before.access),
+				.dstStageMask = Utils::ToVkPipelineStages(barrier.after.stages),
+				.dstAccessMask = Utils::ToVkResourceAccess(barrier.after.access),
+				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.buffer = buffer->GetBuffer(),
+				.offset = barrier.offset,
+				.size = barrier.size,
+			});
+		}
+
+		for (const TextureBarrier& barrier : barriers.textures) {
+			auto* texture = dynamic_cast<VulkanTexture*>(barrier.texture);
+			if (texture == nullptr || texture->GetDevice() != m_Device ||
+				barrier.subresources.mipLevelCount == 0 || barrier.subresources.arrayLayerCount == 0 ||
+				barrier.subresources.baseMipLevel >= texture->m_MipLevels ||
+				barrier.subresources.mipLevelCount > texture->m_MipLevels - barrier.subresources.baseMipLevel ||
+				barrier.subresources.baseArrayLayer >= texture->m_ArrayLayers ||
+				barrier.subresources.arrayLayerCount > texture->m_ArrayLayers - barrier.subresources.baseArrayLayer) {
+				return Result::Failed;
+			}
+
+			imageBarriers.push_back({
+				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+				.srcStageMask = Utils::ToVkPipelineStages(barrier.before.stages),
+				.srcAccessMask = Utils::ToVkResourceAccess(barrier.before.access),
+				.dstStageMask = Utils::ToVkPipelineStages(barrier.after.stages),
+				.dstAccessMask = Utils::ToVkResourceAccess(barrier.after.access),
+				.oldLayout = Utils::TextureLayoutToVkImageLayout(barrier.oldLayout),
+				.newLayout = Utils::TextureLayoutToVkImageLayout(barrier.newLayout),
+				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.image = texture->m_Image,
+				.subresourceRange = {
+					.aspectMask = Utils::TextureFormatToVkImageAspect(Utils::VkFormatToTextureFormat(texture->m_Format)),
+					.baseMipLevel = barrier.subresources.baseMipLevel,
+					.levelCount = barrier.subresources.mipLevelCount,
+					.baseArrayLayer = barrier.subresources.baseArrayLayer,
+					.layerCount = barrier.subresources.arrayLayerCount,
+				},
+			});
+		}
+
+		for (const BufferBarrier& barrier : barriers.buffers) {
+			RetainResource(barrier.buffer);
+		}
+		for (const TextureBarrier& barrier : barriers.textures) {
+			RetainResource(barrier.texture);
+		}
+
+		VkDependencyInfo dependencyInfo{
+			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+			.memoryBarrierCount = static_cast<uint32_t>(memoryBarriers.size()),
+			.pMemoryBarriers = memoryBarriers.data(),
+			.bufferMemoryBarrierCount = static_cast<uint32_t>(bufferBarriers.size()),
+			.pBufferMemoryBarriers = bufferBarriers.data(),
+			.imageMemoryBarrierCount = static_cast<uint32_t>(imageBarriers.size()),
+			.pImageMemoryBarriers = imageBarriers.data(),
+		};
+		vkCmdPipelineBarrier2(m_CommandBuffer, &dependencyInfo);
 		return Result::Success;
 	}
 

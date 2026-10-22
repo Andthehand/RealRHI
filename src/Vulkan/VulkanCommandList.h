@@ -44,6 +44,8 @@ namespace RealRHI {
 		Result CopyBuffer(Buffer* source, Buffer* destination, const BufferCopyRegion& region) override;
 		Result CopyBufferToTexture(Buffer* source, Texture* destination, const BufferTextureCopyRegion& region) override;
 
+		Result Barrier(const BarrierDesc& barriers) override;
+
 		void Draw(uint32_t vertexCount) override;
 		void DrawIndexed(uint32_t indexCount) override;
 
