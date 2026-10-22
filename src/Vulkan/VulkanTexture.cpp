@@ -185,13 +185,13 @@ namespace RealRHI {
         }
 
         BufferTextureCopyRegion copyRegion{
-            .bufferOffset = 0,
-            .mipLevel = 0,
-            .baseArrayLayer = 0,
-            .layerCount = m_ArrayLayers,
             .width = m_ImageExtent.width,
             .height = m_ImageExtent.height,
             .depth = m_ImageExtent.depth,
+            .bufferOffset = 0,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = m_ArrayLayers
         };
         if (commandList->CopyBufferToTexture(transferBuffer.Raw(), this, copyRegion) != Result::Success) {
             return Result::Failed;
