@@ -49,9 +49,11 @@ namespace RealRHI {
 
 	private:
 		TextureLayout GetSubmittedLayout(uint32_t mip, uint32_t layer) const {
+			std::scoped_lock lock(m_Device->GetStateTrackingMutex());
 			return m_SubresourceLayouts[mip * m_ArrayLayers + layer];
 		}
 		void SetSubmittedLayout(uint32_t mip, uint32_t layer, TextureLayout layout) {
+			std::scoped_lock lock(m_Device->GetStateTrackingMutex());
 			m_SubresourceLayouts[mip * m_ArrayLayers + layer] = layout;
 		}
 

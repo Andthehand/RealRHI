@@ -10,6 +10,7 @@
 
 #include <mutex>
 #include <algorithm>
+#include <unordered_set>
 #include <utility>
 
 namespace RealRHI {
@@ -363,7 +364,7 @@ namespace RealRHI {
 			const auto it = predicted.find(key);
 			const TextureLayout current = it != predicted.end() ? it->second :
 				key.texture->GetSubmittedLayout(key.mipLevel, key.arrayLayer);
-			if (current != layout) {
+			if (layout != TextureLayout::Undefined && current != layout) {
 				return false;
 			}
 		}
@@ -392,7 +393,7 @@ namespace RealRHI {
 	bool VulkanCommandList::HasRecordedLayout(const VulkanTexture* texture, uint32_t mipLevel,
 		uint32_t baseLayer, uint32_t layerCount, TextureLayout expected) const {
 		for (uint32_t layer = baseLayer; layer < baseLayer + layerCount; ++layer) {
-			if (GetExpectedLayout(texture, mipLevel, layer) != expected) {
+			if (expected != TextureLayout::Undefined && GetExpectedLayout(texture, mipLevel, layer) != expected) {
 				return false;
 			}
 		}
@@ -662,6 +663,23 @@ namespace RealRHI {
 				},
 			});
 		}
+
+        // Reject overlapping ranges: barriers within one dependency are not sequential.
+        std::unordered_set<SubresourceKey, SubresourceKeyHash> touched;
+        for (const TextureBarrier& barrier : barriers.textures) {
+            auto* texture = static_cast<VulkanTexture*>(barrier.texture);
+            for (uint32_t mip = barrier.subresources.baseMipLevel;
+                mip < barrier.subresources.baseMipLevel + barrier.subresources.mipLevelCount; ++mip) {
+                for (uint32_t layer = barrier.subresources.baseArrayLayer;
+                    layer < barrier.subresources.baseArrayLayer + barrier.subresources.arrayLayerCount; ++layer) {
+                    if (!touched.insert({ texture, mip, layer }).second) {
+                        m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                            "Overlapping texture barriers must be recorded in separate calls.");
+                        return Result::Failed;
+                    }
+                }
+            }
+        }
 
         // Update the command list's layout knowledge only after all barriers validate.
         for (const TextureBarrier& barrier : barriers.textures) {

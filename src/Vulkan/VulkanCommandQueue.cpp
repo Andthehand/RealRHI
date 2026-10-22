@@ -145,7 +145,8 @@ namespace RealRHI {
 		std::unique_lock submitLock(m_SubmissionMutex);
         // Check the complete batch before submitting. No global state changes
         // are published unless vkQueueSubmit2 succeeds.
-        VulkanCommandList::LayoutMap predictedLayouts;
+        std::scoped_lock stateLock(m_Device->GetStateTrackingMutex());
+		VulkanCommandList::LayoutMap predictedLayouts;
         for (CommandList* commandList : trackedLists) {
             if (!static_cast<VulkanCommandList*>(commandList)->ValidateSubmissionLayouts(predictedLayouts)) {
                 m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,

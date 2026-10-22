@@ -59,7 +59,6 @@ namespace RealRHI {
 		friend class VulkanTexture;
 		friend class VulkanCommandQueue;
 		VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
-	public:
 	private:
 		struct SubresourceKey {
 			const VulkanTexture* texture = nullptr;

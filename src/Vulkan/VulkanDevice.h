@@ -44,6 +44,7 @@ namespace RealRHI {
 		uint32_t GetPresentQueueFamily() const { return m_PresentQueueFamily; }
 		CommandQueue* GetGraphicsCommandQueue() const override;
 		VulkanCommandQueue* GetCommandQueue(const QueueId& queueId) const;
+		std::recursive_mutex& GetStateTrackingMutex() const { return m_StateTrackingMutex; }
 
 		// Pools
 
@@ -105,6 +106,7 @@ namespace RealRHI {
 			VulkanCommandQueue* m_GraphicsCommandQueue = nullptr;
 			std::unordered_map<QueueId, VulkanCommandQueue*> m_Queues;
             mutable DeferredDeletionQueue m_DeferredDeletions;
+			mutable std::recursive_mutex m_StateTrackingMutex;
 
 			// Pools
 			std::unique_ptr<VulkanDescriptorManager> m_DescriptorManager;
