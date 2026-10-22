@@ -510,6 +510,19 @@ int main() {
         Expect(list->End() == RealRHI::Result::Success, "End overlap test");
     }
 
+    // Compute dispatch requires an explicitly bound compute pipeline.
+    {
+        RealRHI::Ref<RealRHI::CommandList> computeList;
+        Expect(device->CreateCommandList(allocator.Raw(), computeList) == RealRHI::Result::Success,
+            "Create compute validation command list");
+        Expect(computeList->Begin() == RealRHI::Result::Success,
+            "Begin compute validation command list");
+        Expect(computeList->Dispatch(1, 1, 1) != RealRHI::Result::Success,
+            "Reject dispatch without a compute pipeline");
+        Expect(computeList->End() == RealRHI::Result::Success,
+            "End compute validation command list");
+    }
+
     std::cout << "QueueSubmissionTests passed" << std::endl;
     return 0;
 }

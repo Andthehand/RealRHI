@@ -1,6 +1,7 @@
 #include "VulkanBuffer.h"
 
 #include "VulkanConvertions.h"
+#include "VulkanDescriptorManager.h"
 
 namespace RealRHI {
     VulkanBuffer::VulkanBuffer(const VulkanDevice* device)
@@ -8,6 +9,9 @@ namespace RealRHI {
     }
 
     VulkanBuffer::~VulkanBuffer() {
+        if (m_DescriptorIndex != UINT32_MAX) {
+            m_Device->GetDescriptorManager()->FreeBufferDescriptor(m_DescriptorIndex);
+        }
         vmaDestroyBuffer(m_Device->GetAllocator(), m_Buffer, m_BufferMemory);
     }
 
@@ -42,6 +46,13 @@ namespace RealRHI {
             memcpy(m_AllocInfo.pMappedData, desc.initialData, (size_t)bufferInfo.size);
         }
         
+        if (Any(m_Usage & (BufferUsage::Storage | BufferUsage::Uniform))) {
+            m_DescriptorIndex = m_Device->GetDescriptorManager()->AllocateBufferDescriptor(this);
+            if (m_DescriptorIndex == UINT32_MAX) {
+                return Result::Failed;
+            }
+        }
+
         return Result::Success;
     }
 

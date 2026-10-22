@@ -68,6 +68,8 @@ namespace RealRHI {
         virtual Result UseResource(Buffer* buffer) = 0;
 
         virtual void BindPipeline(Pipeline* pipeline) = 0;
+		virtual Result BindComputePipeline(Pipeline* pipeline) = 0;
+		virtual Result Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) = 0;
         virtual void BindVertexBuffer(Buffer* vertexBuffer) = 0;
 		virtual void BindIndexBuffer(Buffer* indexBuffer) = 0;
 

@@ -22,6 +22,58 @@ namespace RealRHI {
         return Result::Success;
 	}
 
+    Result VulkanPipeline::CreateCompute(const VulkanDevice* device, const ComputePipelineDesc& desc,
+        Ref<VulkanPipeline>& outPipeline) {
+        Ref<VulkanPipeline> pipeline = Ref<VulkanPipeline>::Create(device);
+        const Result result = pipeline->InitCompute(desc);
+        if (result != Result::Success) {
+            return result;
+        }
+        outPipeline = pipeline;
+        return Result::Success;
+    }
+
+    Result VulkanPipeline::InitCompute(const ComputePipelineDesc& desc) {
+        const auto* shader = dynamic_cast<const VulkanShader*>(desc.shader);
+        if (shader == nullptr) {
+            return Result::Failed;
+        }
+
+        const auto& entryPoints = shader->GetEntryPoints();
+        if (entryPoints.size() != 1 || entryPoints[0].stage != SLANG_STAGE_COMPUTE) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "Compute pipeline requires exactly one compute shader entry point.");
+            return Result::Failed;
+        }
+
+        const VkPipelineShaderStageCreateInfo stage{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+            .module = shader->GetShaderModule(),
+            .pName = entryPoints[0].entryPointName.c_str(),
+        };
+        const VkPipelineCreateFlags2CreateInfo flags{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO,
+            .flags = VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT,
+        };
+        const VkComputePipelineCreateInfo info{
+            .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+            .pNext = &flags,
+            .stage = stage,
+            .layout = VK_NULL_HANDLE,
+        };
+
+        if (vkCreateComputePipelines(m_Device->GetDevice(), VK_NULL_HANDLE, 1, &info,
+            nullptr, &m_Pipeline) != VK_SUCCESS) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "Failed to create Vulkan compute pipeline.");
+            return Result::Failed;
+        }
+
+        m_BindPoint = VK_PIPELINE_BIND_POINT_COMPUTE;
+        return Result::Success;
+    }
+
     Result VulkanPipeline::Init(const PipelineDesc& desc) {
         const VulkanShader* shader = static_cast<VulkanShader*>(desc.shader);
         VkShaderModule shaderModule = shader->GetShaderModule();
@@ -35,6 +87,25 @@ namespace RealRHI {
                 .module = shaderModule,
                 .pName = entryPoints[i].entryPointName.c_str()
             };
+        }
+
+        bool hasVertex = false;
+        bool hasFragment = false;
+        for (const EntryPoint& entryPoint : entryPoints) {
+            if (entryPoint.stage == SLANG_STAGE_VERTEX) {
+                hasVertex = true;
+            }
+            else if (entryPoint.stage == SLANG_STAGE_FRAGMENT) {
+                hasFragment = true;
+            }
+            else {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                    "Graphics pipeline cannot contain compute or unsupported shader stages.");
+                return Result::Failed;
+            }
+        }
+        if (!hasVertex || !hasFragment) {
+            return Result::Failed;
         }
 
         // Vertex input is taken from the shader reflection data

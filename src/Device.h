@@ -47,6 +47,7 @@ namespace RealRHI {
 		virtual Result CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) const = 0;
 		virtual Result CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) const = 0;
 		virtual Result CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) const = 0;
+		virtual Result CreateComputePipeline(const ComputePipelineDesc& desc, Ref<Pipeline>& outPipeline) const = 0;
 		virtual Result CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) const = 0;
 		virtual Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) const = 0;
 		virtual Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const = 0;

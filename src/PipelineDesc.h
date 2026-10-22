@@ -50,6 +50,10 @@ namespace RealRHI {
         TextureFormat depthFormat = TextureFormat::Unknown;
     };
 
+    struct ComputePipelineDesc {
+        Shader* shader = nullptr;
+    };
+
     struct PipelineDesc {
         Shader* shader;
 

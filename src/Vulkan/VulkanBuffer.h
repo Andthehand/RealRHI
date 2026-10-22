@@ -18,6 +18,7 @@ namespace RealRHI {
 
 		BufferUsage GetUsage() const { return m_Usage; }
 		uint64_t GetSize() const override { return m_AllocInfo.size; }
+		uint32_t GetDescriptorIndex() const override { return m_DescriptorIndex; }
 
 		Result WriteData(const void* data, uint64_t size, uint64_t offset = 0) override;
 		Result ReadData(void* data, uint64_t size, uint64_t offset = 0) const override;
@@ -37,5 +38,6 @@ namespace RealRHI {
 		VkBuffer m_Buffer = VK_NULL_HANDLE;
 		VmaAllocation m_BufferMemory = VK_NULL_HANDLE;
 		VmaAllocationInfo m_AllocInfo;
+		uint32_t m_DescriptorIndex = UINT32_MAX;
 	};
 }

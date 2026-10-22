@@ -147,6 +147,15 @@ namespace RealRHI {
 		return res;
 	}
 
+	Result VulkanDevice::CreateComputePipeline(const ComputePipelineDesc& desc, Ref<Pipeline>& outPipeline) const {
+		Ref<VulkanPipeline> pipeline;
+		const Result result = VulkanPipeline::CreateCompute(this, desc, pipeline);
+		if (result == Result::Success) {
+			outPipeline = pipeline.As<Pipeline>();
+		}
+		return result;
+	}
+
 	Result VulkanDevice::CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) const {
 		Ref<VulkanSwapchain> vkSwapchain;
 		Result res = VulkanSwapchain::Create(this, desc, vkSwapchain);

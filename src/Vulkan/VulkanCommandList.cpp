@@ -74,6 +74,7 @@ namespace RealRHI {
                 return Result::Failed;
             }
             m_State = CommandListState::Recording;
+            m_ComputePipelineBound = false;
         }
 
         return Result::Success;
@@ -144,6 +145,7 @@ namespace RealRHI {
         // Release outside the state mutex (destructors may invoke other locks).
         std::vector<Ref<RefCounted>> released;
         released.swap(m_ReferencedResources);
+        m_ComputePipelineBound = false;
         m_RecordedLayouts.clear();
         m_InitialLayouts.clear();
         return Result::Success;
@@ -300,11 +302,47 @@ namespace RealRHI {
 	}
 
     void VulkanCommandList::BindPipeline(Pipeline* pipeline) {
-        RetainResource(pipeline);
-        vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, static_cast<VulkanPipeline*>(pipeline)->GetPipeline());
+        auto* graphicsPipeline = dynamic_cast<VulkanPipeline*>(pipeline);
+        if (GetState() != CommandListState::Recording || graphicsPipeline == nullptr ||
+            graphicsPipeline->GetBindPoint() != VK_PIPELINE_BIND_POINT_GRAPHICS) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "BindPipeline requires a graphics pipeline and an active recording.");
+            return;
+        }
+        RetainResource(graphicsPipeline);
+        vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline->GetPipeline());
 
         m_Device->BindDescriptorHeaps(m_CommandBuffer);
     }
+
+	Result VulkanCommandList::BindComputePipeline(Pipeline* pipeline) {
+		if (GetState() != CommandListState::Recording) {
+			return Result::Failed;
+		}
+		auto* computePipeline = dynamic_cast<VulkanPipeline*>(pipeline);
+		if (computePipeline == nullptr || computePipeline->GetBindPoint() != VK_PIPELINE_BIND_POINT_COMPUTE) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+				"BindComputePipeline requires a compute pipeline.");
+			return Result::Failed;
+		}
+
+		RetainResource(computePipeline);
+		vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline->GetPipeline());
+		m_Device->BindDescriptorHeaps(m_CommandBuffer);
+		m_ComputePipelineBound = true;
+		return Result::Success;
+	}
+
+	Result VulkanCommandList::Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) {
+		if (GetState() != CommandListState::Recording || !m_ComputePipelineBound ||
+			groupCountX == 0 || groupCountY == 0 || groupCountZ == 0) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+				"Dispatch requires a bound compute pipeline and nonzero group counts.");
+			return Result::Failed;
+		}
+		vkCmdDispatch(m_CommandBuffer, groupCountX, groupCountY, groupCountZ);
+		return Result::Success;
+	}
 
     void VulkanCommandList::BindVertexBuffer(Buffer* vertexBuffer) {
         RetainResource(vertexBuffer);
