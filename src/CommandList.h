@@ -28,6 +28,17 @@ namespace RealRHI {
         uint32_t layerCount = 1;
     };
 
+    struct TextureCopyRegion {
+        uint32_t sourceMipLevel = 0;
+        uint32_t destinationMipLevel = 0;
+        uint32_t sourceBaseArrayLayer = 0;
+        uint32_t destinationBaseArrayLayer = 0;
+        uint32_t layerCount = 1;
+        uint32_t width = 0;
+        uint32_t height = 0;
+        uint32_t depth = 1;
+    };
+
     enum class CommandListState {
         Initial,
         Recording,
@@ -61,6 +72,8 @@ namespace RealRHI {
 
         virtual Result CopyBuffer(Buffer* source, Buffer* destination, const BufferCopyRegion& region) = 0;
         virtual Result CopyBufferToTexture(Buffer* source, Texture* destination, const BufferTextureCopyRegion& region) = 0;
+        virtual Result CopyTextureToBuffer(Texture* source, Buffer* destination, const BufferTextureCopyRegion& region) = 0;
+        virtual Result CopyTexture(Texture* source, Texture* destination, const TextureCopyRegion& region) = 0;
 
 		virtual Result Barrier(const BarrierDesc& barriers) = 0;
 

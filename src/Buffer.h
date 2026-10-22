@@ -11,5 +11,6 @@ namespace RealRHI {
 		virtual uint64_t GetSize() const = 0;
 
 		virtual Result WriteData(const void* data, uint64_t size, uint64_t offset = 0) = 0;
+		virtual Result ReadData(void* data, uint64_t size, uint64_t offset = 0) const = 0;
 	};
 }

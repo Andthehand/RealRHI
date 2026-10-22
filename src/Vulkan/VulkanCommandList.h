@@ -43,6 +43,8 @@ namespace RealRHI {
 
 		Result CopyBuffer(Buffer* source, Buffer* destination, const BufferCopyRegion& region) override;
 		Result CopyBufferToTexture(Buffer* source, Texture* destination, const BufferTextureCopyRegion& region) override;
+		Result CopyTextureToBuffer(Texture* source, Buffer* destination, const BufferTextureCopyRegion& region) override;
+		Result CopyTexture(Texture* source, Texture* destination, const TextureCopyRegion& region) override;
 
 		Result Barrier(const BarrierDesc& barriers) override;
 
