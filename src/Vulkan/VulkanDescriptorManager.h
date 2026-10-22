@@ -6,6 +6,8 @@
 
 #include <memory>
 #include <vector>
+#include <mutex>
+#include "Queue.h"
 
 namespace RealRHI {
 	class VulkanBuffer;
@@ -32,6 +34,7 @@ namespace RealRHI {
 
 	private:
 		const VulkanDevice* m_Device;
+        mutable std::mutex m_DescriptorMutex;
 		std::unique_ptr<VulkanDescriptorHeaps> m_DescriptorHeaps;
 
 		// Resource Heap

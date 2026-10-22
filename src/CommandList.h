@@ -32,6 +32,11 @@ namespace RealRHI {
         virtual void SetViewport(const Viewport& vp) = 0;
         virtual void SetScissor(const Rect& rect) = 0;
 
+        // Explicitly declare shader-visible bindless resources for this recording.
+        // Must be called while recording, before submission. Retained through reset.
+        virtual Result UseResource(Texture* texture) = 0;
+        virtual Result UseResource(Buffer* buffer) = 0;
+
         virtual void BindPipeline(Pipeline* pipeline) = 0;
         virtual void BindVertexBuffer(Buffer* vertexBuffer) = 0;
 		virtual void BindIndexBuffer(Buffer* indexBuffer) = 0;

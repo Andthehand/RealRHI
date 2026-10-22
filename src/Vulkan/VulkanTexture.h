@@ -13,6 +13,7 @@ namespace RealRHI {
 	class VulkanTexture : public Texture {
 	public:
 		VulkanTexture(const VulkanDevice* device);
+        const VulkanDevice* GetDevice() const { return m_Device; }
 		~VulkanTexture();
 
 		static Result Create(const VulkanDevice* device, const TextureDesc& desc, Ref<VulkanTexture>& outTexture);

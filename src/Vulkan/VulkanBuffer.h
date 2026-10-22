@@ -11,6 +11,7 @@ namespace RealRHI {
 	class VulkanBuffer : public Buffer {
 	public:
 		VulkanBuffer(const VulkanDevice* device);
+        const VulkanDevice* GetDevice() const { return m_Device; }
 		~VulkanBuffer();
 
 		static Result Create(const VulkanDevice* device, const BufferDesc& desc, Ref<VulkanBuffer>& outBuffer);

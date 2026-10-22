@@ -23,6 +23,7 @@ find_library(SDL_LIBRARY NAMES SDL3 HINTS "$ENV{VULKAN_SDK}/lib" REQUIRED)
 # Create RealRHI library
 set(REALRHI_HEADERS
     "src/CommandAllocator.h"
+    "src/DeferredDeletionQueue.h"
     "src/FrameResources.h"
     "src/Vulkan/VulkanCommandAllocator.h"
     "src/Vulkan/VulkanDevice.h"
