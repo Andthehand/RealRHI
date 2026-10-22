@@ -670,7 +670,11 @@ namespace RealRHI {
                 mip < barrier.subresources.baseMipLevel + barrier.subresources.mipLevelCount; ++mip) {
                 for (uint32_t layer = barrier.subresources.baseArrayLayer;
                     layer < barrier.subresources.baseArrayLayer + barrier.subresources.arrayLayerCount; ++layer) {
-                    m_RecordedLayouts[{ texture, mip, layer }] = barrier.newLayout;
+                    const SubresourceKey key{ texture, mip, layer };
+                    if (!m_RecordedLayouts.contains(key)) {
+                        m_InitialLayouts.emplace(key, barrier.oldLayout);
+                    }
+                    m_RecordedLayouts[key] = barrier.newLayout;
                 }
             }
         }
