@@ -94,14 +94,19 @@ namespace RealRHI {
         return Result::Success;
     }
 
-    void VulkanCommandList::RetainResource(RefCounted* resource) {
-        // The caller owns the command list while recording. GPU submissions
-        // retain the command list through queue completion tracking.
-        if (resource == nullptr) return;
-        for (const auto& retained : m_ReferencedResources)
-            if (retained.Raw() == resource) return;
-        m_ReferencedResources.emplace_back(resource);
-    }
+	void VulkanCommandList::RetainResource(RefCounted* resource) {
+		if (resource == nullptr) {
+			return;
+		}
+
+		for (const auto& retained : m_ReferencedResources) {
+			if (retained.Raw() == resource) {
+				return;
+			}
+		}
+
+		m_ReferencedResources.emplace_back(resource);
+	}
 
     Result VulkanCommandList::Reset() {
         CommandListState state = GetState();
@@ -255,21 +260,33 @@ namespace RealRHI {
         vkCmdSetScissor(m_CommandBuffer, 0, 1, &scissor);
     }
 
-    Result VulkanCommandList::UseResource(Texture* texture) {
-        if (texture == nullptr || GetState() != CommandListState::Recording) return Result::Failed;
-        auto* resource = dynamic_cast<VulkanTexture*>(texture);
-        if (resource == nullptr || resource->GetDevice() != m_Device) return Result::Failed;
-        RetainResource(resource);
-        return Result::Success;
-    }
+	Result VulkanCommandList::UseResource(Texture* texture) {
+		if (texture == nullptr || GetState() != CommandListState::Recording) {
+			return Result::Failed;
+		}
 
-    Result VulkanCommandList::UseResource(Buffer* buffer) {
-        if (buffer == nullptr || GetState() != CommandListState::Recording) return Result::Failed;
-        auto* resource = dynamic_cast<VulkanBuffer*>(buffer);
-        if (resource == nullptr || resource->GetDevice() != m_Device) return Result::Failed;
-        RetainResource(resource);
-        return Result::Success;
-    }
+		auto* resource = dynamic_cast<VulkanTexture*>(texture);
+		if (resource == nullptr || resource->GetDevice() != m_Device) {
+			return Result::Failed;
+		}
+
+		RetainResource(resource);
+		return Result::Success;
+	}
+
+	Result VulkanCommandList::UseResource(Buffer* buffer) {
+		if (buffer == nullptr || GetState() != CommandListState::Recording) {
+			return Result::Failed;
+		}
+
+		auto* resource = dynamic_cast<VulkanBuffer*>(buffer);
+		if (resource == nullptr || resource->GetDevice() != m_Device) {
+			return Result::Failed;
+		}
+
+		RetainResource(resource);
+		return Result::Success;
+	}
 
     void VulkanCommandList::BindPipeline(Pipeline* pipeline) {
         RetainResource(pipeline);

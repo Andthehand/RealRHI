@@ -88,8 +88,10 @@ namespace RealRHI {
 	}
 
 	void VulkanDescriptorManager::FreeBufferDescriptor(uint32_t index) {
-        std::scoped_lock lock(m_DescriptorMutex);
-        if (index == UINT32_MAX) return;
+		std::scoped_lock lock(m_DescriptorMutex);
+		if (index == UINT32_MAX) {
+			return;
+		}
 		m_FreeBufferDescriptors.push_back(index);
 	}
 
@@ -147,8 +149,10 @@ namespace RealRHI {
 	}
 
 	void VulkanDescriptorManager::FreeImageDescriptor(uint32_t index) {
-        std::scoped_lock lock(m_DescriptorMutex);
-        if (index == UINT32_MAX) return;
+		std::scoped_lock lock(m_DescriptorMutex);
+		if (index == UINT32_MAX) {
+			return;
+		}
 		m_FreeImageDescriptors.push_back(index);
 	}
 
@@ -187,8 +191,10 @@ namespace RealRHI {
 	}
 
 	void VulkanDescriptorManager::FreeSamplerDescriptor(uint32_t index) {
-        std::scoped_lock lock(m_DescriptorMutex);
-        if (index == UINT32_MAX) return;
+		std::scoped_lock lock(m_DescriptorMutex);
+		if (index == UINT32_MAX) {
+			return;
+		}
 		m_FreeSamplerDescriptors.push_back(index);
 	}
 
