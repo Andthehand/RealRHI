@@ -50,7 +50,8 @@ namespace RealRHI {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             .stage = VK_SHADER_STAGE_COMPUTE_BIT,
             .module = shader->GetShaderModule(),
-            .pName = entryPoints[0].entryPointName.c_str(),
+            // Slang's linked SPIR-V module exports the compute entry point as "main".
+            .pName = "main",
         };
         const VkPipelineCreateFlags2CreateInfo flags{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO,
