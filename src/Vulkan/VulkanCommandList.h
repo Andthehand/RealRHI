@@ -53,10 +53,6 @@ namespace RealRHI {
 		void DrawIndexed(uint32_t indexCount) override;
 
 		QueueId GetQueueId() const { return m_QueueId; }
-		TextureLayout GetExpectedLayout(const VulkanTexture* texture, uint32_t mip, uint32_t layer) const;
-		using LayoutMap = std::unordered_map<SubresourceKey, TextureLayout, SubresourceKeyHash>;
-		bool ValidateSubmissionLayouts(LayoutMap& predicted) const;
-		void CommitSubmissionLayouts() const;
 		const VulkanDevice* GetDevice() const { return m_Device; }
 
 	protected:
@@ -64,8 +60,7 @@ namespace RealRHI {
 		friend class VulkanTexture;
 		friend class VulkanCommandQueue;
 		VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
-	private:
-		void RetainResource(RefCounted* resource);
+	public:
 		struct SubresourceKey {
 			const VulkanTexture* texture = nullptr;
 			uint32_t mipLevel = 0;
@@ -78,6 +73,12 @@ namespace RealRHI {
 					(static_cast<size_t>(key.mipLevel) << 16) ^ static_cast<size_t>(key.arrayLayer);
 			}
 		};
+		using LayoutMap = std::unordered_map<SubresourceKey, TextureLayout, SubresourceKeyHash>;
+		TextureLayout GetExpectedLayout(const VulkanTexture* texture, uint32_t mip, uint32_t layer) const;
+		bool ValidateSubmissionLayouts(LayoutMap& predicted) const;
+		void CommitSubmissionLayouts() const;
+	private:
+		void RetainResource(RefCounted* resource);
 		void RegisterRequiredLayout(const VulkanTexture* texture, uint32_t mipLevel, uint32_t baseLayer,
 			uint32_t layerCount, TextureLayout expected);
 		bool HasRecordedLayout(const VulkanTexture* texture, uint32_t mipLevel, uint32_t baseLayer,
