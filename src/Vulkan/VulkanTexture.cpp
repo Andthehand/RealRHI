@@ -144,6 +144,10 @@ namespace RealRHI {
             .pImageMemoryBarriers = &barrier,
         };
 
+        if (vkCmd->UseResource(this) != Result::Success) {
+            return Result::Failed;
+        }
+
         vkCmdPipelineBarrier2(vkCmd->GetCommandBuffer(), &depInfo);
 		m_Layout = newLayout;
 

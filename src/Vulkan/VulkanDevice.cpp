@@ -283,6 +283,9 @@ namespace RealRHI {
 		if (outToken && token.IsValid()) {
 			*outToken = token;
 		}
+		if (token.IsValid()) {
+			ProcessDeferredDeletions();
+		}
 		return token.IsValid() ? Result::Success : Result::Failed;
 	}
 
@@ -341,6 +344,7 @@ namespace RealRHI {
 			m_GraphicsCommandQueue->WaitIdle();
 		}
 		vkDeviceWaitIdle(m_Device);
+		ProcessDeferredDeletions();
 	}
 
 	Result Device::Create(const DeviceDesc& desc, std::unique_ptr<Device>& outDevice) {
