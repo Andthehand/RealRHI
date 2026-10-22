@@ -2,6 +2,7 @@
 
 #include "Buffer.h"
 #include "Texture.h"
+#include "TextureDesc.h"
 
 #include <cstdint>
 #include <vector>
