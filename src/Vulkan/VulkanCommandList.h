@@ -56,13 +56,13 @@ namespace RealRHI {
 		friend class VulkanCommandQueue;
 		VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
 	private:
+		void RetainResource(RefCounted* resource);
+	private:
 		const VulkanDevice* m_Device;
         Ref<VulkanCommandAllocator> m_Allocator;
-		VulkanPipeline* m_BoundPipeline = nullptr;
-		// Executable command buffers can be resubmitted without rerecording.
-		std::vector<Ref<RefCounted>> m_ReferencedResources;
-		void RetainResource(RefCounted* resource);
+		
 		mutable std::mutex m_StateMutex;
+		std::vector<Ref<RefCounted>> m_ReferencedResources;
 		CommandListState m_State = CommandListState::Initial;
 		QueueId m_QueueId{};
 
