@@ -143,6 +143,7 @@ namespace RealRHI {
         // Release outside the state mutex (destructors may invoke other locks).
         std::vector<Ref<RefCounted>> released;
         released.swap(m_ReferencedResources);
+        m_RecordedLayouts.clear();
         return Result::Success;
     }
 
@@ -351,6 +352,17 @@ namespace RealRHI {
 		return Result::Success;
 	}
 
+	bool VulkanCommandList::HasRecordedLayout(const VulkanTexture* texture, uint32_t mipLevel,
+		uint32_t baseLayer, uint32_t layerCount, TextureLayout expected) const {
+		for (uint32_t layer = baseLayer; layer < baseLayer + layerCount; ++layer) {
+			const auto it = m_RecordedLayouts.find({ texture, mipLevel, layer });
+			if (it != m_RecordedLayouts.end() && it->second != expected) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	Result VulkanCommandList::CopyBufferToTexture(Buffer* source, Texture* destination, const BufferTextureCopyRegion& region) {
 		if (GetState() != CommandListState::Recording ||
 			region.width == 0 || region.height == 0 || region.depth == 0 || region.layerCount == 0) {
@@ -362,7 +374,8 @@ namespace RealRHI {
 		auto* sourceBuffer = dynamic_cast<VulkanBuffer*>(source);
 		auto* destinationTexture = dynamic_cast<VulkanTexture*>(destination);
 		if (sourceBuffer == nullptr || destinationTexture == nullptr ||
-			destinationTexture->m_Layout != TextureLayout::TransferDst ||
+			!HasRecordedLayout(destinationTexture, region.mipLevel, region.baseArrayLayer,
+                region.layerCount, TextureLayout::TransferDst) ||
 			region.mipLevel >= destinationTexture->m_MipLevels ||
 			region.baseArrayLayer >= destinationTexture->m_ArrayLayers ||
 			region.layerCount > destinationTexture->m_ArrayLayers - region.baseArrayLayer) {
@@ -414,7 +427,9 @@ namespace RealRHI {
 			region.mipLevel >= texture->m_MipLevels ||
 			region.baseArrayLayer >= texture->m_ArrayLayers ||
 			region.layerCount > texture->m_ArrayLayers - region.baseArrayLayer ||
-			region.bufferOffset >= buffer->GetSize()) {
+			region.bufferOffset >= buffer->GetSize() ||
+            !HasRecordedLayout(texture, region.mipLevel, region.baseArrayLayer,
+                region.layerCount, TextureLayout::TransferSrc)) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "CopyTextureToBuffer failed: Invalid source texture, destination buffer, or subresource range.");
 			return Result::Failed;
 		}
@@ -476,7 +491,11 @@ namespace RealRHI {
 			region.sourceBaseArrayLayer >= sourceTexture->m_ArrayLayers ||
 			region.destinationBaseArrayLayer >= destinationTexture->m_ArrayLayers ||
 			region.layerCount > sourceTexture->m_ArrayLayers - region.sourceBaseArrayLayer ||
-			region.layerCount > destinationTexture->m_ArrayLayers - region.destinationBaseArrayLayer) {
+			region.layerCount > destinationTexture->m_ArrayLayers - region.destinationBaseArrayLayer ||
+            !HasRecordedLayout(sourceTexture, region.sourceMipLevel, region.sourceBaseArrayLayer,
+                region.layerCount, TextureLayout::TransferSrc) ||
+            !HasRecordedLayout(destinationTexture, region.destinationMipLevel, region.destinationBaseArrayLayer,
+                region.layerCount, TextureLayout::TransferDst)) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "CopyTexture failed: Invalid textures, formats, or subresource range.");
 			return Result::Failed;
 		}
@@ -569,6 +588,16 @@ namespace RealRHI {
 				return Result::Failed;
 			}
 
+            for (uint32_t mip = barrier.subresources.baseMipLevel;
+                mip < barrier.subresources.baseMipLevel + barrier.subresources.mipLevelCount; ++mip) {
+                if (!HasRecordedLayout(texture, mip, barrier.subresources.baseArrayLayer,
+                    barrier.subresources.arrayLayerCount, barrier.oldLayout)) {
+                    m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                        "Texture barrier old layout disagrees with an earlier transition in this command list.");
+                    return Result::Failed;
+                }
+            }
+
 			imageBarriers.push_back({
 				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
 				.srcStageMask = Utils::ToVkPipelineStages(barrier.before.stages),
@@ -589,6 +618,18 @@ namespace RealRHI {
 				},
 			});
 		}
+
+        // Update the command list's layout knowledge only after all barriers validate.
+        for (const TextureBarrier& barrier : barriers.textures) {
+            auto* texture = static_cast<VulkanTexture*>(barrier.texture);
+            for (uint32_t mip = barrier.subresources.baseMipLevel;
+                mip < barrier.subresources.baseMipLevel + barrier.subresources.mipLevelCount; ++mip) {
+                for (uint32_t layer = barrier.subresources.baseArrayLayer;
+                    layer < barrier.subresources.baseArrayLayer + barrier.subresources.arrayLayerCount; ++layer) {
+                    m_RecordedLayouts[{ texture, mip, layer }] = barrier.newLayout;
+                }
+            }
+        }
 
 		for (const BufferBarrier& barrier : barriers.buffers) {
 			RetainResource(barrier.buffer);

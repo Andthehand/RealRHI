@@ -8,6 +8,7 @@
 
 #include <mutex>
 #include <vector>
+#include <unordered_map>
 
 namespace RealRHI {
 	class VulkanCommandList : public CommandList {
@@ -61,6 +62,21 @@ namespace RealRHI {
 		VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
 	private:
 		void RetainResource(RefCounted* resource);
+		struct SubresourceKey {
+			const VulkanTexture* texture = nullptr;
+			uint32_t mipLevel = 0;
+			uint32_t arrayLayer = 0;
+			bool operator==(const SubresourceKey&) const = default;
+		};
+		struct SubresourceKeyHash {
+			size_t operator()(const SubresourceKey& key) const {
+				return std::hash<const VulkanTexture*>{}(key.texture) ^
+					(static_cast<size_t>(key.mipLevel) << 16) ^ static_cast<size_t>(key.arrayLayer);
+			}
+		};
+		bool HasRecordedLayout(const VulkanTexture* texture, uint32_t mipLevel, uint32_t baseLayer,
+			uint32_t layerCount, TextureLayout expected) const;
+		std::unordered_map<SubresourceKey, TextureLayout, SubresourceKeyHash> m_RecordedLayouts;
 	private:
 		const VulkanDevice* m_Device;
         Ref<VulkanCommandAllocator> m_Allocator;

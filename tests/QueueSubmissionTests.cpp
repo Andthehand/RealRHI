@@ -333,6 +333,54 @@ int main() {
         Expect(list->Reset() == RealRHI::Result::Success, "Reset completed texture transfer list");
     }
 
+    // Layout tracking is scoped to the recording and to individual subresources.
+    {
+        RealRHI::TextureDesc desc{};
+        desc.width = 8;
+        desc.height = 8;
+        desc.mipLevels = 2;
+        desc.arrayLayers = 2;
+        desc.format = RealRHI::TextureFormat::RGBA8_UNorm;
+        desc.usage = RealRHI::TextureUsage::TransferSrc | RealRHI::TextureUsage::TransferDst;
+
+        RealRHI::Ref<RealRHI::Texture> texture;
+        Expect(device->CreateTexture(desc, texture) == RealRHI::Result::Success,
+               "Create tracked-layout texture");
+
+        RealRHI::Ref<RealRHI::CommandList> list;
+        Expect(device->CreateCommandList(allocator.Raw(), list) == RealRHI::Result::Success,
+               "Create tracked-layout command list");
+        Expect(list->Begin() == RealRHI::Result::Success, "Begin tracked-layout list");
+
+        RealRHI::BarrierDesc barriers;
+        barriers.textures.push_back({
+            .texture = texture.Raw(),
+            .before = { RealRHI::PipelineStage::None, RealRHI::ResourceAccess::None },
+            .after = { RealRHI::PipelineStage::Transfer, RealRHI::ResourceAccess::TransferWrite },
+            .oldLayout = RealRHI::TextureLayout::Undefined,
+            .newLayout = RealRHI::TextureLayout::TransferDst,
+            .subresources = { .baseMipLevel = 1, .mipLevelCount = 1, .baseArrayLayer = 1, .arrayLayerCount = 1 },
+        });
+        Expect(list->Barrier(barriers) == RealRHI::Result::Success,
+               "Record a single subresource transition");
+
+        // An inconsistent second transition must be rejected.
+        barriers.textures[0].oldLayout = RealRHI::TextureLayout::ShaderRead;
+        barriers.textures[0].newLayout = RealRHI::TextureLayout::TransferSrc;
+        Expect(list->Barrier(barriers) != RealRHI::Result::Success,
+               "Reject mismatched recorded old layout");
+
+        barriers.textures[0].oldLayout = RealRHI::TextureLayout::TransferDst;
+        Expect(list->Barrier(barriers) == RealRHI::Result::Success,
+               "Accept transition from the recorded layout");
+
+        Expect(list->End() == RealRHI::Result::Success, "End tracked-layout list");
+        const auto token = graphicsQueue->Submit(*list);
+        Expect(token.IsValid(), "Submit tracked-layout list");
+        graphicsQueue->Wait(token);
+        Expect(list->Reset() == RealRHI::Result::Success, "Reset tracked-layout list");
+    }
+
     std::cout << "QueueSubmissionTests passed" << std::endl;
     return 0;
 }
