@@ -50,7 +50,9 @@ namespace RealRHI {
             return Result::Failed;
         }
 
-        RecreateSwapchain();
+        if (RecreateSwapchain() != Result::Success) {
+            return Result::Failed;
+        }
 
         // Create command pool for transition command buffers
         VkCommandPoolCreateInfo poolInfo{
@@ -149,23 +151,31 @@ namespace RealRHI {
         }
     }
 
-    void VulkanSwapchain::RecreateSwapchain() {
-        vkDeviceWaitIdle(m_Device->GetDevice());
+    Result VulkanSwapchain::RecreateSwapchain() {
+        const VkExtent2D requestedExtent{ m_Window->GetWidth(), m_Window->GetHeight() };
+        if (requestedExtent.width == 0 || requestedExtent.height == 0) {
+            return Result::Failed;
+        }
 
-        // Destroy old images (ref-counted, clearing the vector destroys image views too)
-        m_SwapchainImages.clear();
+        if (vkDeviceWaitIdle(m_Device->GetDevice()) != VK_SUCCESS) {
+            return Result::Failed;
+        }
 
-        SwapChainSupportDetails swapChainSupport = QuerySwapChainSupport();
+        SwapChainSupportDetails support = QuerySwapChainSupport();
+        if (support.Formats.empty() || support.PresentModes.empty()) {
+            return Result::Failed;
+        }
 
-        VkSurfaceFormatKHR surfaceFormat = ChooseSwapSurfaceFormat(swapChainSupport.Formats);
-        VkPresentModeKHR presentMode = ChooseSwapPresentMode(swapChainSupport.PresentModes);
-        VkExtent2D requestedExtent = VkExtent2D{ .width = m_Window->GetWidth(), .height = m_Window->GetHeight() };
-        VkExtent2D extent = ChooseSwapExtent(swapChainSupport.Capabilities, requestedExtent);
+        const VkSurfaceFormatKHR surfaceFormat = ChooseSwapSurfaceFormat(support.Formats);
+        const VkPresentModeKHR presentMode = ChooseSwapPresentMode(support.PresentModes);
+        const VkExtent2D extent = ChooseSwapExtent(support.Capabilities, requestedExtent);
+        if (extent.width == 0 || extent.height == 0) {
+            return Result::Failed;
+        }
 
-        uint32_t imageCount = swapChainSupport.Capabilities.minImageCount + 1;
-        if (swapChainSupport.Capabilities.maxImageCount > 0 &&
-            imageCount > swapChainSupport.Capabilities.maxImageCount) {
-            imageCount = swapChainSupport.Capabilities.maxImageCount;
+        uint32_t imageCount = support.Capabilities.minImageCount + 1;
+        if (support.Capabilities.maxImageCount > 0) {
+            imageCount = std::min(imageCount, support.Capabilities.maxImageCount);
         }
 
         VkSwapchainCreateInfoKHR createInfo{
@@ -178,7 +188,7 @@ namespace RealRHI {
             .imageArrayLayers = 1,
             .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
             .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
-            .preTransform = swapChainSupport.Capabilities.currentTransform,
+            .preTransform = support.Capabilities.currentTransform,
             .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
             .presentMode = presentMode,
             .clipped = VK_TRUE,
@@ -187,47 +197,70 @@ namespace RealRHI {
 
         VkSwapchainKHR newSwapchain = VK_NULL_HANDLE;
         if (vkCreateSwapchainKHR(m_Device->GetDevice(), &createInfo, nullptr, &newSwapchain) != VK_SUCCESS) {
-            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to recreate Vulkan swapchain.");
-            return;
+            return Result::Failed;
         }
 
-        vkDestroySwapchainKHR(m_Device->GetDevice(), m_Swapchain, nullptr);
-        m_Swapchain = newSwapchain;
+        if (vkGetSwapchainImagesKHR(m_Device->GetDevice(), newSwapchain, &imageCount, nullptr) != VK_SUCCESS ||
+            imageCount == 0) {
+            vkDestroySwapchainKHR(m_Device->GetDevice(), newSwapchain, nullptr);
+            return Result::Failed;
+        }
 
-        // Re-query images and recreate wrappers
-        vkGetSwapchainImagesKHR(m_Device->GetDevice(), m_Swapchain, &imageCount, nullptr);
-        std::vector<VkImage> swapchainVkImages(imageCount);
-        vkGetSwapchainImagesKHR(m_Device->GetDevice(), m_Swapchain, &imageCount, swapchainVkImages.data());
+        std::vector<VkImage> images(imageCount);
+        if (vkGetSwapchainImagesKHR(m_Device->GetDevice(), newSwapchain, &imageCount, images.data()) != VK_SUCCESS) {
+            vkDestroySwapchainKHR(m_Device->GetDevice(), newSwapchain, nullptr);
+            return Result::Failed;
+        }
 
-        const uint32_t oldImageCount = static_cast<uint32_t>(m_RenderFinishedSemaphores.size());
-
-        m_SwapchainImages.resize(imageCount);
-        for (uint32_t i = 0; i < imageCount; i++) {
-            if (VulkanTexture::CreateFromSwapChain(m_Device, surfaceFormat.format, swapchainVkImages[i], m_SwapchainImages[i]) != Result::Success) {
-                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to recreate swapchain image wrappers.");
-                return;
+        std::vector<Ref<VulkanTexture>> newImages(imageCount);
+        for (uint32_t i = 0; i < imageCount; ++i) {
+            if (VulkanTexture::CreateFromSwapChain(m_Device, surfaceFormat.format, images[i], newImages[i]) != Result::Success) {
+                newImages.clear();
+                vkDestroySwapchainKHR(m_Device->GetDevice(), newSwapchain, nullptr);
+                return Result::Failed;
             }
         }
 
-        m_SwapchainImageFormat = Utils::VkFormatToTextureFormat(surfaceFormat.format);
-        m_SwapchainExtent = extent;
-
-        m_ImageLayouts.assign(imageCount, VK_IMAGE_LAYOUT_UNDEFINED);
-
-        // Recreate per-image semaphores only if the image count changed
-        if (imageCount != oldImageCount) {
-            for (auto semaphore : m_RenderFinishedSemaphores) {
-                vkDestroySemaphore(m_Device->GetDevice(), semaphore, nullptr);
-            }
-            m_RenderFinishedSemaphores.resize(imageCount);
-            VkSemaphoreCreateInfo semInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
-            for (uint32_t i = 0; i < imageCount; i++) {
-                if (vkCreateSemaphore(m_Device->GetDevice(), &semInfo, nullptr, &m_RenderFinishedSemaphores[i]) != VK_SUCCESS) {
-                    m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to recreate render finished semaphores after swapchain resize.");
-                    return;
+        std::vector<VkSemaphore> newSemaphores;
+        if (imageCount != m_RenderFinishedSemaphores.size()) {
+            newSemaphores.resize(imageCount, VK_NULL_HANDLE);
+            const VkSemaphoreCreateInfo semaphoreInfo{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+            for (VkSemaphore& semaphore : newSemaphores) {
+                if (vkCreateSemaphore(m_Device->GetDevice(), &semaphoreInfo, nullptr, &semaphore) != VK_SUCCESS) {
+                    for (VkSemaphore created : newSemaphores) {
+                        if (created != VK_NULL_HANDLE) {
+                            vkDestroySemaphore(m_Device->GetDevice(), created, nullptr);
+                        }
+                    }
+                    newImages.clear();
+                    vkDestroySwapchainKHR(m_Device->GetDevice(), newSwapchain, nullptr);
+                    return Result::Failed;
                 }
             }
         }
+
+        if (m_Swapchain != VK_NULL_HANDLE) {
+            m_RetiredSwapchains.push_back({
+                .handle = m_Swapchain,
+                .images = std::move(m_SwapchainImages),
+            });
+        }
+
+        m_Swapchain = newSwapchain;
+        m_SwapchainImages = std::move(newImages);
+        m_SwapchainImageFormat = Utils::VkFormatToTextureFormat(surfaceFormat.format);
+        m_SwapchainExtent = extent;
+        m_ImageLayouts.assign(imageCount, VK_IMAGE_LAYOUT_UNDEFINED);
+
+        if (!newSemaphores.empty()) {
+            for (VkSemaphore semaphore : m_RenderFinishedSemaphores) {
+                vkDestroySemaphore(m_Device->GetDevice(), semaphore, nullptr);
+            }
+            m_RenderFinishedSemaphores = std::move(newSemaphores);
+        }
+
+        CollectRetiredSwapchains();
+        return Result::Success;
     }
 
     void VulkanSwapchain::CollectRetiredSwapchains() {
@@ -257,8 +290,18 @@ namespace RealRHI {
 
     FrameContext VulkanSwapchain::BeginFrame() {
         CollectRetiredSwapchains();
+        CollectRetiredSwapchains();
         if (m_FrameFailed) {
             return FrameContext{ .imageIndex = std::numeric_limits<uint32_t>::max() };
+        }
+        if (m_Window->GetWidth() == 0 || m_Window->GetHeight() == 0) {
+            return FrameContext{ .imageIndex = std::numeric_limits<uint32_t>::max() };
+        }
+        if (m_Window->GetWidth() != m_SwapchainExtent.width ||
+            m_Window->GetHeight() != m_SwapchainExtent.height) {
+            if (RecreateSwapchain() != Result::Success) {
+                return FrameContext{ .imageIndex = std::numeric_limits<uint32_t>::max() };
+            }
         }
         const uint32_t frameIdx = m_CurrentFrameIndex;
 
@@ -287,7 +330,9 @@ namespace RealRHI {
         VkResult result = vkAcquireNextImageKHR(m_Device->GetDevice(), m_Swapchain, UINT64_MAX,
             m_FrameSync[frameIdx].imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
         if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-            RecreateSwapchain();
+            if (RecreateSwapchain() != Result::Success) {
+                return FrameContext{ .imageIndex = std::numeric_limits<uint32_t>::max() };
+            }
             if (m_Swapchain == VK_NULL_HANDLE || m_SwapchainExtent.width == 0 || m_SwapchainExtent.height == 0) {
                 return FrameContext{ .frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max(), .backBufferView = nullptr, .width = 0, .height = 0 };
             }
@@ -375,7 +420,12 @@ namespace RealRHI {
 
         VkResult result = vkQueuePresentKHR(m_Device->GetPresentQueue(), &presentInfo);
         if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-            RecreateSwapchain();
+            if (RecreateSwapchain() != Result::Success) {
+                m_FrameFailed = true;
+            }
+        }
+        else if (result != VK_SUCCESS) {
+            m_FrameFailed = true;
         }
         m_CurrentFrameIndex = (m_CurrentFrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
     }

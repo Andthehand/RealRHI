@@ -289,6 +289,11 @@ bool RecordCommandBuffer(RealRHI::CommandList* cmd, const RealRHI::FrameContext&
 }
 
 bool DrawFrame() {
+    if (window->GetWidth() == 0 || window->GetHeight() == 0) {
+        SDL_Delay(16);
+        return true;
+    }
+
     RealRHI::FrameContext frame = swapchain->BeginFrame();
     if (frame.backBufferView == nullptr) {
         std::cerr << "Frame acquisition returned no backbuffer; stopping to avoid unsafe semaphore reuse." << std::endl;
