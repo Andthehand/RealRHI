@@ -725,6 +725,43 @@ int main() {
         for (auto& list : lists) {
             Expect(list->Reset() == RealRHI::Result::Success, "Reset completed stress list");
         }
+
+        // Deferred callbacks must wait for every queue dependency, not just
+        // the last queue used by the application.
+        std::array<RealRHI::SubmissionToken, 3> deletionDependencies{};
+        for (uint32_t i = 0; i < 3; ++i) {
+            RealRHI::Ref<RealRHI::CommandAllocator> deferredAllocator;
+            RealRHI::Ref<RealRHI::CommandList> deferredList;
+            Expect(device->CreateCommandAllocator(roles[i], deferredAllocator) ==
+                RealRHI::Result::Success, "Create deferred-test allocator");
+            Expect(device->CreateCommandList(deferredAllocator.Raw(), deferredList) ==
+                RealRHI::Result::Success, "Create deferred-test list");
+            Expect(deferredList->Begin() == RealRHI::Result::Success, "Begin deferred-test list");
+            Expect(deferredList->End() == RealRHI::Result::Success, "End deferred-test list");
+            deletionDependencies[i] = queues[i]->Submit(*deferredList);
+            Expect(deletionDependencies[i].IsValid(), "Submit deferred-test list");
+        }
+
+        RealRHI::Ref<RealRHI::Buffer> deferredBuffer;
+        RealRHI::BufferDesc deferredDesc{};
+        deferredDesc.size = 64;
+        deferredDesc.usage = RealRHI::BufferUsage::TransferDst;
+        Expect(device->CreateBuffer(deferredDesc, deferredBuffer) == RealRHI::Result::Success,
+            "Create deferred-lifetime buffer");
+
+        bool destroyed = false;
+        device->DeferDeletion(
+            { deletionDependencies.begin(), deletionDependencies.end() },
+            [buffer = std::move(deferredBuffer), &destroyed]() mutable {
+                buffer.Reset();
+                destroyed = true;
+            });
+
+        for (uint32_t i = 0; i < 3; ++i) {
+            queues[i]->Wait(deletionDependencies[i]);
+        }
+        device->ProcessDeferredDeletions();
+        Expect(destroyed, "Deferred deletion waits for all queue dependencies");
     }
 
     std::cout << "QueueSubmissionTests passed" << std::endl;

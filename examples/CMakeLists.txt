@@ -16,3 +16,5 @@ add_subdirectory(TriangleExample)
 add_subdirectory(TextureExample)
 
 add_subdirectory(ComputeExample)
+
+add_subdirectory(MultiQueueExample)
