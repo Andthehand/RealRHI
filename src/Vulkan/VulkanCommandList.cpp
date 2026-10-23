@@ -313,7 +313,9 @@ namespace RealRHI {
         RetainResource(vulkanPipeline);
         vkCmdBindPipeline(m_CommandBuffer, vulkanPipeline->GetBindPoint(), vulkanPipeline->GetPipeline());
         m_Device->BindDescriptorHeaps(m_CommandBuffer);
-		m_ComputePipelineBound = (vulkanPipeline->GetBindPoint() == VK_PIPELINE_BIND_POINT_COMPUTE);
+		if (vulkanPipeline->GetBindPoint() == VK_PIPELINE_BIND_POINT_COMPUTE) {
+			m_ComputePipelineBound = true;
+		}
 
 		return Result::Success;
     }
