@@ -62,9 +62,9 @@ int main() {
     if (device->CreateCommandAllocator(allocator) != RealRHI::Result::Success ||
         device->CreateCommandList(allocator.Raw(), list) != RealRHI::Result::Success ||
         list->Begin() != RealRHI::Result::Success ||
-        list->BindComputePipeline(pipeline.Raw()) != RealRHI::Result::Success ||
+        list->BindPipeline(pipeline.Raw()) != RealRHI::Result::Success ||
         list->UseResource(output.Raw()) != RealRHI::Result::Success ||
-        list->Dispatch(1, 1, 1) != RealRHI::Result::Success) {
+        list->DispatchCompute(1, 1, 1) != RealRHI::Result::Success) {
         return 1;
     }
 

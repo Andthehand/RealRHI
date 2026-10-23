@@ -30,9 +30,8 @@ namespace RealRHI {
 
 		Result UseResource(Texture* texture) override;
 		Result UseResource(Buffer* buffer) override;
-		void BindPipeline(Pipeline* pipeline) override;
-		Result BindComputePipeline(Pipeline* pipeline) override;
-		Result Dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
+		Result BindPipeline(Pipeline* pipeline) override;
+		Result DispatchCompute(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
 		void BindVertexBuffer(Buffer* vertexBuffer) override;
 		void BindIndexBuffer(Buffer* indexBuffer) override;
 

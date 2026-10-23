@@ -121,7 +121,7 @@ namespace RealRHI {
 		Ref<VulkanWindow> vkWindow;
 		Result res = VulkanWindow::Create(this, desc, vkWindow);
 		if (res == Result::Success) {
-			outWindow = vkWindow.template As<Window>();
+			outWindow = vkWindow.As<Window>();
 		}
 
 		return res;
@@ -131,7 +131,7 @@ namespace RealRHI {
 		Ref<VulkanShader> vkShader;
 		Result res = VulkanShader::Create(this, desc, vkShader);
 		if (res == Result::Success) {
-			outShader = vkShader.template As<Shader>();
+			outShader = vkShader.As<Shader>();
 		}
 
 		return res;
@@ -139,9 +139,9 @@ namespace RealRHI {
 
 	Result VulkanDevice::CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) const {
 		Ref<VulkanPipeline> vkPipeline;
-		Result res = VulkanPipeline::Create(this, desc, vkPipeline);
+		Result res = VulkanPipeline::CreateGraphics(this, desc, vkPipeline);
 		if (res == Result::Success) {
-			outPipeline = vkPipeline.template As<Pipeline>();
+			outPipeline = vkPipeline.As<Pipeline>();
 		}
 
 		return res;
@@ -153,6 +153,7 @@ namespace RealRHI {
 		if (result == Result::Success) {
 			outPipeline = pipeline.As<Pipeline>();
 		}
+
 		return result;
 	}
 
@@ -160,7 +161,7 @@ namespace RealRHI {
 		Ref<VulkanSwapchain> vkSwapchain;
 		Result res = VulkanSwapchain::Create(this, desc, vkSwapchain);
 		if (res == Result::Success) {
-			outSwapchain = vkSwapchain.template As<Swapchain>();
+			outSwapchain = vkSwapchain.As<Swapchain>();
 		}
 
 		return res;
@@ -170,7 +171,7 @@ namespace RealRHI {
 		Ref<VulkanBuffer> vkBuffer;
 		Result res = VulkanBuffer::Create(this, desc, vkBuffer);
 		if (res == Result::Success) {
-			outBuffer = vkBuffer.template As<Buffer>();
+			outBuffer = vkBuffer.As<Buffer>();
 		}
 
 		return res;
@@ -180,7 +181,7 @@ namespace RealRHI {
 		Ref<VulkanTexture> vkTexture;
 		Result res = VulkanTexture::Create(this, desc, vkTexture);
 		if (res == Result::Success) {
-			outTexture = vkTexture.template As<Texture>();
+			outTexture = vkTexture.As<Texture>();
 		}
 
 		return res;

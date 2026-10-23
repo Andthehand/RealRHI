@@ -23,8 +23,9 @@ namespace RealRHI {
 		VulkanPipeline(const VulkanDevice* device);
 		~VulkanPipeline();
 
-		static Result Create(const VulkanDevice* device, const PipelineDesc& desc, Ref<VulkanPipeline>& outPipeline);
-		Result Init(const PipelineDesc& desc);
+		static Result CreateGraphics(const VulkanDevice* device, const PipelineDesc& desc, Ref<VulkanPipeline>& outPipeline);
+		Result InitGraphics(const PipelineDesc& desc);
+		
 		static Result CreateCompute(const VulkanDevice* device, const ComputePipelineDesc& desc, Ref<VulkanPipeline>& outPipeline);
 		Result InitCompute(const ComputePipelineDesc& desc);
 	protected:
@@ -35,6 +36,6 @@ namespace RealRHI {
 		const VulkanDevice* m_Device = nullptr;
 
 		VkPipeline m_Pipeline = VK_NULL_HANDLE;
-		VkPipelineBindPoint m_BindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		VkPipelineBindPoint m_BindPoint;
 	};
 }

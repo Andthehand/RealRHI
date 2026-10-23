@@ -4,16 +4,16 @@
 #include "VulkanConvertions.h"
 
 namespace RealRHI {
-    VulkanPipeline::VulkanPipeline(const VulkanDevice* device) : m_Device(device) {
-    }
+    VulkanPipeline::VulkanPipeline(const VulkanDevice* device) 
+        : m_Device(device) { }
 
     VulkanPipeline::~VulkanPipeline() {
         vkDestroyPipeline(m_Device->GetDevice(), m_Pipeline, nullptr);
     }
 
-    Result VulkanPipeline::Create(const VulkanDevice* device, const PipelineDesc& desc, Ref<VulkanPipeline>& outPipeline) {
+    Result VulkanPipeline::CreateGraphics(const VulkanDevice* device, const PipelineDesc& desc, Ref<VulkanPipeline>& outPipeline) {
         Ref<VulkanPipeline> pipeline = Ref<VulkanPipeline>::Create(device);
-        Result res = pipeline->Init(desc);
+        Result res = pipeline->InitGraphics(desc);
         if (res != Result::Success) {
             return res;
         }
@@ -29,6 +29,7 @@ namespace RealRHI {
         if (result != Result::Success) {
             return result;
         }
+
         outPipeline = pipeline;
         return Result::Success;
     }
@@ -75,7 +76,7 @@ namespace RealRHI {
         return Result::Success;
     }
 
-    Result VulkanPipeline::Init(const PipelineDesc& desc) {
+    Result VulkanPipeline::InitGraphics(const PipelineDesc& desc) {
         const VulkanShader* shader = static_cast<VulkanShader*>(desc.shader);
         VkShaderModule shaderModule = shader->GetShaderModule();
 
@@ -88,25 +89,6 @@ namespace RealRHI {
                 .module = shaderModule,
                 .pName = entryPoints[i].entryPointName.c_str()
             };
-        }
-
-        bool hasVertex = false;
-        bool hasFragment = false;
-        for (const EntryPoint& entryPoint : entryPoints) {
-            if (entryPoint.stage == SLANG_STAGE_VERTEX) {
-                hasVertex = true;
-            }
-            else if (entryPoint.stage == SLANG_STAGE_FRAGMENT) {
-                hasFragment = true;
-            }
-            else {
-                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
-                    "Graphics pipeline cannot contain compute or unsupported shader stages.");
-                return Result::Failed;
-            }
-        }
-        if (!hasVertex || !hasFragment) {
-            return Result::Failed;
         }
 
         // Vertex input is taken from the shader reflection data
@@ -240,6 +222,7 @@ namespace RealRHI {
             return Result::Failed;
         }
 
+		m_BindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         return Result::Success;
     }
 }
