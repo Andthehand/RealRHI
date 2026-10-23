@@ -12,6 +12,16 @@
 #include <memory>
 
 namespace {
+    uint32_t g_ProgrammerErrors = 0;
+
+    void CaptureDebugMessage(const RealRHI::DebugMessage& message) {
+        if (message.severity == RealRHI::DebugSeverity::Error &&
+            message.type == RealRHI::DebugMessageType::General) {
+            ++g_ProgrammerErrors;
+        }
+        RealRHI::DefaultDebugCallback(message);
+    }
+
     void Expect(bool condition, const char* message) {
         if (!condition) {
             std::cerr << "Test failed: " << message << '\n';
@@ -26,6 +36,7 @@ int main() {
     desc.shaderDirectory = std::filesystem::current_path() / "assets" / "shaders";
     desc.enableValidationLayers = true;
     desc.enableDebug = true;
+    desc.debugCallback = CaptureDebugMessage;
 
     std::unique_ptr<RealRHI::Device> device;
     const RealRHI::Result createResult = RealRHI::Device::Create(desc, device);
@@ -148,8 +159,7 @@ int main() {
                "CreateGraphics bindless lifetime command list");
         Expect(list->Begin() == RealRHI::Result::Success, "Begin bindless lifetime list");
         const auto initialReferences = bindless->GetRefCount();
-        Expect(list->UseResource(bindless.Raw()) == RealRHI::Result::Success,
-               "Register bindless resource");
+        list->UseResource(bindless.Raw());
         Expect(bindless->GetRefCount() > initialReferences,
                "Bindless registration retains resource");
         Expect(list->End() == RealRHI::Result::Success, "End bindless lifetime list");
@@ -174,11 +184,9 @@ int main() {
         Expect(device->CreateCommandList(allocator.Raw(), list) == RealRHI::Result::Success,
                "CreateGraphics retained bindless list");
         Expect(list->Begin() == RealRHI::Result::Success, "Begin retained bindless list");
-        Expect(list->UseResource(resource.Raw()) == RealRHI::Result::Success,
-               "Register bindless buffer");
+        list->UseResource(resource.Raw());
         const auto references = resource->GetRefCount();
-        Expect(list->UseResource(resource.Raw()) == RealRHI::Result::Success,
-               "Duplicate registration accepted");
+        list->UseResource(resource.Raw());
         Expect(resource->GetRefCount() == references, "Duplicate registration does not retain twice");
         Expect(list->End() == RealRHI::Result::Success, "End retained bindless list");
         resource.Reset();
@@ -215,8 +223,11 @@ int main() {
             .offset = 60,
             .size = 16,
         });
-        Expect(list->Barrier(barriers) != RealRHI::Result::Success,
-               "Reject out-of-bounds buffer barrier");
+        {
+            const auto errorsBefore = g_ProgrammerErrors;
+            list->Barrier(barriers);
+            Expect(g_ProgrammerErrors > errorsBefore, "Reject out-of-bounds buffer barrier");
+        }
 
         RealRHI::TextureDesc textureDesc{};
         textureDesc.width = 4;
@@ -236,8 +247,11 @@ int main() {
             .newLayout = RealRHI::TextureLayout::TransferDst,
             .subresources = { .baseMipLevel = 1, .mipLevelCount = 1, .baseArrayLayer = 0, .arrayLayerCount = 1 },
         });
-        Expect(list->Barrier(barriers) != RealRHI::Result::Success,
-               "Reject out-of-bounds texture mip barrier");
+        {
+            const auto errorsBefore = g_ProgrammerErrors;
+            list->Barrier(barriers);
+            Expect(g_ProgrammerErrors > errorsBefore, "Reject out-of-bounds texture mip barrier");
+        }
         Expect(list->End() == RealRHI::Result::Success, "End invalid-range barrier test list");
     }
 
@@ -294,14 +308,12 @@ int main() {
             .oldLayout = RealRHI::TextureLayout::Undefined,
             .newLayout = RealRHI::TextureLayout::TransferDst,
         });
-        Expect(list->Barrier(barriers) == RealRHI::Result::Success,
-               "Prepare source and destination image layouts");
+        list->Barrier(barriers);
 
         RealRHI::TextureCopyRegion copyRegion{};
         copyRegion.width = width;
         copyRegion.height = height;
-        Expect(list->CopyTexture(source.Raw(), destination.Raw(), copyRegion) == RealRHI::Result::Success,
-               "Copy texture to texture");
+        list->CopyTexture(source.Raw(), destination.Raw(), copyRegion);
 
         barriers.textures.clear();
         barriers.textures.push_back({
@@ -311,14 +323,12 @@ int main() {
             .oldLayout = RealRHI::TextureLayout::TransferDst,
             .newLayout = RealRHI::TextureLayout::TransferSrc,
         });
-        Expect(list->Barrier(barriers) == RealRHI::Result::Success,
-               "Prepare destination texture for readback");
+        list->Barrier(barriers);
 
         RealRHI::BufferTextureCopyRegion readbackRegion{};
         readbackRegion.width = width;
         readbackRegion.height = height;
-        Expect(list->CopyTextureToBuffer(destination.Raw(), readback.Raw(), readbackRegion) == RealRHI::Result::Success,
-               "Copy texture to readback buffer");
+        list->CopyTextureToBuffer(destination.Raw(), readback.Raw(), readbackRegion);
         Expect(list->End() == RealRHI::Result::Success, "End texture transfer list");
 
         const auto token = graphicsQueue->Submit(*list);
@@ -361,18 +371,19 @@ int main() {
             .newLayout = RealRHI::TextureLayout::TransferDst,
             .subresources = { .baseMipLevel = 1, .mipLevelCount = 1, .baseArrayLayer = 1, .arrayLayerCount = 1 },
         });
-        Expect(list->Barrier(barriers) == RealRHI::Result::Success,
-               "Record a single subresource transition");
+        list->Barrier(barriers);
 
         // An inconsistent second transition must be rejected.
         barriers.textures[0].oldLayout = RealRHI::TextureLayout::ShaderRead;
         barriers.textures[0].newLayout = RealRHI::TextureLayout::TransferSrc;
-        Expect(list->Barrier(barriers) != RealRHI::Result::Success,
-               "Reject mismatched recorded old layout");
+        {
+            const auto errorsBefore = g_ProgrammerErrors;
+            list->Barrier(barriers);
+            Expect(g_ProgrammerErrors > errorsBefore, "Reject mismatched recorded old layout");
+        }
 
         barriers.textures[0].oldLayout = RealRHI::TextureLayout::TransferDst;
-        Expect(list->Barrier(barriers) == RealRHI::Result::Success,
-               "Accept transition from the recorded layout");
+        list->Barrier(barriers);
 
         Expect(list->End() == RealRHI::Result::Success, "End tracked-layout list");
         const auto token = graphicsQueue->Submit(*list);
@@ -414,7 +425,7 @@ int main() {
         Expect(device->CreateCommandList(allocator.Raw(), prime) == RealRHI::Result::Success,
             "CreateGraphics initial state list");
         Expect(prime->Begin() == RealRHI::Result::Success, "Begin initial state list");
-        Expect(prime->Barrier(transition) == RealRHI::Result::Success, "Record initial state");
+        prime->Barrier(transition);
         Expect(prime->End() == RealRHI::Result::Success, "End initial state list");
         const auto primeToken = graphicsQueue->Submit(*prime);
         Expect(primeToken.IsValid(), "Submit initial state");
@@ -431,11 +442,11 @@ int main() {
         };
 
         Expect(first->Begin() == RealRHI::Result::Success, "Begin first state list");
-        Expect(first->Barrier(transition) == RealRHI::Result::Success, "Record first state transition");
+        first->Barrier(transition);
         Expect(first->End() == RealRHI::Result::Success, "End first state list");
 
         Expect(stale->Begin() == RealRHI::Result::Success, "Begin stale state list");
-        Expect(stale->Barrier(transition) == RealRHI::Result::Success, "Record stale state transition");
+        stale->Barrier(transition);
         Expect(stale->End() == RealRHI::Result::Success, "End stale state list");
 
         const auto firstToken = graphicsQueue->Submit(*first);
@@ -454,7 +465,7 @@ int main() {
             RealRHI::PipelineStage::Transfer, RealRHI::ResourceAccess::TransferWrite
         };
         Expect(stale->Begin() == RealRHI::Result::Success, "Begin corrected state list");
-        Expect(stale->Barrier(transition) == RealRHI::Result::Success, "Record corrected transition");
+        stale->Barrier(transition);
         Expect(stale->End() == RealRHI::Result::Success, "End corrected state list");
         const auto secondToken = graphicsQueue->Submit(*stale);
         Expect(secondToken.IsValid(), "Submit corrected state list");
@@ -484,7 +495,7 @@ int main() {
             .newLayout = RealRHI::TextureLayout::TransferDst,
         });
         Expect(list->Begin() == RealRHI::Result::Success, "Begin discard transition list");
-        Expect(list->Barrier(barriers) == RealRHI::Result::Success, "Record initial transition");
+        list->Barrier(barriers);
         Expect(list->End() == RealRHI::Result::Success, "End initial transition");
         auto token = graphicsQueue->Submit(*list);
         Expect(token.IsValid(), "Submit initial transition");
@@ -492,8 +503,7 @@ int main() {
         Expect(list->Reset() == RealRHI::Result::Success, "Reset discard transition list");
 
         Expect(list->Begin() == RealRHI::Result::Success, "Begin discard rerecord");
-        Expect(list->Barrier(barriers) == RealRHI::Result::Success,
-            "Record discard transition from previously used image");
+        list->Barrier(barriers);
         Expect(list->End() == RealRHI::Result::Success, "End discard rerecord");
         token = graphicsQueue->Submit(*list);
         Expect(token.IsValid(), "Submit discard transition from used image");
@@ -502,11 +512,13 @@ int main() {
 
         Expect(list->Begin() == RealRHI::Result::Success, "Begin overlap test");
         barriers.textures.push_back(barriers.textures.front());
-        Expect(list->Barrier(barriers) != RealRHI::Result::Success,
-            "Reject overlapping texture barriers");
+        {
+            const auto errorsBefore = g_ProgrammerErrors;
+            list->Barrier(barriers);
+            Expect(g_ProgrammerErrors > errorsBefore, "Reject overlapping texture barriers");
+        }
         barriers.textures.pop_back();
-        Expect(list->Barrier(barriers) == RealRHI::Result::Success,
-            "Accept non-overlapping barrier after rejection");
+        list->Barrier(barriers);
         Expect(list->End() == RealRHI::Result::Success, "End overlap test");
     }
 
@@ -517,8 +529,11 @@ int main() {
             "CreateGraphics compute validation command list");
         Expect(computeList->Begin() == RealRHI::Result::Success,
             "Begin compute validation command list");
-        Expect(computeList->DispatchCompute(1, 1, 1) != RealRHI::Result::Success,
-            "Reject dispatch without a compute pipeline");
+        {
+            const auto errorsBefore = g_ProgrammerErrors;
+            computeList->DispatchCompute(1, 1, 1);
+            Expect(g_ProgrammerErrors > errorsBefore, "Reject dispatch without a compute pipeline");
+        }
         Expect(computeList->End() == RealRHI::Result::Success,
             "End compute validation command list");
     }

@@ -140,9 +140,7 @@ namespace RealRHI {
                     .newLayout = newLayout,
                     .subresources = { mip, 1, layer, 1 },
                 });
-                if (commandList->Barrier(barriers) != Result::Success) {
-                    return Result::Failed;
-                }
+                commandList->Barrier(barriers);
             }
         }
         return Result::Success;
@@ -189,9 +187,7 @@ namespace RealRHI {
             .baseArrayLayer = 0,
             .layerCount = m_ArrayLayers
         };
-        if (commandList->CopyBufferToTexture(transferBuffer.Raw(), this, copyRegion) != Result::Success) {
-            return Result::Failed;
-        }
+        commandList->CopyBufferToTexture(transferBuffer.Raw(), this, copyRegion);
         if (ChangeLayout(commandList.Raw(), TextureLayout::ShaderRead) != Result::Success) {
             return Result::Failed;
         }

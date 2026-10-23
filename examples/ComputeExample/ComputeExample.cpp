@@ -61,12 +61,12 @@ int main() {
     RealRHI::Ref<RealRHI::CommandList> list;
     if (device->CreateCommandAllocator(allocator) != RealRHI::Result::Success ||
         device->CreateCommandList(allocator.Raw(), list) != RealRHI::Result::Success ||
-        list->Begin() != RealRHI::Result::Success ||
-        list->BindPipeline(pipeline.Raw()) != RealRHI::Result::Success ||
-        list->UseResource(output.Raw()) != RealRHI::Result::Success ||
-        list->DispatchCompute(1, 1, 1) != RealRHI::Result::Success) {
+        list->Begin() != RealRHI::Result::Success) {
         return 1;
     }
+    list->BindPipeline(pipeline.Raw());
+    list->UseResource(output.Raw());
+    list->DispatchCompute(1, 1, 1);
 
     RealRHI::BarrierDesc barriers;
     barriers.buffers.push_back({
@@ -77,9 +77,9 @@ int main() {
         .size = outputDesc.size,
     });
     const RealRHI::BufferCopyRegion copy{ .size = outputDesc.size };
-    if (list->Barrier(barriers) != RealRHI::Result::Success ||
-        list->CopyBuffer(output.Raw(), readback.Raw(), copy) != RealRHI::Result::Success ||
-        list->End() != RealRHI::Result::Success) {
+    list->Barrier(barriers);
+    list->CopyBuffer(output.Raw(), readback.Raw(), copy);
+    if (list->End() != RealRHI::Result::Success) {
         return 1;
     }
 

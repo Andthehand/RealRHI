@@ -64,20 +64,20 @@ namespace RealRHI {
 
         // Explicitly declare shader-visible bindless resources for this recording.
         // Must be called while recording, before submission. Retained through reset.
-        virtual Result UseResource(Texture* texture) = 0;
-        virtual Result UseResource(Buffer* buffer) = 0;
+        virtual void UseResource(Texture* texture) = 0;
+        virtual void UseResource(Buffer* buffer) = 0;
 
-        virtual Result BindPipeline(Pipeline* pipeline) = 0;
-		virtual Result DispatchCompute(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) = 0;
+        virtual void BindPipeline(Pipeline* pipeline) = 0;
+		virtual void DispatchCompute(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) = 0;
         virtual void BindVertexBuffer(Buffer* vertexBuffer) = 0;
 		virtual void BindIndexBuffer(Buffer* indexBuffer) = 0;
 
-        virtual Result CopyBuffer(Buffer* source, Buffer* destination, const BufferCopyRegion& region) = 0;
-        virtual Result CopyBufferToTexture(Buffer* source, Texture* destination, const BufferTextureCopyRegion& region) = 0;
-        virtual Result CopyTextureToBuffer(Texture* source, Buffer* destination, const BufferTextureCopyRegion& region) = 0;
-        virtual Result CopyTexture(Texture* source, Texture* destination, const TextureCopyRegion& region) = 0;
+        virtual void CopyBuffer(Buffer* source, Buffer* destination, const BufferCopyRegion& region) = 0;
+        virtual void CopyBufferToTexture(Buffer* source, Texture* destination, const BufferTextureCopyRegion& region) = 0;
+        virtual void CopyTextureToBuffer(Texture* source, Buffer* destination, const BufferTextureCopyRegion& region) = 0;
+        virtual void CopyTexture(Texture* source, Texture* destination, const TextureCopyRegion& region) = 0;
 
-		virtual Result Barrier(const BarrierDesc& barriers) = 0;
+		virtual void Barrier(const BarrierDesc& barriers) = 0;
 
         virtual void Draw(uint32_t vertexCount) = 0;
 		virtual void DrawIndexed(uint32_t indexCount) = 0;
