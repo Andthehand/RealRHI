@@ -601,6 +601,125 @@ int main() {
         Expect(transferList->Reset() == RealRHI::Result::Success, "Reset transfer-family list");
     }
 
+    // Explicit release/acquire ownership transfer between distinct queue families.
+    // When queue roles alias the same family, use a normal memory barrier instead.
+    {
+        auto* graphics = device->GetCommandQueue(RealRHI::QueueType::Graphics);
+        auto* compute = device->GetCommandQueue(RealRHI::QueueType::Compute);
+        auto* transfer = device->GetCommandQueue(RealRHI::QueueType::Transfer);
+        auto* vkGraphics = dynamic_cast<RealRHI::VulkanCommandQueue*>(graphics);
+        auto* vkCompute = dynamic_cast<RealRHI::VulkanCommandQueue*>(compute);
+        auto* vkTransfer = dynamic_cast<RealRHI::VulkanCommandQueue*>(transfer);
+        Expect(vkGraphics && vkCompute && vkTransfer, "Queue roles resolve to Vulkan queues");
+
+        // Test transfer -> compute -> graphics, including the aliasing case.
+        const RealRHI::QueueType roles[] = {
+            RealRHI::QueueType::Transfer,
+            RealRHI::QueueType::Compute,
+            RealRHI::QueueType::Graphics
+        };
+        RealRHI::CommandQueue* queues[] = { transfer, compute, graphics };
+        const uint32_t families[] = {
+            vkTransfer->GetQueueId().familyIndex,
+            vkCompute->GetQueueId().familyIndex,
+            vkGraphics->GetQueueId().familyIndex
+        };
+
+        RealRHI::Ref<RealRHI::Buffer> buffer;
+        RealRHI::BufferDesc bufferDesc{};
+        bufferDesc.size = 256;
+        bufferDesc.usage = RealRHI::BufferUsage::TransferSrc | RealRHI::BufferUsage::TransferDst |
+            RealRHI::BufferUsage::Storage;
+        Expect(device->CreateBuffer(bufferDesc, buffer) == RealRHI::Result::Success,
+            "Create cross-queue buffer");
+
+        RealRHI::SubmissionToken dependency{};
+        for (uint32_t i = 0; i < 3; ++i) {
+            RealRHI::Ref<RealRHI::CommandAllocator> allocatorForQueue;
+            Expect(device->CreateCommandAllocator(roles[i], allocatorForQueue) == RealRHI::Result::Success,
+                "Create role-specific allocator");
+            RealRHI::Ref<RealRHI::CommandList> list;
+            Expect(device->CreateCommandList(allocatorForQueue.Raw(), list) == RealRHI::Result::Success,
+                "Create role-specific list");
+            Expect(list->Begin() == RealRHI::Result::Success, "Begin role-specific list");
+
+            // A barrier on the receiving queue acquires ownership only if the
+            // preceding queue family is different. The release is recorded
+            // on the producing queue in the previous iteration below.
+            if (i > 0 && families[i - 1] != families[i]) {
+                RealRHI::BarrierDesc acquire;
+                acquire.buffers.push_back({
+                    .buffer = buffer.Raw(),
+                    .before = { RealRHI::PipelineStage::None, RealRHI::ResourceAccess::None },
+                    .after = { RealRHI::PipelineStage::AllCommands, RealRHI::ResourceAccess::MemoryRead },
+                    .offset = 0,
+                    .size = bufferDesc.size,
+                    .sourceQueue = roles[i - 1],
+                    .destinationQueue = roles[i],
+                });
+                list->Barrier(acquire);
+            }
+
+            if (i < 2 && families[i] != families[i + 1]) {
+                RealRHI::BarrierDesc release;
+                release.buffers.push_back({
+                    .buffer = buffer.Raw(),
+                    .before = { RealRHI::PipelineStage::AllCommands, RealRHI::ResourceAccess::MemoryWrite },
+                    .after = { RealRHI::PipelineStage::None, RealRHI::ResourceAccess::None },
+                    .offset = 0,
+                    .size = bufferDesc.size,
+                    .sourceQueue = roles[i],
+                    .destinationQueue = roles[i + 1],
+                });
+                list->Barrier(release);
+            }
+
+            Expect(list->End() == RealRHI::Result::Success, "End role-specific list");
+            RealRHI::CommandList* commands[] = { list.Raw() };
+            RealRHI::SubmissionToken waits[] = { dependency };
+            const auto token = queues[i]->Submit(RealRHI::SubmitInfo{
+                .commandLists = commands,
+                .waitFor = dependency.IsValid()
+                    ? std::span<const RealRHI::SubmissionToken>(waits, 1)
+                    : std::span<const RealRHI::SubmissionToken>{},
+            });
+            Expect(token.IsValid(), "Submit ownership transfer chain");
+            queues[i]->Wait(token);
+            Expect(list->Reset() == RealRHI::Result::Success, "Reset ownership transfer list");
+            dependency = token;
+        }
+
+        // Keep command lists and allocators alive while 32 submissions are in flight.
+        std::vector<RealRHI::Ref<RealRHI::CommandAllocator>> allocators;
+        std::vector<RealRHI::Ref<RealRHI::CommandList>> lists;
+        allocators.reserve(32);
+        lists.reserve(32);
+        for (uint32_t iteration = 0; iteration < 32; ++iteration) {
+            const uint32_t roleIndex = iteration % 3;
+            RealRHI::Ref<RealRHI::CommandAllocator> allocatorForQueue;
+            Expect(device->CreateCommandAllocator(roles[roleIndex], allocatorForQueue) ==
+                RealRHI::Result::Success, "Create stress allocator");
+            RealRHI::Ref<RealRHI::CommandList> list;
+            Expect(device->CreateCommandList(allocatorForQueue.Raw(), list) ==
+                RealRHI::Result::Success, "Create stress list");
+            Expect(list->Begin() == RealRHI::Result::Success, "Begin stress list");
+            Expect(list->End() == RealRHI::Result::Success, "End stress list");
+            RealRHI::CommandList* commands[] = { list.Raw() };
+            const RealRHI::SubmissionToken waits[] = { dependency };
+            dependency = queues[roleIndex]->Submit(RealRHI::SubmitInfo{
+                .commandLists = commands,
+                .waitFor = waits,
+            });
+            Expect(dependency.IsValid(), "Submit stress dependency");
+            allocators.push_back(std::move(allocatorForQueue));
+            lists.push_back(std::move(list));
+        }
+        queues[31 % 3]->Wait(dependency);
+        for (auto& list : lists) {
+            Expect(list->Reset() == RealRHI::Result::Success, "Reset completed stress list");
+        }
+    }
+
     std::cout << "QueueSubmissionTests passed" << std::endl;
     return 0;
 }
