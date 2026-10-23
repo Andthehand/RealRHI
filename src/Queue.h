@@ -7,6 +7,12 @@
 namespace RealRHI {
     class CommandList;
 
+    enum class QueueType {
+        Graphics,
+        Compute,
+        Transfer
+    };
+
     struct QueueId {
         uint32_t familyIndex = 0;
         uint32_t queueIndex = 0;
