@@ -538,6 +538,27 @@ int main() {
             "End compute validation command list");
     }
 
+    // Descriptor-heap push data supports valid writes and rejects invalid ranges.
+    {
+        RealRHI::Ref<RealRHI::CommandList> pushList;
+        Expect(device->CreateCommandList(allocator.Raw(), pushList) == RealRHI::Result::Success,
+            "Create push-data command list");
+        Expect(pushList->Begin() == RealRHI::Result::Success, "Begin push-data command list");
+
+        const std::array<uint32_t, 4> values{ 3, 5, 7, 11 };
+        pushList->SetPushConstants(values.data(), sizeof(values));
+
+        const auto errorsBefore = g_ProgrammerErrors;
+        pushList->SetPushConstants(values.data(), sizeof(values), 2);
+        Expect(g_ProgrammerErrors > errorsBefore, "Reject unaligned push-data offset");
+
+        Expect(pushList->End() == RealRHI::Result::Success, "End push-data command list");
+        const auto token = graphicsQueue->Submit(*pushList);
+        Expect(token.IsValid(), "Submit push-data command list");
+        graphicsQueue->Wait(token);
+        Expect(pushList->Reset() == RealRHI::Result::Success, "Reset push-data command list");
+    }
+
     std::cout << "QueueSubmissionTests passed" << std::endl;
     return 0;
 }

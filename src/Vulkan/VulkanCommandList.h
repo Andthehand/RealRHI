@@ -31,6 +31,7 @@ namespace RealRHI {
 		void UseResource(Texture* texture) override;
 		void UseResource(Buffer* buffer) override;
 		void BindPipeline(Pipeline* pipeline) override;
+		void SetPushConstants(const void* data, uint32_t size, uint32_t offset = 0) override;
 		void DispatchCompute(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
 		void BindVertexBuffer(Buffer* vertexBuffer) override;
 		void BindIndexBuffer(Buffer* indexBuffer) override;

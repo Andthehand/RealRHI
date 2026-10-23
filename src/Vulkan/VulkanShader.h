@@ -23,6 +23,7 @@ namespace RealRHI {
 		const std::vector<EntryPoint>& GetEntryPoints() const { return m_EntryPoints; }
 		const BufferLayout& GetBufferLayout() const { return m_BufferLayout; }
 		const DescriptorsDesc& GetDescriptorsDesc() const { return m_DescriptorsDesc; }
+		uint32_t GetPushDataSize() const { return m_PushDataSize; }
 
 	private:
 		Slang::ComPtr<slang::IModule> LoadModule(
@@ -62,6 +63,7 @@ namespace RealRHI {
 		std::vector<EntryPoint> m_EntryPoints;
 		BufferLayout m_BufferLayout;
 		DescriptorsDesc m_DescriptorsDesc;
+		uint32_t m_PushDataSize = 0;
 
 		inline static Slang::ComPtr<slang::IGlobalSession> s_SlangGlobalSession;
 		inline static Slang::ComPtr<slang::ISession> s_SlangSession;
