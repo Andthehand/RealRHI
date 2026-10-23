@@ -715,6 +715,13 @@ int main() {
             lists.push_back(std::move(list));
         }
         queues[31 % 3]->Wait(dependency);
+
+        // The final timeline wait completes the dependency chain on the GPU,
+        // but each queue must finalize its own pending command lists.
+        for (RealRHI::CommandQueue* queue : queues) {
+            queue->WaitIdle();
+        }
+
         for (auto& list : lists) {
             Expect(list->Reset() == RealRHI::Result::Success, "Reset completed stress list");
         }
