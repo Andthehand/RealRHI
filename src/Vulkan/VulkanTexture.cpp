@@ -140,9 +140,7 @@ namespace RealRHI {
                     .newLayout = newLayout,
                     .subresources = { mip, 1, layer, 1 },
                 });
-                if (commandList->Barrier(barriers) != Result::Success) {
-                    return Result::Failed;
-                }
+                commandList->Barrier(barriers);
             }
         }
         return Result::Success;
