@@ -90,7 +90,8 @@ namespace RealRHI {
 		TextureLayout GetExpectedLayout(const VulkanTexture* texture, uint32_t mip, uint32_t layer) const;
 		// Check if the recorded layouts match the expected layouts at submission time, and update the predicted layouts accordingly.
 		bool ValidateSubmissionLayouts(LayoutMap& predicted) const;
-		bool ValidateSubmissionOwnership(QueueId queue, std::span<const SubmissionToken> waits) const;
+		bool ValidateSubmissionOwnership(QueueId queue, std::span<const SubmissionToken> waits,
+			OwnershipMap& predicted) const;
 		void CommitSubmissionOwnership(SubmissionToken token) const;
 		
 		// Only called by the command queue after submission is complete. 
