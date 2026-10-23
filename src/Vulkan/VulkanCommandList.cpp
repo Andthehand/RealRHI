@@ -288,7 +288,6 @@ namespace RealRHI {
 		}
 
 		RetainResource(resource);
-		return;
 	}
 
 	void VulkanCommandList::UseResource(Buffer* buffer) {
@@ -304,7 +303,6 @@ namespace RealRHI {
 		}
 
 		RetainResource(resource);
-		return;
 	}
 
     void VulkanCommandList::BindPipeline(Pipeline* pipeline) {
@@ -326,7 +324,6 @@ namespace RealRHI {
 			m_ComputePipelineBound = true;
 		}
 
-		return;
     }
 
 	void VulkanCommandList::DispatchCompute(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) {
@@ -338,7 +335,6 @@ namespace RealRHI {
 		}
 
 		vkCmdDispatch(m_CommandBuffer, groupCountX, groupCountY, groupCountZ);
-		return;
 	}
 
     void VulkanCommandList::BindVertexBuffer(Buffer* vertexBuffer) {
@@ -386,7 +382,6 @@ namespace RealRHI {
 			.size = region.size,
 		};
 		vkCmdCopyBuffer(m_CommandBuffer, sourceBuffer->GetBuffer(), destinationBuffer->GetBuffer(), 1, &copyRegion);
-		return;
 	}
 
 	TextureLayout VulkanCommandList::GetExpectedLayout(const VulkanTexture* texture, uint32_t mip, uint32_t layer) const {
@@ -484,7 +479,6 @@ namespace RealRHI {
 		};
 		vkCmdCopyBufferToImage(m_CommandBuffer, sourceBuffer->GetBuffer(), destinationTexture->m_Image,
 			                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
-		return;
 	}
 
 	void VulkanCommandList::CopyTextureToBuffer(Texture* source, Buffer* destination, const BufferTextureCopyRegion& region) {
@@ -545,7 +539,6 @@ namespace RealRHI {
 		};
 		vkCmdCopyImageToBuffer(m_CommandBuffer, texture->m_Image,
 			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer->GetBuffer(), 1, &copyRegion);
-		return;
 	}
 
 	void VulkanCommandList::CopyTexture(Texture* source, Texture* destination, const TextureCopyRegion& region) {
@@ -610,7 +603,6 @@ namespace RealRHI {
 		};
 		vkCmdCopyImage(m_CommandBuffer, sourceTexture->m_Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 			destinationTexture->m_Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
-		return;
 	}
 
 	void VulkanCommandList::Barrier(const BarrierDesc& barriers) {
@@ -755,7 +747,6 @@ namespace RealRHI {
 			.pImageMemoryBarriers = imageBarriers.data(),
 		};
 		vkCmdPipelineBarrier2(m_CommandBuffer, &dependencyInfo);
-		return;
 	}
 
     void VulkanCommandList::Draw(uint32_t vertexCount) {
