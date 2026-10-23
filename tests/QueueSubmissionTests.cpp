@@ -559,6 +559,48 @@ int main() {
         Expect(pushList->Reset() == RealRHI::Result::Success, "Reset push-data command list");
     }
 
+    // Queue roles can alias the same Vulkan queue on devices without dedicated families.
+    {
+        auto* computeQueue = device->GetCommandQueue(RealRHI::QueueType::Compute);
+        auto* transferQueue = device->GetCommandQueue(RealRHI::QueueType::Transfer);
+        Expect(computeQueue != nullptr, "Compute queue is available");
+        Expect(transferQueue != nullptr, "Transfer queue is available");
+
+        RealRHI::Ref<RealRHI::CommandAllocator> computeAllocator;
+        Expect(device->CreateCommandAllocator(RealRHI::QueueType::Compute, computeAllocator) ==
+            RealRHI::Result::Success, "Create compute-family allocator");
+
+        RealRHI::Ref<RealRHI::CommandList> computeList;
+        Expect(device->CreateCommandList(computeAllocator.Raw(), computeList) ==
+            RealRHI::Result::Success, "Create compute-family command list");
+        Expect(computeList->Begin() == RealRHI::Result::Success, "Begin compute-family list");
+        Expect(computeList->End() == RealRHI::Result::Success, "End compute-family list");
+
+        const auto computeToken = computeQueue->Submit(*computeList);
+        Expect(computeToken.IsValid(), "Submit compute-family command list");
+        computeQueue->Wait(computeToken);
+        Expect(computeList->Reset() == RealRHI::Result::Success, "Reset compute-family list");
+
+        RealRHI::Ref<RealRHI::CommandAllocator> transferAllocator;
+        Expect(device->CreateCommandAllocator(RealRHI::QueueType::Transfer, transferAllocator) ==
+            RealRHI::Result::Success, "Create transfer-family allocator");
+        RealRHI::Ref<RealRHI::CommandList> transferList;
+        Expect(device->CreateCommandList(transferAllocator.Raw(), transferList) ==
+            RealRHI::Result::Success, "Create transfer-family command list");
+        Expect(transferList->Begin() == RealRHI::Result::Success, "Begin transfer-family list");
+        Expect(transferList->End() == RealRHI::Result::Success, "End transfer-family list");
+
+        RealRHI::CommandList* lists[] = { transferList.Raw() };
+        const RealRHI::SubmissionToken waits[] = { computeToken };
+        const auto transferToken = transferQueue->Submit(RealRHI::SubmitInfo{
+            .commandLists = lists,
+            .waitFor = waits,
+        });
+        Expect(transferToken.IsValid(), "Submit transfer-family list with compute dependency");
+        transferQueue->Wait(transferToken);
+        Expect(transferList->Reset() == RealRHI::Result::Success, "Reset transfer-family list");
+    }
+
     std::cout << "QueueSubmissionTests passed" << std::endl;
     return 0;
 }

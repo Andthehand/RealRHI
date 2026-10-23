@@ -195,8 +195,16 @@ namespace RealRHI {
 	}
 
 	Result VulkanDevice::CreateCommandAllocator(Ref<CommandAllocator>& outAllocator) const {
+		return CreateCommandAllocator(QueueType::Graphics, outAllocator);
+	}
+
+	Result VulkanDevice::CreateCommandAllocator(QueueType type, Ref<CommandAllocator>& outAllocator) const {
 		Ref<VulkanCommandAllocator> allocator;
-		const Result result = VulkanCommandAllocator::Create(this, allocator);
+		const auto* queue = static_cast<VulkanCommandQueue*>(GetCommandQueue(type));
+		if (queue == nullptr) {
+			return Result::Failed;
+		}
+		const Result result = VulkanCommandAllocator::Create(this, queue->GetQueueId().familyIndex, allocator);
 		if (result == Result::Success) {
 			outAllocator = allocator.As<CommandAllocator>();
 		}
@@ -214,6 +222,16 @@ namespace RealRHI {
 			outCommandList = list.As<CommandList>();
 		}
 		return result;
+	}
+
+	CommandQueue* VulkanDevice::GetCommandQueue(QueueType type) const {
+		uint32_t family = m_GraphicsQueueFamily;
+		switch (type) {
+			case QueueType::Graphics: break;
+			case QueueType::Compute: family = m_ComputeQueueFamily; break;
+			case QueueType::Transfer: family = m_TransferQueueFamily; break;
+		}
+		return GetCommandQueue(QueueId{ family, 0 });
 	}
 
 	CommandQueue* VulkanDevice::GetGraphicsCommandQueue() const {
@@ -599,11 +617,15 @@ namespace RealRHI {
 
         m_GraphicsQueueFamily = indices.graphicsFamily.value();
         m_PresentQueueFamily = indices.presentFamily.value();
+        m_ComputeQueueFamily = indices.computeFamily.value_or(m_GraphicsQueueFamily);
+        m_TransferQueueFamily = indices.transferFamily.value_or(m_ComputeQueueFamily);
 
         std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
         std::set<uint32_t> uniqueQueueFamilies = {
             m_GraphicsQueueFamily,
-            m_PresentQueueFamily
+            m_PresentQueueFamily,
+            m_ComputeQueueFamily,
+            m_TransferQueueFamily
         };
 
         float queuePriority = 1.0f;
@@ -667,51 +689,71 @@ namespace RealRHI {
     QueueFamilyIndices VulkanDevice::FindQueueFamilies(VkPhysicalDevice device) {
         QueueFamilyIndices indices;
 
-        uint32_t queueFamilyCount = 0;
-        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+        uint32_t count = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &count, nullptr);
+        std::vector<VkQueueFamilyProperties> families(count);
+        vkGetPhysicalDeviceQueueFamilyProperties(device, &count, families.data());
 
-        std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
-        vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
-
-        for (uint32_t queueFamilyIndex = 0; queueFamilyIndex < queueFamilyCount; ++queueFamilyIndex) {
-            const auto& queueFamily = queueFamilies[queueFamilyIndex];
-
-            if (!indices.graphicsFamily.has_value() && (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
-                indices.graphicsFamily = queueFamilyIndex;
+        for (uint32_t i = 0; i < count; ++i) {
+            const VkQueueFlags flags = families[i].queueFlags;
+            if (families[i].queueCount == 0) {
+                continue;
             }
-
-            if (SDL_Vulkan_GetPresentationSupport(m_Instance, device, queueFamilyIndex) && !indices.presentFamily.has_value()) {
-                indices.presentFamily = queueFamilyIndex;
+            if (!indices.graphicsFamily && (flags & VK_QUEUE_GRAPHICS_BIT)) {
+                indices.graphicsFamily = i;
             }
-
-            if (indices.IsComplete()) {
-                break;
+            if (!indices.presentFamily && SDL_Vulkan_GetPresentationSupport(m_Instance, device, i)) {
+                indices.presentFamily = i;
+            }
+            if ((flags & VK_QUEUE_COMPUTE_BIT) &&
+                (!indices.computeFamily || !(flags & VK_QUEUE_GRAPHICS_BIT))) {
+                indices.computeFamily = i;
+            }
+            if ((flags & VK_QUEUE_TRANSFER_BIT) &&
+                (!indices.transferFamily || !(flags & (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)))) {
+                indices.transferFamily = i;
             }
         }
 
-        if (!indices.presentFamily.has_value() && indices.graphicsFamily.has_value()) {
+        if (!indices.presentFamily && indices.graphicsFamily) {
             indices.presentFamily = indices.graphicsFamily;
         }
-
+        if (!indices.computeFamily) {
+            indices.computeFamily = indices.graphicsFamily;
+        }
+        if (!indices.transferFamily) {
+            indices.transferFamily = indices.computeFamily;
+        }
         return indices;
     }
 
     bool VulkanDevice::CreateCommandQueues() {
-        vkGetDeviceQueue(m_Device, m_GraphicsQueueFamily, 0, &m_GraphicsQueue);
-        vkGetDeviceQueue(m_Device, m_PresentQueueFamily, 0, &m_PresentQueue);
-
         if (!m_Queues.empty()) {
-            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Command queues are already initialized.");
+            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "Command queues are already initialized.");
             return false;
         }
-        m_GraphicsCommandQueue = new VulkanCommandQueue(this, m_GraphicsQueueFamily, 0, m_GraphicsQueue);
-        m_Queues[QueueId{ m_GraphicsQueueFamily, 0 }] = m_GraphicsCommandQueue;
 
-        if (m_PresentQueueFamily != m_GraphicsQueueFamily) {
-            auto* presentQueue = new VulkanCommandQueue(this, m_PresentQueueFamily, 0, m_PresentQueue);
-            m_Queues[QueueId{ m_PresentQueueFamily, 0 }] = presentQueue;
+        const uint32_t families[] = {
+            m_GraphicsQueueFamily, m_PresentQueueFamily,
+            m_ComputeQueueFamily, m_TransferQueueFamily
+        };
+        for (uint32_t family : families) {
+            const QueueId id{ family, 0 };
+            if (m_Queues.contains(id)) {
+                continue;
+            }
+            VkQueue queue = VK_NULL_HANDLE;
+            vkGetDeviceQueue(m_Device, family, 0, &queue);
+            if (queue == VK_NULL_HANDLE) {
+                return false;
+            }
+            m_Queues[id] = new VulkanCommandQueue(this, family, 0, queue);
         }
 
+        m_GraphicsCommandQueue = m_Queues.at(QueueId{ m_GraphicsQueueFamily, 0 });
+        m_GraphicsQueue = m_GraphicsCommandQueue->GetQueue();
+        m_PresentQueue = m_Queues.at(QueueId{ m_PresentQueueFamily, 0 })->GetQueue();
         return true;
     }
 

@@ -3,9 +3,11 @@
 #include "Buffer.h"
 #include "Texture.h"
 #include "TextureDesc.h"
+#include "Queue.h"
 
 #include <cstdint>
 #include <vector>
+#include <optional>
 
 namespace RealRHI {
 	enum class PipelineStage : uint64_t {
@@ -66,6 +68,8 @@ namespace RealRHI {
 		TextureLayout oldLayout = TextureLayout::Undefined;
 		TextureLayout newLayout = TextureLayout::Undefined;
 		TextureSubresourceRange subresources{};
+		std::optional<QueueType> sourceQueue;
+		std::optional<QueueType> destinationQueue;
 	};
 
 	struct BufferBarrier {
@@ -74,6 +78,8 @@ namespace RealRHI {
 		ResourceState after{};
 		uint64_t offset = 0;
 		uint64_t size = 0;
+		std::optional<QueueType> sourceQueue;
+		std::optional<QueueType> destinationQueue;
 	};
 
 	struct MemoryBarrier {

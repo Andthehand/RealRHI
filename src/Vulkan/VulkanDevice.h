@@ -21,6 +21,8 @@ namespace RealRHI {
 	struct QueueFamilyIndices {
 		std::optional<uint32_t> graphicsFamily;
 		std::optional<uint32_t> presentFamily;
+		std::optional<uint32_t> computeFamily;
+		std::optional<uint32_t> transferFamily;
 
 		bool IsComplete() const {
 			return graphicsFamily.has_value() && presentFamily.has_value();
@@ -43,6 +45,7 @@ namespace RealRHI {
 		uint32_t GetGraphicsQueueFamily() const { return m_GraphicsQueueFamily; }
 		uint32_t GetPresentQueueFamily() const { return m_PresentQueueFamily; }
 		CommandQueue* GetGraphicsCommandQueue() const override;
+		CommandQueue* GetCommandQueue(QueueType type) const override;
 		VulkanCommandQueue* GetCommandQueue(const QueueId& queueId) const;
 		std::recursive_mutex& GetStateTrackingMutex() const { return m_StateTrackingMutex; }
 
@@ -65,6 +68,7 @@ namespace RealRHI {
 		Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) const override;
 		Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const override;
         Result CreateCommandAllocator(Ref<CommandAllocator>& outAllocator) const override;
+		Result CreateCommandAllocator(QueueType type, Ref<CommandAllocator>& outAllocator) const override;
         Result CreateCommandList(CommandAllocator* allocator, Ref<CommandList>& outCommandList) const override;
 
 		// TODO: Temp?
@@ -103,6 +107,8 @@ namespace RealRHI {
 			VkDevice m_Device = VK_NULL_HANDLE;
 			uint32_t m_GraphicsQueueFamily = 0;
 			uint32_t m_PresentQueueFamily = 0;
+			uint32_t m_ComputeQueueFamily = 0;
+			uint32_t m_TransferQueueFamily = 0;
 			VkQueue m_GraphicsQueue = VK_NULL_HANDLE;
 			VkQueue m_PresentQueue = VK_NULL_HANDLE;
 			VulkanCommandQueue* m_GraphicsCommandQueue = nullptr;

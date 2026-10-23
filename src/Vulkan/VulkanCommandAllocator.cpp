@@ -2,11 +2,15 @@
 #include "VulkanDevice.h"
 
 namespace RealRHI {
-    VulkanCommandAllocator::VulkanCommandAllocator(const VulkanDevice* device)
-        : m_Device(device), m_Family(device->GetGraphicsQueueFamily()) {}
+    VulkanCommandAllocator::VulkanCommandAllocator(const VulkanDevice* device, uint32_t family)
+        : m_Device(device), m_Family(family) {}
 
     Result VulkanCommandAllocator::Create(const VulkanDevice* device, Ref<VulkanCommandAllocator>& out) {
-        Ref<VulkanCommandAllocator> allocator = Ref<VulkanCommandAllocator>::Create(device);
+        return Create(device, device->GetGraphicsQueueFamily(), out);
+    }
+
+    Result VulkanCommandAllocator::Create(const VulkanDevice* device, uint32_t family, Ref<VulkanCommandAllocator>& out) {
+        Ref<VulkanCommandAllocator> allocator = Ref<VulkanCommandAllocator>::Create(device, family);
         VkCommandPoolCreateInfo info{
             .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
             .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,

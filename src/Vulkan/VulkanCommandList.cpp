@@ -2,6 +2,7 @@
 
 #include "VulkanTextureView.h"
 #include "VulkanPipeline.h"
+#include "VulkanCommandQueue.h"
 #include "VulkanBuffer.h"
 #include "VulkanTexture.h"
 
@@ -16,7 +17,7 @@
 namespace RealRHI {
 
     VulkanCommandList::VulkanCommandList(const VulkanDevice* device, Ref<VulkanCommandAllocator> allocator)
-        : m_Device(device), m_Allocator(std::move(allocator)), m_QueueId{ device->GetGraphicsQueueFamily() } {}
+        : m_Device(device), m_Allocator(std::move(allocator)), m_QueueId{ m_Allocator->GetQueueFamilyIndex(), 0 } {}
 
     VulkanCommandList::~VulkanCommandList() {
         std::scoped_lock lock(m_StateMutex);
@@ -633,6 +634,21 @@ namespace RealRHI {
 			return;
 		}
 
+		auto getQueueFamilies = [this](std::optional<QueueType> source,
+			std::optional<QueueType> destination) {
+			std::pair<uint32_t, uint32_t> families{ VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED };
+			if (!source || !destination) {
+				return families;
+			}
+			auto* sourceQueue = static_cast<VulkanCommandQueue*>(m_Device->GetCommandQueue(*source));
+			auto* destinationQueue = static_cast<VulkanCommandQueue*>(m_Device->GetCommandQueue(*destination));
+			if (sourceQueue != nullptr && destinationQueue != nullptr &&
+				sourceQueue->GetQueueId().familyIndex != destinationQueue->GetQueueId().familyIndex) {
+				families = { sourceQueue->GetQueueId().familyIndex, destinationQueue->GetQueueId().familyIndex };
+			}
+			return families;
+		};
+
 		std::vector<VkMemoryBarrier2> memoryBarriers;
 		std::vector<VkBufferMemoryBarrier2> bufferBarriers;
 		std::vector<VkImageMemoryBarrier2> imageBarriers;
@@ -660,14 +676,16 @@ namespace RealRHI {
 				return;
 			}
 
+			const auto [sourceFamily, destinationFamily] =
+				getQueueFamilies(barrier.sourceQueue, barrier.destinationQueue);
 			bufferBarriers.push_back({
 				.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
 				.srcStageMask = Utils::ToVkPipelineStages(barrier.before.stages),
 				.srcAccessMask = Utils::ToVkResourceAccess(barrier.before.access),
 				.dstStageMask = Utils::ToVkPipelineStages(barrier.after.stages),
 				.dstAccessMask = Utils::ToVkResourceAccess(barrier.after.access),
-				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.srcQueueFamilyIndex = sourceFamily,
+				.dstQueueFamilyIndex = destinationFamily,
 				.buffer = buffer->GetBuffer(),
 				.offset = barrier.offset,
 				.size = barrier.size,
@@ -697,6 +715,8 @@ namespace RealRHI {
                 }
             }
 
+			const auto [sourceFamily, destinationFamily] =
+				getQueueFamilies(barrier.sourceQueue, barrier.destinationQueue);
 			imageBarriers.push_back({
 				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
 				.srcStageMask = Utils::ToVkPipelineStages(barrier.before.stages),
@@ -705,8 +725,8 @@ namespace RealRHI {
 				.dstAccessMask = Utils::ToVkResourceAccess(barrier.after.access),
 				.oldLayout = Utils::TextureLayoutToVkImageLayout(barrier.oldLayout),
 				.newLayout = Utils::TextureLayoutToVkImageLayout(barrier.newLayout),
-				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.srcQueueFamilyIndex = sourceFamily,
+				.dstQueueFamilyIndex = destinationFamily,
 				.image = texture->m_Image,
 				.subresourceRange = {
 					.aspectMask = Utils::TextureFormatToVkImageAspect(Utils::VkFormatToTextureFormat(texture->m_Format)),
