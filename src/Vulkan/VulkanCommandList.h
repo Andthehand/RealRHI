@@ -80,6 +80,7 @@ namespace RealRHI {
 			}
 		};
 		using LayoutMap = std::unordered_map<SubresourceKey, TextureLayout, SubresourceKeyHash>;
+		using OwnershipMap = std::unordered_map<SubresourceKey, VulkanTexture::SubmittedOwnership, SubresourceKeyHash>;
 		struct OwnershipTransition {
 			SubresourceKey key{};
 			uint32_t sourceFamily = VK_QUEUE_FAMILY_IGNORED;
