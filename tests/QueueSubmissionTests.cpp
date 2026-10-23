@@ -764,6 +764,84 @@ int main() {
         Expect(destroyed, "Deferred deletion waits for all queue dependencies");
     }
 
+    // A texture ownership release must be matched by an acquire that waits
+    // on the source queue's timeline semaphore.
+    {
+        auto* sourceQueue = device->GetCommandQueue(RealRHI::QueueType::Transfer);
+        auto* targetQueue = device->GetCommandQueue(RealRHI::QueueType::Graphics);
+        const auto sourceFamily = static_cast<RealRHI::VulkanCommandQueue*>(sourceQueue)->GetQueueId().familyIndex;
+        const auto targetFamily = static_cast<RealRHI::VulkanCommandQueue*>(targetQueue)->GetQueueId().familyIndex;
+
+        RealRHI::TextureDesc textureDesc{};
+        textureDesc.width = 4;
+        textureDesc.height = 4;
+        textureDesc.format = RealRHI::TextureFormat::RGBA8_UNorm;
+        textureDesc.usage = RealRHI::TextureUsage::TransferSrc | RealRHI::TextureUsage::TransferDst;
+        RealRHI::Ref<RealRHI::Texture> texture;
+        Expect(device->CreateTexture(textureDesc, texture) == RealRHI::Result::Success,
+            "Create cross-queue ownership texture");
+
+        RealRHI::Ref<RealRHI::CommandAllocator> sourceAllocator;
+        RealRHI::Ref<RealRHI::CommandAllocator> targetAllocator;
+        RealRHI::Ref<RealRHI::CommandList> release;
+        RealRHI::Ref<RealRHI::CommandList> acquire;
+        Expect(device->CreateCommandAllocator(RealRHI::QueueType::Transfer, sourceAllocator) ==
+            RealRHI::Result::Success, "Create texture release allocator");
+        Expect(device->CreateCommandAllocator(RealRHI::QueueType::Graphics, targetAllocator) ==
+            RealRHI::Result::Success, "Create texture acquire allocator");
+        Expect(device->CreateCommandList(sourceAllocator.Raw(), release) == RealRHI::Result::Success,
+            "Create texture release list");
+        Expect(device->CreateCommandList(targetAllocator.Raw(), acquire) == RealRHI::Result::Success,
+            "Create texture acquire list");
+
+        RealRHI::BarrierDesc releaseBarrier;
+        releaseBarrier.textures.push_back({
+            .texture = texture.Raw(),
+            .before = { RealRHI::PipelineStage::None, RealRHI::ResourceAccess::None },
+            .after = { RealRHI::PipelineStage::None, RealRHI::ResourceAccess::None },
+            .oldLayout = RealRHI::TextureLayout::Undefined,
+            .newLayout = RealRHI::TextureLayout::TransferDst,
+            .sourceQueue = RealRHI::QueueType::Transfer,
+            .destinationQueue = RealRHI::QueueType::Graphics,
+        });
+
+        Expect(release->Begin() == RealRHI::Result::Success, "Begin texture release");
+        release->Barrier(releaseBarrier);
+        Expect(release->End() == RealRHI::Result::Success, "End texture release");
+        const auto releaseToken = sourceQueue->Submit(*release);
+        Expect(releaseToken.IsValid(), "Submit texture release");
+
+        RealRHI::BarrierDesc acquireBarrier = releaseBarrier;
+        // Release and acquire must describe the same layout transition.
+        acquireBarrier.textures[0].after = {
+            RealRHI::PipelineStage::Transfer, RealRHI::ResourceAccess::TransferWrite
+        };
+        Expect(acquire->Begin() == RealRHI::Result::Success, "Begin texture acquire");
+        acquire->Barrier(acquireBarrier);
+        Expect(acquire->End() == RealRHI::Result::Success, "End texture acquire");
+
+        RealRHI::CommandList* commands[] = { acquire.Raw() };
+        if (sourceFamily != targetFamily) {
+            const auto errorsBefore = g_ProgrammerErrors;
+            const auto rejected = targetQueue->Submit(RealRHI::SubmitInfo{
+                .commandLists = commands,
+            });
+            Expect(!rejected.IsValid() && g_ProgrammerErrors > errorsBefore,
+                "Reject texture acquire without timeline dependency");
+        }
+
+        const RealRHI::SubmissionToken waits[] = { releaseToken };
+        const auto acquireToken = targetQueue->Submit(RealRHI::SubmitInfo{
+            .commandLists = commands,
+            .waitFor = waits,
+        });
+        Expect(acquireToken.IsValid(), "Submit texture acquire with dependency");
+        targetQueue->Wait(acquireToken);
+        sourceQueue->Wait(releaseToken);
+        Expect(release->Reset() == RealRHI::Result::Success, "Reset texture release");
+        Expect(acquire->Reset() == RealRHI::Result::Success, "Reset texture acquire");
+    }
+
     std::cout << "QueueSubmissionTests passed" << std::endl;
     return 0;
 }

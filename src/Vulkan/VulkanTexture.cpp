@@ -45,6 +45,7 @@ namespace RealRHI {
 		m_MipLevels = desc.mipLevels;
 		m_ArrayLayers = desc.arrayLayers;
 		m_SubresourceLayouts.assign(m_MipLevels * m_ArrayLayers, TextureLayout::Undefined);
+		m_SubresourceOwnership.assign(m_MipLevels * m_ArrayLayers, {});
 		m_ImageExtent = {
 			.width = desc.width,
 			.height = desc.height,
@@ -214,6 +215,7 @@ namespace RealRHI {
 	Result VulkanTexture::InitSwapChainTexture(VkFormat format, VkImage image) {
 		m_IsExternal = true;
 		m_SubresourceLayouts.assign(1, TextureLayout::Undefined);
+		m_SubresourceOwnership.assign(1, {});
 		m_Usage = TextureUsage::RenderTarget;
 		m_Format = format;
 		m_Image = image;

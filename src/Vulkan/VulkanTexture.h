@@ -58,12 +58,28 @@ namespace RealRHI {
 		}
 
 	private:
+		struct SubmittedOwnership {
+			uint32_t family = VK_QUEUE_FAMILY_IGNORED;
+			uint32_t pendingDestination = VK_QUEUE_FAMILY_IGNORED;
+			SubmissionToken releaseToken{};
+		};
+		SubmittedOwnership GetSubmittedOwnership(uint32_t mip, uint32_t layer) const {
+			std::scoped_lock lock(m_Device->GetStateTrackingMutex());
+			return m_SubresourceOwnership[mip * m_ArrayLayers + layer];
+		}
+		void SetSubmittedOwnership(uint32_t mip, uint32_t layer, SubmittedOwnership ownership) {
+			std::scoped_lock lock(m_Device->GetStateTrackingMutex());
+			m_SubresourceOwnership[mip * m_ArrayLayers + layer] = ownership;
+		}
+
+	private:
 		const VulkanDevice* m_Device = nullptr;
 		VkImage m_Image = VK_NULL_HANDLE;
 		VmaAllocation m_Allocation = VK_NULL_HANDLE;
 
 		// Submission-ordered state; never modified during command recording.
 		std::vector<TextureLayout> m_SubresourceLayouts;
+		std::vector<SubmittedOwnership> m_SubresourceOwnership;
 		TextureUsage m_Usage = TextureUsage::None;
 		VkFormat m_Format = VK_FORMAT_UNDEFINED;
 		bool m_IsExternal = false; // Whether the image is owned by us or external (e.g. swapchain)

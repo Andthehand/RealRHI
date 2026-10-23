@@ -8,6 +8,7 @@
 
 #include <mutex>
 #include <vector>
+#include <span>
 #include <unordered_map>
 
 namespace RealRHI {
@@ -78,10 +79,17 @@ namespace RealRHI {
 			}
 		};
 		using LayoutMap = std::unordered_map<SubresourceKey, TextureLayout, SubresourceKeyHash>;
+		struct OwnershipTransition {
+			SubresourceKey key{};
+			uint32_t sourceFamily = VK_QUEUE_FAMILY_IGNORED;
+			uint32_t destinationFamily = VK_QUEUE_FAMILY_IGNORED;
+		};
 
 		TextureLayout GetExpectedLayout(const VulkanTexture* texture, uint32_t mip, uint32_t layer) const;
 		// Check if the recorded layouts match the expected layouts at submission time, and update the predicted layouts accordingly.
 		bool ValidateSubmissionLayouts(LayoutMap& predicted) const;
+		bool ValidateSubmissionOwnership(QueueId queue, std::span<const SubmissionToken> waits) const;
+		void CommitSubmissionOwnership(SubmissionToken token) const;
 		
 		// Only called by the command queue after submission is complete. 
 		// Updates the submitted layouts of textures based on the recorded layouts during command recording.
@@ -112,6 +120,7 @@ namespace RealRHI {
 		// Recorded layout = the layout that was recorded for a given subresource during command recording.
 		LayoutMap m_InitialLayouts;
 		LayoutMap m_RecordedLayouts;
+		std::vector<OwnershipTransition> m_OwnershipTransitions;
 
 		VkCommandBuffer m_CommandBuffer = VK_NULL_HANDLE;
 	};

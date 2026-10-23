@@ -29,7 +29,8 @@ namespace RealRHI {
             std::span<const VkSemaphoreSubmitInfo> waitSemaphores,
             std::span<const VkSemaphoreSubmitInfo> signalSemaphores,
             std::span<CommandList*> trackedLists = {},
-            VkFence fence = VK_NULL_HANDLE);
+            VkFence fence = VK_NULL_HANDLE,
+            std::span<const SubmissionToken> waitTokens = {});
 
         bool IsComplete(const SubmissionToken& token) const override;
         void Wait(const SubmissionToken& token) override;

@@ -105,7 +105,7 @@ namespace RealRHI {
 			});
 		}
 
-		return SubmitTracked(commandBufferInfos, waitSemaphoreInfos, {}, trackedLists);
+		return SubmitTracked(commandBufferInfos, waitSemaphoreInfos, {}, trackedLists, VK_NULL_HANDLE, submitInfo.waitFor);
 	}
 
 	SubmissionToken VulkanCommandQueue::SubmitTracked(
@@ -113,7 +113,7 @@ namespace RealRHI {
 		std::span<const VkSemaphoreSubmitInfo> waitSemaphores,
 		std::span<const VkSemaphoreSubmitInfo> signalSemaphores,
 		std::span<CommandList*> trackedLists,
-		VkFence fence) {
+		VkFence fence, std::span<const SubmissionToken> waitTokens) {
 		// Retains references to the command lists until the submission is completed then releases them
 		std::vector<Ref<CommandList>> retainedLists;
 		retainedLists.reserve(trackedLists.size());
@@ -148,6 +148,11 @@ namespace RealRHI {
         std::scoped_lock stateLock(m_Device->GetStateTrackingMutex());
 		VulkanCommandList::LayoutMap predictedLayouts;
         for (CommandList* commandList : trackedLists) {
+            if (!static_cast<VulkanCommandList*>(commandList)->ValidateSubmissionOwnership(GetQueueId(), waitTokens)) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                    "Submission rejected: texture ownership transfer is missing a matching release or timeline dependency.");
+                return {};
+            }
             if (!static_cast<VulkanCommandList*>(commandList)->ValidateSubmissionLayouts(predictedLayouts)) {
                 m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
                     "Submission rejected: texture layout differs from the recorded initial layout.");
@@ -180,6 +185,8 @@ namespace RealRHI {
 
 		for (CommandList* commandList : trackedLists) {
 			static_cast<VulkanCommandList*>(commandList)->CommitSubmissionLayouts();
+			static_cast<VulkanCommandList*>(commandList)->CommitSubmissionOwnership(
+				SubmissionToken{ .queue = GetQueueId(), .value = submissionValue });
 		}
 		++m_NextFrameValue;
 		m_PendingSubmissions[submissionValue] = std::move(retainedLists);

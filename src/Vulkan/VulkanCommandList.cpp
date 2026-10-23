@@ -148,6 +148,7 @@ namespace RealRHI {
         released.swap(m_ReferencedResources);
         m_ComputePipelineBound = false;
         m_RecordedLayouts.clear();
+		m_OwnershipTransitions.clear();
         m_InitialLayouts.clear();
         return Result::Success;
     }
@@ -424,6 +425,60 @@ namespace RealRHI {
 			predicted[key] = layout;
 		}
 		return true;
+	}
+
+	bool VulkanCommandList::ValidateSubmissionOwnership(QueueId queue,
+		std::span<const SubmissionToken> waits) const {
+		for (const OwnershipTransition& transition : m_OwnershipTransitions) {
+			const auto ownership = transition.key.texture->GetSubmittedOwnership(
+				transition.key.mipLevel, transition.key.arrayLayer);
+			if (queue.familyIndex == transition.sourceFamily) {
+				if (ownership.pendingDestination != VK_QUEUE_FAMILY_IGNORED ||
+					(ownership.family != VK_QUEUE_FAMILY_IGNORED && ownership.family != queue.familyIndex)) {
+					return false;
+				}
+			}
+			else if (queue.familyIndex == transition.destinationFamily) {
+				if (ownership.pendingDestination != queue.familyIndex ||
+					ownership.family != transition.sourceFamily) {
+					return false;
+				}
+				bool found = false;
+				for (const SubmissionToken& wait : waits) {
+					if (wait.queue == ownership.releaseToken.queue &&
+						wait.value >= ownership.releaseToken.value && wait.IsValid()) {
+						found = true;
+						break;
+					}
+				}
+				if (!found) {
+					return false;
+				}
+			}
+			else {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	void VulkanCommandList::CommitSubmissionOwnership(SubmissionToken token) const {
+		for (const OwnershipTransition& transition : m_OwnershipTransitions) {
+			auto* texture = const_cast<VulkanTexture*>(transition.key.texture);
+			auto ownership = texture->GetSubmittedOwnership(
+				transition.key.mipLevel, transition.key.arrayLayer);
+			if (token.queue.familyIndex == transition.sourceFamily) {
+				ownership.family = transition.sourceFamily;
+				ownership.pendingDestination = transition.destinationFamily;
+				ownership.releaseToken = token;
+			}
+			else {
+				ownership.family = transition.destinationFamily;
+				ownership.pendingDestination = VK_QUEUE_FAMILY_IGNORED;
+				ownership.releaseToken = {};
+			}
+			texture->SetSubmittedOwnership(transition.key.mipLevel, transition.key.arrayLayer, ownership);
+		}
 	}
 
 	void VulkanCommandList::CommitSubmissionLayouts() const {
@@ -770,6 +825,22 @@ namespace RealRHI {
                 }
             }
         }
+
+		for (const TextureBarrier& barrier : barriers.textures) {
+			auto* texture = static_cast<VulkanTexture*>(barrier.texture);
+			const auto [sourceFamily, destinationFamily] =
+				getQueueFamilies(barrier.sourceQueue, barrier.destinationQueue);
+			if (sourceFamily == VK_QUEUE_FAMILY_IGNORED) {
+				continue;
+			}
+			for (uint32_t mip = barrier.subresources.baseMipLevel;
+				mip < barrier.subresources.baseMipLevel + barrier.subresources.mipLevelCount; ++mip) {
+				for (uint32_t layer = barrier.subresources.baseArrayLayer;
+					layer < barrier.subresources.baseArrayLayer + barrier.subresources.arrayLayerCount; ++layer) {
+					m_OwnershipTransitions.push_back({ { texture, mip, layer }, sourceFamily, destinationFamily });
+				}
+			}
+		}
 
 		for (const BufferBarrier& barrier : barriers.buffers) {
 			RetainResource(barrier.buffer);
