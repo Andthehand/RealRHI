@@ -290,7 +290,6 @@ namespace RealRHI {
 
     FrameContext VulkanSwapchain::BeginFrame() {
         CollectRetiredSwapchains();
-        CollectRetiredSwapchains();
         if (m_FrameFailed) {
             return FrameContext{ .imageIndex = std::numeric_limits<uint32_t>::max() };
         }
@@ -366,35 +365,47 @@ namespace RealRHI {
         };
     }
 
+    bool VulkanSwapchain::IsFrameValid(const FrameContext& frame) const {
+        return frame.frameIndex < m_FrameSync.size() && frame.imageIndex < m_SwapchainImages.size() &&
+            frame.backBufferView == m_SwapchainImages[frame.imageIndex]->GetTextureView() &&
+            frame.width == m_SwapchainExtent.width && frame.height == m_SwapchainExtent.height;
+    }
+
     bool VulkanSwapchain::PrepareFrameSubmission(uint32_t frameIndex) {
         if (frameIndex >= m_FrameSync.size()) {
             return false;
         }
+
         auto& sync = m_FrameSync[frameIndex];
         return !m_FrameFailed && !sync.submissionPending && !sync.submitted;
     }
 
     void VulkanSwapchain::FinishFrameSubmission(uint32_t frameIndex, SubmissionToken token) {
-        const bool success = token.IsValid();
         if (frameIndex >= m_FrameSync.size()) {
             return;
         }
+
+        const bool submitted = token.IsValid();
         auto& sync = m_FrameSync[frameIndex];
-        if (success) {
-            sync.completionToken = token;
-            sync.submissionPending = true;
-            sync.submitted = true;
-            return;
+        sync.completionToken = token;
+        sync.submissionPending = submitted;
+        sync.submitted = submitted;
+
+        if (!submitted) {
+            sync.completionToken = {};
+            // The acquired image and signaled semaphore cannot be reused after a failed submission.
+            m_FrameFailed = true;
         }
-        sync.completionToken = {};
-        sync.submissionPending = false;
-        sync.submitted = false;
-        // An acquired image and its semaphore are still outstanding. Stop
-        // rendering instead of reacquiring with an already-signaled semaphore.
-        m_FrameFailed = true;
     }
 
     void VulkanSwapchain::Present(const FrameContext& frame) {
+        if (!IsFrameValid(frame)) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "Present: Frame indices, backbuffer view, and extent must match this swapchain.");
+            
+            return;
+        }
+
         if (frame.imageIndex == std::numeric_limits<uint32_t>::max() || frame.backBufferView == nullptr || m_Swapchain == VK_NULL_HANDLE) {
             return;
         }
@@ -428,6 +439,7 @@ namespace RealRHI {
             m_FrameFailed = true;
         }
         m_CurrentFrameIndex = (m_CurrentFrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
+        m_FrameSync[frame.frameIndex].submitted = false;
     }
 
     VkCommandBuffer VulkanSwapchain::RecordPreTransitionCmd(uint32_t frameIndex, uint32_t imageIndex) {

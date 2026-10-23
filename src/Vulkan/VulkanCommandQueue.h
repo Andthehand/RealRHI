@@ -6,7 +6,8 @@
 #include <volk.h>
 
 #include <mutex>
-#include <unordered_map>
+#include <memory>
+#include <deque>
 #include <vector>
 
 namespace RealRHI {
@@ -15,8 +16,14 @@ namespace RealRHI {
 
     class VulkanCommandQueue : public CommandQueue {
     public:
-        VulkanCommandQueue(const VulkanDevice* device, uint32_t familyIndex, uint32_t queueIndex, VkQueue queue);
         ~VulkanCommandQueue() override;
+
+        static Result Create(
+            const VulkanDevice* device,
+            uint32_t familyIndex,
+            uint32_t queueIndex,
+            VkQueue queue,
+            std::unique_ptr<VulkanCommandQueue>& outQueue);
 
 		// Command submission functions
         SubmissionToken Submit(CommandList& cmd) override;
@@ -31,16 +38,24 @@ namespace RealRHI {
             std::span<CommandList*> trackedLists = {},
             VkFence fence = VK_NULL_HANDLE);
 
-        bool IsComplete(const SubmissionToken& token) const override;
+        bool IsComplete(const SubmissionToken& token) override;
         void Wait(const SubmissionToken& token) override;
         void WaitIdle() override;
         void ProcessCompletedSubmissions();
 
         VkQueue GetQueue() const { return m_Queue; }
         VkSemaphore GetTimelineSemaphore() const { return m_TimelineSemaphore; }
-        QueueId GetQueueId() const { return { m_FamilyIndex, m_QueueIndex }; }
+        QueueId GetQueueId() const override { return { m_FamilyIndex, m_QueueIndex }; }
     private:
+        struct PendingSubmission {
+            uint64_t value = 0;
+            std::vector<Ref<CommandList>> commandLists;
+        };
+    private:
+        VulkanCommandQueue(const VulkanDevice* device, uint32_t familyIndex, uint32_t queueIndex, VkQueue queue);
+        Result Init();
         void FinalizeCompleted(uint64_t completedValue);
+        bool HasSubmitted(const SubmissionToken& token) const;
     private:
         const VulkanDevice* m_Device = nullptr;
         VkQueue m_Queue = VK_NULL_HANDLE;
@@ -50,7 +65,6 @@ namespace RealRHI {
 
         mutable std::mutex m_SubmissionMutex;
         uint64_t m_NextFrameValue = 1;
-        std::unordered_map<uint64_t, std::vector<Ref<CommandList>>> m_PendingSubmissions;
-        uint64_t m_LastCompletedValue = 0;
+        std::deque<PendingSubmission> m_PendingSubmissions;
     };
 }

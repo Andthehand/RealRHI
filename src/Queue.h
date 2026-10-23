@@ -41,7 +41,9 @@ namespace RealRHI {
         virtual SubmissionToken Submit(CommandList& cmd) = 0;
         virtual SubmissionToken Submit(std::span<CommandList*> commandLists) = 0;
         virtual SubmissionToken Submit(const SubmitInfo& submitInfo) = 0;
-        virtual bool IsComplete(const SubmissionToken& token) const = 0;
+        virtual QueueId GetQueueId() const = 0;
+        // A completed token also retires its command lists so they can be reset.
+        virtual bool IsComplete(const SubmissionToken& token) = 0;
         virtual void Wait(const SubmissionToken& token) = 0;
         virtual void WaitIdle() = 0;
     };

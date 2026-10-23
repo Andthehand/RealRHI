@@ -55,7 +55,7 @@ namespace RealRHI {
     };
 
     struct PipelineDesc {
-        Shader* shader;
+        Shader* shader = nullptr;
 
         RasterState rasterState;
         DepthState depthState;

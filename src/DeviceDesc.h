@@ -29,6 +29,7 @@ namespace RealRHI {
     static void DefaultDebugCallback(const DebugMessage& message) {
         const char* severityStr = "";
         switch (message.severity) {
+            case DebugSeverity::Trace: severityStr = "Trace"; break;
             case DebugSeverity::Info: severityStr = "Info"; break;
             case DebugSeverity::Warning: severityStr = "Warning"; break;
             case DebugSeverity::Error: severityStr = "Error"; break;

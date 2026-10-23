@@ -17,15 +17,21 @@ namespace RealRHI {
         FrameResources& operator=(const FrameResources&) = delete;
         ~FrameResources() { WaitAll(); }
 
-        Result Initialize(Device& device, CommandQueue& queue, uint32_t slotCount) {
+        Result Initialize(Device& device, QueueType queueType, uint32_t slotCount) {
             if (m_Queue != nullptr || slotCount == 0) {
                 return Result::Failed;
             }
+
+            CommandQueue* queue = device.GetCommandQueue(queueType);
+            if (queue == nullptr) {
+                return Result::InvalidParameter;
+            }
+
             std::vector<Slot> slots;
             slots.reserve(slotCount);
             for (uint32_t i = 0; i < slotCount; ++i) {
                 Slot slot;
-                if (device.CreateCommandAllocator(slot.allocator) != Result::Success) {
+                if (device.CreateCommandAllocator(queueType, slot.allocator) != Result::Success) {
                     return Result::Failed;
                 }
                 if (device.CreateCommandList(slot.allocator.Raw(), slot.commandList) != Result::Success) {
@@ -34,7 +40,7 @@ namespace RealRHI {
                 slots.push_back(std::move(slot));
             }
             m_Slots = std::move(slots);
-            m_Queue = &queue;
+            m_Queue = queue;
             return Result::Success;
         }
 
@@ -72,7 +78,7 @@ namespace RealRHI {
         // The token must come from this object's queue.
         Result TrackSubmission(uint32_t index, SubmissionToken token) {
             if (index >= m_Slots.size() || m_Queue == nullptr ||
-                !token.IsValid() || m_Slots[index].recordingAvailable) {
+                !token.IsValid() || token.queue != m_Queue->GetQueueId() || m_Slots[index].recordingAvailable) {
                 return Result::Failed;
             }
             Slot& slot = m_Slots[index];

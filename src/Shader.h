@@ -42,7 +42,7 @@ namespace RealRHI {
 
 	struct BufferLayout {
 		std::vector<BufferAttribute> attributes;
-		uint32_t stride;
+		uint32_t stride = 0;
 	};
 
 	class Shader : public RefCounted {

@@ -11,7 +11,6 @@ namespace RealRHI {
         explicit VulkanCommandAllocator(const VulkanDevice* device, uint32_t family);
         ~VulkanCommandAllocator() override;
 
-        static Result Create(const VulkanDevice* device, Ref<VulkanCommandAllocator>& out);
         static Result Create(const VulkanDevice* device, uint32_t family, Ref<VulkanCommandAllocator>& out);
         
         Result Reset() override;

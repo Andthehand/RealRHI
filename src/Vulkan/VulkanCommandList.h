@@ -107,6 +107,8 @@ namespace RealRHI {
 		std::vector<Ref<RefCounted>> m_ReferencedResources;
 		CommandListState m_State = CommandListState::Initial;
 		bool m_ComputePipelineBound = false;
+		bool m_GraphicsPipelineBound = false;
+		bool m_Rendering = false;
 
 		// Initial layout = the layout that was expected at the start of recording for a given subresource.
 		// Recorded layout = the layout that was recorded for a given subresource during command recording.

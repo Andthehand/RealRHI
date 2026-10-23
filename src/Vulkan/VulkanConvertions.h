@@ -66,7 +66,7 @@ namespace RealRHI::Utils {
             case ScalarType::Int64: return VK_FORMAT_R64_SINT;
             case ScalarType::UInt64: return VK_FORMAT_R64_UINT;
             case ScalarType::Float16: return VK_FORMAT_R16_SFLOAT;
-            case ScalarType::Float32: return VK_FORMAT_R32G32B32_SFLOAT;
+            case ScalarType::Float32: return VK_FORMAT_R32_SFLOAT;
 			case ScalarType::Float64: return VK_FORMAT_R64_SFLOAT;
 			case ScalarType::Vec2: return VK_FORMAT_R32G32_SFLOAT;
 			case ScalarType::Vec3: return VK_FORMAT_R32G32B32_SFLOAT;
@@ -184,13 +184,12 @@ namespace RealRHI::Utils {
 
         switch (usage) {
             case MemoryUsage::GPUOnly:
-                allocInfo.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
                 break;
             case MemoryUsage::CPUToGPU:
-                allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+                allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
                 break;
             case MemoryUsage::GPUToCPU:
-                allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+                allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
                 break;
         }
         return allocInfo;
@@ -239,10 +238,51 @@ namespace RealRHI::Utils {
         if (desc.depth > 1) {
             return VK_IMAGE_TYPE_3D;
         }
-        if (desc.height > 1) {
-            return VK_IMAGE_TYPE_2D;
+        return VK_IMAGE_TYPE_2D;
+    }
+
+    // Depth/stencil copies require an explicit aspect and are handled separately.
+    constexpr uint32_t TextureFormatByteSize(TextureFormat format) {
+        switch (format) {
+            case TextureFormat::R8_UNorm:
+            case TextureFormat::R8_SNorm: return 1;
+            case TextureFormat::RG8_UNorm:
+            case TextureFormat::RG8_SNorm:
+            case TextureFormat::R16_UNorm:
+            case TextureFormat::R16_SNorm:
+            case TextureFormat::R16_Float: return 2;
+            case TextureFormat::RGBA8_UNorm:
+            case TextureFormat::RGBA8_SRGB:
+            case TextureFormat::RGBA8_SNorm:
+            case TextureFormat::RGBA8_UInt:
+            case TextureFormat::RGBA8_SInt:
+            case TextureFormat::BGRA8_UNorm:
+            case TextureFormat::BGRA8_SRGB:
+            case TextureFormat::RG16_UNorm:
+            case TextureFormat::RG16_SNorm:
+            case TextureFormat::RG16_Float:
+            case TextureFormat::R32_Float:
+            case TextureFormat::R32_UInt:
+            case TextureFormat::R32_SInt:
+            case TextureFormat::RGB10A2_UNorm:
+            case TextureFormat::RG11B10_Float:
+            case TextureFormat::RGB9E5_Float: return 4;
+            case TextureFormat::RGBA16_UNorm:
+            case TextureFormat::RGBA16_SNorm:
+            case TextureFormat::RGBA16_Float:
+            case TextureFormat::RGBA16_UInt:
+            case TextureFormat::RGBA16_SInt:
+            case TextureFormat::RG32_Float:
+            case TextureFormat::RG32_UInt:
+            case TextureFormat::RG32_SInt: return 8;
+            case TextureFormat::RGB32_Float:
+            case TextureFormat::RGB32_UInt:
+            case TextureFormat::RGB32_SInt: return 12;
+            case TextureFormat::RGBA32_Float:
+            case TextureFormat::RGBA32_UInt:
+            case TextureFormat::RGBA32_SInt: return 16;
+            default: return 0;
         }
-        return VK_IMAGE_TYPE_1D;
     }
 
     constexpr VkFormat TextureFormatToVkFormat(TextureFormat format) {
@@ -363,6 +403,9 @@ namespace RealRHI::Utils {
             case TextureLayout::TransferSrc: return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
             case TextureLayout::TransferDst: return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
             case TextureLayout::Present: return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+            case TextureLayout::General: return VK_IMAGE_LAYOUT_GENERAL;
+            case TextureLayout::DepthStencilAttachment: return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            case TextureLayout::DepthStencilReadOnly: return VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
             default: return VK_IMAGE_LAYOUT_UNDEFINED;
         }
 	}
@@ -375,6 +418,9 @@ namespace RealRHI::Utils {
             case TextureLayout::TransferSrc: return VK_ACCESS_2_TRANSFER_READ_BIT;
             case TextureLayout::TransferDst: return VK_ACCESS_2_TRANSFER_WRITE_BIT;
             case TextureLayout::Present: return VK_ACCESS_2_NONE;
+            case TextureLayout::General: return VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
+            case TextureLayout::DepthStencilAttachment: return VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            case TextureLayout::DepthStencilReadOnly: return VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT;
             default: return 0;
         }
     }
@@ -387,6 +433,9 @@ namespace RealRHI::Utils {
             case TextureLayout::TransferSrc:
             case TextureLayout::TransferDst: return VK_PIPELINE_STAGE_2_TRANSFER_BIT;
             case TextureLayout::Present: return VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+            case TextureLayout::General: return VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            case TextureLayout::DepthStencilAttachment: return VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+            case TextureLayout::DepthStencilReadOnly: return VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
             default: return 0;
         }
 	}

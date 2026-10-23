@@ -4,10 +4,31 @@
 #include "VulkanDevice.h"
 
 #include <unordered_set>
+#include <unordered_map>
+#include <algorithm>
+#include <utility>
 
 namespace RealRHI {
 	VulkanCommandQueue::VulkanCommandQueue(const VulkanDevice* device, uint32_t familyIndex, uint32_t queueIndex, VkQueue queue)
-		: m_Device(device), m_Queue(queue), m_FamilyIndex(familyIndex), m_QueueIndex(queueIndex) {
+		: m_Device(device), m_Queue(queue), m_FamilyIndex(familyIndex), m_QueueIndex(queueIndex) {}
+
+	Result VulkanCommandQueue::Create(
+		const VulkanDevice* device,
+		uint32_t familyIndex,
+		uint32_t queueIndex,
+		VkQueue queue,
+		std::unique_ptr<VulkanCommandQueue>& outQueue) {
+		std::unique_ptr<VulkanCommandQueue> commandQueue(new VulkanCommandQueue(device, familyIndex, queueIndex, queue));
+		const Result result = commandQueue->Init();
+		if (result != Result::Success) {
+			return result;
+		}
+
+		outQueue = std::move(commandQueue);
+		return Result::Success;
+	}
+
+	Result VulkanCommandQueue::Init() {
 		VkSemaphoreTypeCreateInfo timelineInfo{
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
 			.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
@@ -21,12 +42,15 @@ namespace RealRHI {
 
 		if (vkCreateSemaphore(m_Device->GetDevice(), &createInfo, nullptr, &m_TimelineSemaphore) != VK_SUCCESS) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan timeline semaphore for command queue.");
+			return Result::Failed;
 		}
+
+		return Result::Success;
 	}
 
 	VulkanCommandQueue::~VulkanCommandQueue() {
-		if (m_Queue != VK_NULL_HANDLE) {
-			vkQueueWaitIdle(m_Queue);
+		if (m_Queue != VK_NULL_HANDLE && m_TimelineSemaphore != VK_NULL_HANDLE) {
+			WaitIdle();
 		}
 
 		if (m_TimelineSemaphore != VK_NULL_HANDLE) {
@@ -60,7 +84,7 @@ namespace RealRHI {
 		duplicateListTracker.reserve(submitInfo.commandLists.size());
 
 		for (CommandList* commandList : submitInfo.commandLists) {
-			auto* vkCommandList = dynamic_cast<VulkanCommandList*>(commandList);
+			auto* vkCommandList = static_cast<VulkanCommandList*>(commandList);
 			if (vkCommandList == nullptr || vkCommandList->GetQueueId() != GetQueueId()) {
 				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Command list was created for a different queue family or index.");
 				return {};
@@ -85,6 +109,7 @@ namespace RealRHI {
 
 		std::vector<VkSemaphoreSubmitInfo> waitSemaphoreInfos;
 		waitSemaphoreInfos.reserve(submitInfo.waitFor.size());
+		std::unordered_map<VulkanCommandQueue*, uint64_t> dependencyValues;
 		for (const SubmissionToken& waitToken : submitInfo.waitFor) {
 			if (!waitToken.IsValid()) {
 				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Invalid submission token for queue wait.");
@@ -92,15 +117,17 @@ namespace RealRHI {
 			}
 
 			VulkanCommandQueue* queuedDependency = m_Device->GetCommandQueue(waitToken.queue);
-			if (queuedDependency == nullptr) {
-				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Cannot wait on a token from a different device or unknown queue.");
+			if (queuedDependency == nullptr || !queuedDependency->HasSubmitted(waitToken)) {
+				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Submit: Queue wait token must identify an existing submission on a known queue.");
 				return {};
 			}
-
+			dependencyValues[queuedDependency] = std::max(dependencyValues[queuedDependency], waitToken.value);
+		}
+		for (const auto& [dependency, value] : dependencyValues) {
 			waitSemaphoreInfos.push_back({
 				.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-				.semaphore = queuedDependency->GetTimelineSemaphore(),
-				.value = waitToken.value,
+				.semaphore = dependency->GetTimelineSemaphore(),
+				.value = value,
 				.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
 			});
 		}
@@ -123,7 +150,7 @@ namespace RealRHI {
 		std::unordered_set<CommandList*> duplicateListTracker;
 		duplicateListTracker.reserve(trackedLists.size());
 		for (CommandList* commandList : trackedLists) {
-			auto* vkCommandList = dynamic_cast<VulkanCommandList*>(commandList);
+			auto* vkCommandList = static_cast<VulkanCommandList*>(commandList);
 			if (vkCommandList == nullptr || vkCommandList->GetQueueId() != GetQueueId()) {
 				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Tried to submit a command list to the wrong queue.");
 				return {};
@@ -182,7 +209,10 @@ namespace RealRHI {
 			static_cast<VulkanCommandList*>(commandList)->CommitSubmissionLayouts();
 		}
 		++m_NextFrameValue;
-		m_PendingSubmissions[submissionValue] = std::move(retainedLists);
+		m_PendingSubmissions.push_back({
+			.value = submissionValue,
+			.commandLists = std::move(retainedLists),
+		});
 
 		for (CommandList* commandList : trackedLists) {
 			if (commandList != nullptr) {
@@ -195,7 +225,7 @@ namespace RealRHI {
 		return SubmissionToken{ .queue = GetQueueId(), .value = submissionValue };
 	}
 
-	bool VulkanCommandQueue::IsComplete(const SubmissionToken& token) const {
+	bool VulkanCommandQueue::IsComplete(const SubmissionToken& token) {
 		if (!token.IsValid() || token.queue != GetQueueId()) {
 			return false;
 		}
@@ -211,7 +241,13 @@ namespace RealRHI {
 			return false;
 		}
 
+		FinalizeCompleted(completed);
 		return completed >= token.value;
+	}
+
+	bool VulkanCommandQueue::HasSubmitted(const SubmissionToken& token) const {
+		std::scoped_lock lock(m_SubmissionMutex);
+		return token.IsValid() && token.queue == GetQueueId() && token.value < m_NextFrameValue;
 	}
 
 	void VulkanCommandQueue::ProcessCompletedSubmissions() {
@@ -257,7 +293,10 @@ namespace RealRHI {
 		uint64_t lastSubmitted = 0;
 		{
 			std::scoped_lock lock(m_SubmissionMutex);
-			vkQueueWaitIdle(m_Queue);
+			if (vkQueueWaitIdle(m_Queue) != VK_SUCCESS) {
+				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "WaitIdle: Failed to wait for the Vulkan queue.");
+				return;
+			}
 			lastSubmitted = m_NextFrameValue - 1;
 		}
 
@@ -267,40 +306,19 @@ namespace RealRHI {
 	}
 
 	void VulkanCommandQueue::FinalizeCompleted(uint64_t completedValue) {
-		std::vector<Ref<CommandList>> completedLists;
+		// Release retained command lists after dropping the submission lock.
+		std::vector<PendingSubmission> completedSubmissions;
 		{
 			std::scoped_lock lock(m_SubmissionMutex);
 
-			// Move completed command lists to a separate vector and remove them from the pending submissions
-			auto it = m_PendingSubmissions.begin();
-			while (it != m_PendingSubmissions.end()) {
-				if (it->first <= completedValue) {
-					// make_move_iterator is used to move the Ref<CommandList> objects instead of copying them,
-					// which is more efficient and avoids unnecessary reference count increments/decrements.
-					completedLists.insert(
-						completedLists.end(),
-						std::make_move_iterator(it->second.begin()),
-						std::make_move_iterator(it->second.end()));
-
-					it = m_PendingSubmissions.erase(it);
-				} else {
-					++it;
+			while (!m_PendingSubmissions.empty() && m_PendingSubmissions.front().value <= completedValue) {
+				auto& submission = m_PendingSubmissions.front();
+				for (auto& commandList : submission.commandLists) {
+					static_cast<VulkanCommandList*>(commandList.Raw())->SetState(CommandListState::Executable);
 				}
-			}
 
-			if (completedValue > m_LastCompletedValue) {
-				m_LastCompletedValue = completedValue;
-			}
-		}
-
-		// Update the state of the completed command lists to Executable
-		for (auto& commandList : completedLists) {
-			if (commandList) {
-				auto* vkCommandList = dynamic_cast<VulkanCommandList*>(commandList.Raw());
-
-				if (vkCommandList != nullptr && vkCommandList->GetState() == CommandListState::Pending) {
-					vkCommandList->SetState(CommandListState::Executable);
-				}
+				completedSubmissions.push_back(std::move(submission));
+				m_PendingSubmissions.pop_front();
 			}
 		}
 	}

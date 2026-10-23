@@ -229,7 +229,9 @@ namespace RealRHI {
 	}
 
 	Result VulkanShader::Init(const ShaderDesc& desc) {
-		InitializeSlang(m_Device);
+		if (desc.moduleName == nullptr || !InitializeSlang(m_Device)) {
+			return Result::Failed;
+		}
 
 		Slang::ComPtr<slang::IBlob> diagnostics;
 
@@ -262,9 +264,6 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
-		composedProgram->getLayout()->toJson(diagnostics.writeRef());
-		CheckSlangDiagnostics(diagnostics);
-
 		// 5. Create Vulkan module
 		m_ShaderModule = CreateVkShaderModule(linkedProgram);
 		if (!m_ShaderModule) {
@@ -284,7 +283,7 @@ namespace RealRHI {
 			)
 		);
 
-		if (!CheckSlangDiagnostics(diagnostics)) {
+		if (!CheckSlangDiagnostics(diagnostics, module ? SLANG_OK : SLANG_FAIL)) {
 			return nullptr;
 		}
 
@@ -302,19 +301,24 @@ namespace RealRHI {
 
 		std::vector<Slang::ComPtr<slang::IEntryPoint>> entryPoints(entryCount);
 		for (uint32_t i = 0; i < entryCount; ++i) {
-			module->getDefinedEntryPoint(i, entryPoints[i].writeRef());
+			if (SLANG_FAILED(module->getDefinedEntryPoint(i, entryPoints[i].writeRef())) || !entryPoints[i]) {
+				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::ShaderCompilation,
+					"CreateShader: Failed to retrieve a Slang entry point.");
+				
+				return nullptr;
+			}
 			componentsToLink[i + 1] = Slang::ComPtr<slang::IComponentType>(entryPoints[i].get());
 		}
 
 		Slang::ComPtr<slang::IComponentType> composedProgram;
 
-		s_SlangSession->createCompositeComponentType(
+		const SlangResult result = s_SlangSession->createCompositeComponentType(
 			reinterpret_cast<slang::IComponentType**>(componentsToLink.data()),
 			componentsToLink.size(),
 			composedProgram.writeRef(),
 			diagnostics.writeRef());
 
-		if (!CheckSlangDiagnostics(diagnostics)) {
+		if (!CheckSlangDiagnostics(diagnostics, result)) {
 			return nullptr;
 		}
 
@@ -327,7 +331,7 @@ namespace RealRHI {
 		Slang::ComPtr<slang::IBlob>& diagnostics) {
 		slang::ProgramLayout* programLayout = composedProgram->getLayout(0, diagnostics.writeRef());
 
-		if (!CheckSlangDiagnostics(diagnostics)) {
+		if (!CheckSlangDiagnostics(diagnostics, programLayout ? SLANG_OK : SLANG_FAIL)) {
 			return {};
 		}
 
@@ -362,7 +366,7 @@ namespace RealRHI {
 		slang::IComponentType* composedProgram,
 		Slang::ComPtr<slang::IBlob>& diagnostics) {
 		slang::ProgramLayout* programLayout = composedProgram->getLayout(0, diagnostics.writeRef());
-		if (!CheckSlangDiagnostics(diagnostics)) {
+		if (!CheckSlangDiagnostics(diagnostics, programLayout ? SLANG_OK : SLANG_FAIL)) {
 			return {};
 		}
 
@@ -397,12 +401,12 @@ namespace RealRHI {
 			Slang::ComPtr<slang::IBlob>& diagnostics) {
 		Slang::ComPtr<slang::IComponentType> linkedProgram;
 
-		composed->link(
+		const SlangResult result = composed->link(
 			linkedProgram.writeRef(),
 			diagnostics.writeRef()
 		);
 
-		if (!CheckSlangDiagnostics(diagnostics)) {
+		if (!CheckSlangDiagnostics(diagnostics, result)) {
 			return nullptr;
 		}
 
@@ -411,7 +415,11 @@ namespace RealRHI {
 
 	VkShaderModule VulkanShader::CreateVkShaderModule(slang::IComponentType* linkedProgram) {
 		Slang::ComPtr<slang::IBlob> spirv;
-		linkedProgram->getTargetCode(0, spirv.writeRef());
+		Slang::ComPtr<slang::IBlob> diagnostics;
+		const SlangResult result = linkedProgram->getTargetCode(0, spirv.writeRef(), diagnostics.writeRef());
+		if (!CheckSlangDiagnostics(diagnostics, result) || !spirv || spirv->getBufferSize() == 0) {
+			return VK_NULL_HANDLE;
+		}
 
 		VkShaderModuleCreateInfo ci{
 			.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
@@ -473,9 +481,14 @@ namespace RealRHI {
 		return attributes;
 	}
 
-	void VulkanShader::InitializeSlang(const VulkanDevice* m_Device) {
-		if (!s_SlangGlobalSession) {
-			slang::createGlobalSession(s_SlangGlobalSession.writeRef());
+	bool VulkanShader::InitializeSlang(const VulkanDevice* m_Device) {
+		if (!s_SlangSession) {
+			if (!s_SlangGlobalSession && SLANG_FAILED(slang::createGlobalSession(s_SlangGlobalSession.writeRef()))) {
+				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::ShaderCompilation,
+					"CreateShader: Failed to create the Slang global session.");
+				
+				return false;
+			}
 			std::array<slang::TargetDesc, 1> slangTargets{
 				std::to_array<slang::TargetDesc>({
 					slang::TargetDesc{
@@ -490,8 +503,9 @@ namespace RealRHI {
 				m_Device->SendDebugMessage(
 					DebugSeverity::Error, 
 					DebugMessageType::ShaderCompilation,
-					"SPIR-V extension 'SPV_EXT_descriptor_indexing' not supported by Slang compiler. Installed Slang version is not supported!"
+					"CreateShader: The installed Slang compiler does not support spvDescriptorHeapEXT."
 				);
+				return false;
 			}
 
 			std::array<slang::CompilerOptionEntry, 3> slangOptions{
@@ -523,17 +537,24 @@ namespace RealRHI {
 				.compilerOptionEntries{slangOptions.data()},
 				.compilerOptionEntryCount{slangOptionsCount}
 			};
-			s_SlangGlobalSession->createSession(slangSessionDesc, s_SlangSession.writeRef());
+			if (SLANG_FAILED(s_SlangGlobalSession->createSession(slangSessionDesc, s_SlangSession.writeRef()))) {
+				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::ShaderCompilation,
+					"CreateShader: Failed to create the Slang compilation session.");
+				return false;
+			}
 		}
+		return s_SlangSession != nullptr;
 	}
 
-	bool VulkanShader::CheckSlangDiagnostics(const Slang::ComPtr<slang::IBlob>& diagnostics) {
+	bool VulkanShader::CheckSlangDiagnostics(const Slang::ComPtr<slang::IBlob>& diagnostics, SlangResult result) {
 		if (diagnostics) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::ShaderCompilation,
+			m_Device->SendDebugMessage(SLANG_FAILED(result) ? DebugSeverity::Error : DebugSeverity::Warning, DebugMessageType::ShaderCompilation,
 				static_cast<const char*>(diagnostics->getBufferPointer()));
-			return false;
 		}
-
-		return true;
+		else if (SLANG_FAILED(result)) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::ShaderCompilation,
+				"CreateShader: Slang compilation operation failed without diagnostics.");
+		}
+		return SLANG_SUCCEEDED(result);
 	}
 }

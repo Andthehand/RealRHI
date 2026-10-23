@@ -16,6 +16,11 @@ namespace {
 
     void CaptureDebugMessage(const RealRHI::DebugMessage& message) {
         if (message.severity == RealRHI::DebugSeverity::Error &&
+            message.type == RealRHI::DebugMessageType::Validation) {
+            RealRHI::DefaultDebugCallback(message);
+            std::exit(1);
+        }
+        if (message.severity == RealRHI::DebugSeverity::Error &&
             message.type == RealRHI::DebugMessageType::General) {
             ++g_ProgrammerErrors;
         }
@@ -46,7 +51,7 @@ int main() {
     Expect(graphicsQueue != nullptr, "Graphics queue was not created");
 
     RealRHI::Ref<RealRHI::CommandAllocator> allocator;
-    Expect(device->CreateCommandAllocator(allocator) == RealRHI::Result::Success, "CreateGraphics command allocator");
+    Expect(device->CreateCommandAllocator(RealRHI::QueueType::Graphics, allocator) == RealRHI::Result::Success, "CreateGraphics command allocator");
 
     RealRHI::Ref<RealRHI::CommandList> firstList;
     Expect(device->CreateCommandList(allocator.Raw(), firstList) == RealRHI::Result::Success, "CreateGraphics first command list");
@@ -89,7 +94,7 @@ int main() {
     // Two independent execution slots, reused only after their GPU tokens complete.
     {
         RealRHI::FrameResources frames;
-        Expect(frames.Initialize(*device, *graphicsQueue, 2) == RealRHI::Result::Success,
+        Expect(frames.Initialize(*device, RealRHI::QueueType::Graphics, 2) == RealRHI::Result::Success,
                "CreateGraphics two frame resource slots");
         for (uint32_t i = 0; i < 8; ++i) {
             const uint32_t slot = i % frames.GetSlotCount();

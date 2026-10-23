@@ -2,6 +2,7 @@
 
 #include <volk.h>
 #include <algorithm>
+#include <limits>
 
 namespace RealRHI {
 	VulkanDescriptorHeaps::VulkanDescriptorHeaps(const VulkanDevice* device)
@@ -14,21 +15,19 @@ namespace RealRHI {
 	}
 
 	void VulkanDescriptorHeaps::BindDescriptorHeaps(VkCommandBuffer commandBuffer) const {
-		VkDeviceSize samplerReservedRangeSize = m_HeapProperties.minSamplerHeapReservedRange;
 		VkBindHeapInfoEXT samplerBind{
 			.sType = VK_STRUCTURE_TYPE_BIND_HEAP_INFO_EXT,
 			.heapRange = { m_DescriptorHeapSamplers.heapAddress, m_DescriptorHeapSamplers.heapSize },
-			.reservedRangeOffset = m_DescriptorHeapSamplers.heapSize - samplerReservedRangeSize,
-			.reservedRangeSize = samplerReservedRangeSize
+			.reservedRangeOffset = m_DescriptorHeapSamplers.usableSize,
+			.reservedRangeSize = m_DescriptorHeapSamplers.heapSize - m_DescriptorHeapSamplers.usableSize
 		};
 		vkCmdBindSamplerHeapEXT(commandBuffer, &samplerBind);
 
-		VkDeviceSize resourceReservedRangeSize = m_HeapProperties.minResourceHeapReservedRange;
 		VkBindHeapInfoEXT resourceBind{
 			.sType = VK_STRUCTURE_TYPE_BIND_HEAP_INFO_EXT,
 			.heapRange = { m_DescriptorHeapResources.heapAddress, m_DescriptorHeapResources.heapSize },
-			.reservedRangeOffset = m_DescriptorHeapResources.heapSize - resourceReservedRangeSize,
-			.reservedRangeSize = resourceReservedRangeSize
+			.reservedRangeOffset = m_DescriptorHeapResources.usableSize,
+			.reservedRangeSize = m_DescriptorHeapResources.heapSize - m_DescriptorHeapResources.usableSize
 		};
 		vkCmdBindResourceHeapEXT(commandBuffer, &resourceBind);
 	}
@@ -41,6 +40,8 @@ namespace RealRHI {
 			MaxResourceDescriptorHeapSize, 
 			resourceDescriptorSize, 
 			m_HeapProperties.resourceHeapAlignment, 
+			m_HeapProperties.minResourceHeapReservedRange,
+			std::max(m_HeapProperties.bufferDescriptorAlignment, m_HeapProperties.imageDescriptorAlignment),
 			m_DescriptorHeapResources
 		);
 
@@ -55,6 +56,8 @@ namespace RealRHI {
 			MaxSamplerDescriptorHeapSize,
 			m_HeapProperties.samplerDescriptorSize,
 			m_HeapProperties.samplerHeapAlignment,
+			m_HeapProperties.minSamplerHeapReservedRange,
+			m_HeapProperties.samplerDescriptorAlignment,
 			m_DescriptorHeapSamplers
 		);
 
@@ -66,25 +69,57 @@ namespace RealRHI {
 		return Result::Success;
 	}
 
-	Result VulkanDescriptorHeaps::CreateDescriptorHeap(VkDeviceSize hardwareMaxHeapSize, VkDeviceSize preferedMaxHeapSize, VkDeviceSize descriptorSize, VkDeviceSize heapAlignment, DescriptorHeap& heap) {
-		// Either use the max descriptor size or the max heap size, whichever is smaller
-		VkDeviceSize heapSize = std::min(preferedMaxHeapSize * descriptorSize, hardwareMaxHeapSize);
+	Result VulkanDescriptorHeaps::CreateDescriptorHeap(
+		VkDeviceSize hardwareMaxHeapSize,
+		VkDeviceSize preferredDescriptorCount,
+		VkDeviceSize descriptorSize,
+		VkDeviceSize heapAlignment,
+		VkDeviceSize reservedSize,
+		VkDeviceSize descriptorAlignment,
+		DescriptorHeap& heap) {
+		if (descriptorSize == 0 ||
+			heapAlignment == 0 ||
+			descriptorAlignment == 0 ||
+			reservedSize >= hardwareMaxHeapSize ||
+			preferredDescriptorCount > (std::numeric_limits<VkDeviceSize>::max() - reservedSize) / descriptorSize) {
+			return Result::InvalidParameter;
+		}
 
-		// Align the heap size to the required alignment
-		heapSize = ((heapSize + heapAlignment - 1) / heapAlignment) * heapAlignment;
+		const VkDeviceSize requestedSize = preferredDescriptorCount * descriptorSize + reservedSize;
+		VkDeviceSize heapSize = std::min(requestedSize, hardwareMaxHeapSize);
+
+		// Vulkan requires that the heap size be aligned to the heap alignment, so we need to round up to the nearest multiple of heapAlignment.
+		const VkDeviceSize padding = (heapAlignment - heapSize % heapAlignment) % heapAlignment;
+		if (padding <= hardwareMaxHeapSize - heapSize) {
+			heapSize += padding;
+		}
+		else {
+			heapSize -= heapSize % heapAlignment;
+		}
+
+		if (heapSize <= reservedSize) {
+			return Result::InvalidParameter;
+		}
+
+		const VkDeviceSize usableSize = (heapSize - reservedSize) / descriptorAlignment * descriptorAlignment;
+		if (usableSize < descriptorSize) {
+			return Result::InvalidParameter;
+		}
+
 		BufferDesc bufferDesc = {
 			.size = heapSize,
 			.usage = BufferUsage::Heap | BufferUsage::Addressable,
 			.memoryUsage = MemoryUsage::CPUToGPU
 		};
 
-		Ref<Buffer> buffer;
-		Result result = m_Device->CreateBuffer(bufferDesc, buffer);
+		Ref<VulkanBuffer> buffer;
+		Result result = VulkanBuffer::Create(m_Device, bufferDesc, buffer);
 		heap.buffer = std::move(buffer);
 
 		if (result == Result::Success) {
 			heap.heapAddress = heap.buffer->GetBufferDeviceAddress();
 			heap.heapSize = heapSize;
+			heap.usableSize = usableSize;
 		}
 
 		return result;

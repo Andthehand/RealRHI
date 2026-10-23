@@ -27,13 +27,20 @@ namespace RealRHI {
 	}
 
     Result VulkanBuffer::Init(const BufferDesc& desc) {
+        if (desc.size == 0 || desc.usage == BufferUsage::None ||
+            (desc.initialData != nullptr && desc.memoryUsage == MemoryUsage::GPUOnly)) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "CreateBuffer: Provide a nonzero size and usage; initialData requires CPU-accessible memory. Use a staging copy for GPUOnly buffers.");
+            return Result::InvalidParameter;
+        }
         m_Usage = desc.usage;
+        m_Size = desc.size;
 
         VkBufferCreateInfo bufferInfo{
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .size = desc.size,
             .usage = Utils::BufferUsageToVkBufferUsage(desc.usage),
-            .sharingMode = VK_SHARING_MODE_EXCLUSIVE, // I don't think we'll ever support sharing buffers between queues
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         };
 
         VmaAllocationCreateInfo vmaAllocCreateInfo = Utils::MemoryUsageToVmaAllocationCreateInfo(desc.memoryUsage);
@@ -43,7 +50,13 @@ namespace RealRHI {
         }
 
         if (desc.initialData) {
-            memcpy(m_AllocInfo.pMappedData, desc.initialData, (size_t)bufferInfo.size);
+            if (m_AllocInfo.pMappedData == nullptr ||
+                vmaCopyMemoryToAllocation(m_Device->GetAllocator(), desc.initialData,
+                    m_BufferMemory, 0, desc.size) != VK_SUCCESS) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                    "CreateBuffer: Failed to copy and flush initial data to mapped memory.");
+                return Result::Failed;
+            }
         }
         
         if (Any(m_Usage & (BufferUsage::Storage | BufferUsage::Uniform))) {
@@ -57,19 +70,29 @@ namespace RealRHI {
     }
 
     void VulkanBuffer::WriteData(const void* data, uint64_t size, uint64_t offset) {
-        if (offset + size > m_AllocInfo.size) {
-            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Trying to write data outside of the buffer bounds.");
-		}
-
-        memcpy((char*)m_AllocInfo.pMappedData + offset, data, (size_t)size);
-
+        if (data == nullptr || m_AllocInfo.pMappedData == nullptr ||
+            offset > m_Size || size > m_Size - offset) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "WriteData: Provide non-null data, a mapped buffer, and a range within GetSize().");
+            return;
+        }
+        if (size == 0) {
+            return;
+        }
+        if (vmaCopyMemoryToAllocation(m_Device->GetAllocator(), data, m_BufferMemory, offset, size) != VK_SUCCESS) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "WriteData: Failed to copy and flush mapped buffer memory.");
+        }
     }
 
 	Result VulkanBuffer::ReadData(void* data, uint64_t size, uint64_t offset) const {
-		if (data == nullptr || offset > m_AllocInfo.size || size > m_AllocInfo.size - offset ||
+		if (data == nullptr || offset > m_Size || size > m_Size - offset ||
 			m_AllocInfo.pMappedData == nullptr) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "ReadData failed: Buffer is not mapped or read range is invalid.");
 			return Result::InvalidParameter;
+		}
+		if (size == 0) {
+			return Result::Success;
 		}
 
 		if (vmaInvalidateAllocation(m_Device->GetAllocator(), m_BufferMemory, offset, size) != VK_SUCCESS) {

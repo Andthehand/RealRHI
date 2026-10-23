@@ -26,8 +26,15 @@ This library is written to be easy for another engineer to read and reason about
 - Match the existing tab-based indentation and brace placement used in the library's C++ headers and Vulkan implementation files.
 - Keep spacing consistent and readable throughout the codebase: use whitespace deliberately around operators, after commas, and add clear newlines between logical blocks so the intent remains obvious at a glance.
 - Always use braces for `if` statements, even when there is only one statement after them, to keep the control flow explicit and easy to audit.
+- Prefer explicit `if`/`else if`/`else` statements over ternary expressions. Avoid nested or chained ternaries; use a ternary only when a simple choice is clearly easier to read.
 - Keep functions and classes focused on a single concern, and avoid creating layers of indirection that hide the true behavior.
 - Prefer straightforward logic and small, readable condition blocks over dense metaprogramming or hidden state.
+
+### Backend casts
+- Use `static_cast` for conversions from RHI interfaces to backend implementation types. Do not use `dynamic_cast` or RTTI-based backend checks.
+- Passing an object from the wrong backend is a programmer error and violates the API preconditions; backend compatibility is the caller's responsibility.
+- Target a single active device. Do not add `GetOwner` accessors or cross-device ownership checks.
+- Keep applicable null, queue-compatibility, and resource-state checks. A static cast does not validate those conditions.
 
 ### Class member organization
 - Separate member function declarations from member variables in class headers.

@@ -13,6 +13,7 @@
 #include <unordered_map>
 
 #undef CreateWindow // Windows.h defines a macro for CreateWindow, which conflicts with our Device::CreateWindow method
+#undef MemoryBarrier // Windows.h also defines MemoryBarrier, which conflicts with the RHI barrier type.
 
 namespace RealRHI {
 	class VulkanDescriptorManager;
@@ -50,8 +51,6 @@ namespace RealRHI {
 		VulkanCommandQueue* GetCommandQueue(const QueueId& queueId) const;
 		std::recursive_mutex& GetStateTrackingMutex() const { return m_StateTrackingMutex; }
 
-		// Pools
-
 		// Allocator
 		VmaAllocator GetAllocator() const { return m_Allocator; }
 		VulkanDescriptorManager* GetDescriptorManager() const { return m_DescriptorManager.get(); }
@@ -68,7 +67,6 @@ namespace RealRHI {
 		Result CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) const override;
 		Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) const override;
 		Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const override;
-        Result CreateCommandAllocator(Ref<CommandAllocator>& outAllocator) const override;
 		Result CreateCommandAllocator(QueueType type, Ref<CommandAllocator>& outAllocator) const override;
         Result CreateCommandList(CommandAllocator* allocator, Ref<CommandList>& outCommandList) const override;
 
@@ -85,9 +83,12 @@ namespace RealRHI {
 		// Properties
 		VkPhysicalDeviceDescriptorHeapPropertiesEXT GetDescriptorHeapProperties() const;
 		uint32_t GetMaxPushDataSize() const { return m_MaxPushDataSize; }
+		bool SupportsWireframe() const { return m_SupportsWireframe; }
 	private:
 		bool CreateInstance(const char* appName, bool enableValidationLayer);
 		bool SetupDebugMessenger();
+		bool SupportsRequiredExtensions(VkPhysicalDevice device) const;
+		bool SupportsRequiredFeatures(VkPhysicalDevice device) const;
 		int RatePhysicalDevice(VkPhysicalDevice device);
 		bool PickPhysicalDevice();
 		bool CreateLogicalDevice();
@@ -123,6 +124,7 @@ namespace RealRHI {
 			// Allocator
 			VmaAllocator m_Allocator = VK_NULL_HANDLE;
 			uint32_t m_MaxPushDataSize = 0;
+			bool m_SupportsWireframe = false;
 
 			// User Defined settings
 			std::filesystem::path m_ShaderDirectory;

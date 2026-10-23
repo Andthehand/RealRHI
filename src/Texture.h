@@ -23,6 +23,11 @@ namespace RealRHI {
 			return std::numeric_limits<uint32_t>::max();
 		}
 
+		virtual uint32_t GetStorageImageDescriptorIndex() const {
+			return std::numeric_limits<uint32_t>::max();
+		}
+
+		// Uploads tightly packed color data to a single-mip texture with TransferDst usage.
 		virtual Result UploadData(const void* data, uint32_t size) = 0;
 	};
 }

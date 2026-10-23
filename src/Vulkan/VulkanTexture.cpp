@@ -5,6 +5,9 @@
 #include "VulkanCommandList.h"
 #include "VulkanDescriptorManager.h"
 
+#include <algorithm>
+#include <bit>
+
 namespace RealRHI {
     VulkanTexture::VulkanTexture(const VulkanDevice* device) 
         : m_Device(device) {}
@@ -40,6 +43,16 @@ namespace RealRHI {
     }
 
 	Result VulkanTexture::Init(const TextureDesc& desc) {
+		if (desc.width == 0 || desc.height == 0 || desc.depth == 0 || desc.arrayLayers == 0 ||
+			desc.mipLevels == 0 || desc.mipLevels > std::bit_width(std::max({ desc.width, desc.height, desc.depth })) ||
+			desc.format == TextureFormat::Unknown || desc.usage == TextureUsage::None ||
+			(desc.depth > 1 && desc.arrayLayers != 1)) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+				"CreateTexture: Provide nonzero dimensions, a valid mip count, format and usage; 3D textures require one array layer.");
+			
+            return Result::InvalidParameter;
+		}
+
 		m_Format = Utils::TextureFormatToVkFormat(desc.format);
 		m_Usage = desc.usage;
 		m_MipLevels = desc.mipLevels;
@@ -75,8 +88,17 @@ namespace RealRHI {
             return Result::Failed;
         }
 
+		TextureViewType viewType = TextureViewType::View2D;
+		if (desc.depth > 1) {
+			viewType = TextureViewType::View3D;
+		}
+		else if (desc.arrayLayers > 1) {
+			viewType = TextureViewType::View2DArray;
+		}
+
 		const bool createNativeImageView = Any(m_Usage & TextureUsage::RenderTarget) || Any(m_Usage & TextureUsage::DepthStencil);
 		if (m_TextureView.Init(m_Device, this, TextureViewDesc{
+			.type = viewType,
 			.mipLevelCount = m_MipLevels,
 			.arrayLayerCount = m_ArrayLayers,
 			}, createNativeImageView) != Result::Success) {
@@ -89,10 +111,11 @@ namespace RealRHI {
 				return Result::Failed;
 			}
 
+			const VkImageLayout imageLayout = Any(m_Usage & TextureUsage::Storage) ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 			m_SampledImageDescriptorIndex = m_Device->GetDescriptorManager()->AllocateImageDescriptor(
 				&m_TextureView,
 				VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+				imageLayout
 			);
 			if (m_SampledImageDescriptorIndex == UINT32_MAX) {
 				return Result::Failed;
@@ -114,7 +137,7 @@ namespace RealRHI {
     }
 
     Result VulkanTexture::ChangeLayout(CommandList* cmd, TextureLayout newLayout) {
-        auto* commandList = dynamic_cast<VulkanCommandList*>(cmd);
+        auto* commandList = static_cast<VulkanCommandList*>(cmd);
         if (commandList == nullptr || 
             commandList->GetState() != CommandListState::Recording) {
             return Result::Failed;
@@ -147,8 +170,19 @@ namespace RealRHI {
     }
 
     Result VulkanTexture::UploadData(const void* data, uint32_t size) {
+        const uint32_t texelSize = Utils::TextureFormatByteSize(Utils::VkFormatToTextureFormat(m_Format));
+        if (data == nullptr || texelSize == 0 || m_MipLevels != 1 || m_IsExternal ||
+            !Any(m_Usage & TextureUsage::TransferDst) ||
+            m_ImageExtent.width > UINT64_MAX / m_ImageExtent.height / m_ImageExtent.depth / m_ArrayLayers / texelSize ||
+            static_cast<uint64_t>(m_ImageExtent.width) * m_ImageExtent.height * m_ImageExtent.depth * m_ArrayLayers * texelSize > size) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "UploadData: Provide sufficient tightly packed color data for a single-mip, non-swapchain texture with TransferDst usage.");
+            
+            return Result::InvalidParameter;
+        }
+
         Ref<VulkanCommandAllocator> commandAllocator;
-        Result res = VulkanCommandAllocator::Create(m_Device, commandAllocator);
+        Result res = VulkanCommandAllocator::Create(m_Device, m_Device->GetGraphicsQueueFamily(), commandAllocator);
         if (res != Result::Success) return res;
 
         Ref<VulkanCommandList> commandList;
@@ -188,7 +222,18 @@ namespace RealRHI {
             .layerCount = m_ArrayLayers
         };
         commandList->CopyBufferToTexture(transferBuffer.Raw(), this, copyRegion);
-        if (ChangeLayout(commandList.Raw(), TextureLayout::ShaderRead) != Result::Success) {
+        
+        TextureLayout finalLayout = TextureLayout::TransferDst;
+        if (Any(m_Usage & TextureUsage::Storage)) {
+            finalLayout = TextureLayout::General;
+        }
+        else if (Any(m_Usage & TextureUsage::ShaderResource)) {
+            finalLayout = TextureLayout::ShaderRead;
+        }
+        else if (Any(m_Usage & TextureUsage::RenderTarget)) {
+            finalLayout = TextureLayout::ColorAttachment;
+        }
+        if (ChangeLayout(commandList.Raw(), finalLayout) != Result::Success) {
             return Result::Failed;
         }
 

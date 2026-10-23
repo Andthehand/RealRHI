@@ -52,7 +52,7 @@ int main() {
 
     RealRHI::Ref<RealRHI::CommandAllocator> allocator;
     RealRHI::Ref<RealRHI::CommandList> list;
-    if (device->CreateCommandAllocator(allocator) != RealRHI::Result::Success ||
+    if (device->CreateCommandAllocator(RealRHI::QueueType::Graphics, allocator) != RealRHI::Result::Success ||
         device->CreateCommandList(allocator.Raw(), list) != RealRHI::Result::Success ||
         list->Begin() != RealRHI::Result::Success) {
         return 1;

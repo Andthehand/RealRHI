@@ -220,12 +220,8 @@ void CreateTextures() {
 }
 
 bool CreateCommandLists() {
-    auto* queue = device->GetGraphicsCommandQueue();
-    if (!queue) {
-        return false;
-    }
     auto resources = std::make_unique<RealRHI::FrameResources>();
-    if (resources->Initialize(*device, *queue, swapchain->GetMaxFramesInFlight()) != RealRHI::Result::Success) {
+    if (resources->Initialize(*device, RealRHI::QueueType::Graphics, swapchain->GetMaxFramesInFlight()) != RealRHI::Result::Success) {
         return false;
     }
     frameResources = std::move(resources);
@@ -258,6 +254,9 @@ bool RecordCommandBuffer(RealRHI::CommandList* cmd, const RealRHI::FrameContext&
 
     cmd->BeginRendering(renderingInfo);
     cmd->BindPipeline(pipeline.Raw());
+    for (auto& texture : textures) {
+        cmd->UseResource(texture.Raw());
+    }
 
     RealRHI::Viewport viewport{
         .x = 0.0f,
@@ -333,6 +332,7 @@ void Cleanup() {
     vertexBuffer.Reset();
     frameResources.reset();
     swapchain.Reset();
+    window.Reset();
     device.reset();
 }
 

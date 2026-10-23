@@ -52,9 +52,9 @@ namespace RealRHI {
 
 		std::vector<BufferAttribute> CalculateCumulativeOffset(slang::TypeLayoutReflection* typeReflection, uint32_t* offset);
 
-		static void InitializeSlang(const VulkanDevice* m_Device);
+		static bool InitializeSlang(const VulkanDevice* m_Device);
 
-		bool CheckSlangDiagnostics(const Slang::ComPtr<slang::IBlob>& diagnostics);
+		bool CheckSlangDiagnostics(const Slang::ComPtr<slang::IBlob>& diagnostics, SlangResult result);
 	private:
 		const VulkanDevice* m_Device = nullptr;
 		Slang::ComPtr<slang::IModule> m_SlangModule;

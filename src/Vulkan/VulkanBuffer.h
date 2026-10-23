@@ -17,7 +17,7 @@ namespace RealRHI {
 		Result Init(const BufferDesc& desc);
 
 		BufferUsage GetUsage() const { return m_Usage; }
-		uint64_t GetSize() const override { return m_AllocInfo.size; }
+		uint64_t GetSize() const override { return m_Size; }
 		uint32_t GetDescriptorIndex() const override { return m_DescriptorIndex; }
 
 		void WriteData(const void* data, uint64_t size, uint64_t offset = 0) override;
@@ -34,10 +34,11 @@ namespace RealRHI {
 		const VulkanDevice* m_Device = nullptr;
 
 		BufferUsage m_Usage = BufferUsage::None;
+		uint64_t m_Size = 0;
 
 		VkBuffer m_Buffer = VK_NULL_HANDLE;
 		VmaAllocation m_BufferMemory = VK_NULL_HANDLE;
-		VmaAllocationInfo m_AllocInfo;
+		VmaAllocationInfo m_AllocInfo{};
 		uint32_t m_DescriptorIndex = UINT32_MAX;
 	};
 }

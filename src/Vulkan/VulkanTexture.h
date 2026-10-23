@@ -32,7 +32,7 @@ namespace RealRHI {
 		}
 
 		uint32_t GetSampledImageDescriptorIndex() const override { return m_SampledImageDescriptorIndex; }
-		uint32_t GetStorageImageDescriptorIndex() const { return m_StorageImageDescriptorIndex; }
+		uint32_t GetStorageImageDescriptorIndex() const override { return m_StorageImageDescriptorIndex; }
 		uint32_t GetSamplerDescriptorIndex() const override { return m_SamplerDescriptorIndex; }
 
 	protected:

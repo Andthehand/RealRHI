@@ -35,7 +35,7 @@ namespace RealRHI {
     }
 
     Result VulkanPipeline::InitCompute(const ComputePipelineDesc& desc) {
-        const auto* shader = dynamic_cast<const VulkanShader*>(desc.shader);
+        const auto* shader = static_cast<const VulkanShader*>(desc.shader);
         if (shader == nullptr) {
             return Result::Failed;
         }
@@ -77,7 +77,13 @@ namespace RealRHI {
     }
 
     Result VulkanPipeline::InitGraphics(const PipelineDesc& desc) {
-        const VulkanShader* shader = static_cast<VulkanShader*>(desc.shader);
+        const auto* shader = static_cast<const VulkanShader*>(desc.shader);
+        if (shader == nullptr || (desc.rasterState.fillMode == FillMode::Wireframe && !m_Device->SupportsWireframe())) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "CreateGraphicsPipeline: Provide a Vulkan shader and a fill mode supported by the device.");
+            
+            return Result::InvalidParameter;
+        }
         VkShaderModule shaderModule = shader->GetShaderModule();
 
         const std::vector<EntryPoint>& entryPoints = shader->GetEntryPoints();
@@ -175,24 +181,28 @@ namespace RealRHI {
                               VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
         };
 
+        const RenderTargetFormats& formats = desc.renderTargetFormats;
+        std::vector<VkPipelineColorBlendAttachmentState> blendAttachments(formats.colorFormats.size(), colorBlendAttachment);
         VkPipelineColorBlendStateCreateInfo colorBlending{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
             .logicOpEnable = VK_FALSE,
-            .attachmentCount = 1,
-            .pAttachments = &colorBlendAttachment,
+			.attachmentCount = static_cast<uint32_t>(formats.colorFormats.size()),
+            .pAttachments = blendAttachments.data()
         };
 
-        const RenderTargetFormats& formats = desc.renderTargetFormats;
         std::vector<VkFormat> vkColorFormats(formats.colorFormats.size());
         for (uint32_t i = 0; i < formats.colorFormats.size(); i++) {
             vkColorFormats[i] = Utils::TextureFormatToVkFormat(formats.colorFormats[i]);
         }
 
+		VkFormat depthFormat = Utils::TextureFormatToVkImageAspect(formats.depthFormat) ?
+            Utils::TextureFormatToVkFormat(formats.depthFormat) : VK_FORMAT_UNDEFINED;
         VkPipelineRenderingCreateInfo pipelineRenderingInfo{
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
             .colorAttachmentCount = (uint32_t)vkColorFormats.size(),
             .pColorAttachmentFormats = vkColorFormats.data(),
             .depthAttachmentFormat = Utils::TextureFormatToVkFormat(formats.depthFormat),
+            .stencilAttachmentFormat = depthFormat
         };
 
         VkPipelineCreateFlags2CreateInfo pipelineCreateFlags2Info{

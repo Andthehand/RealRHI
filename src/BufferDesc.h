@@ -45,6 +45,7 @@ namespace RealRHI {
         BufferUsage usage = BufferUsage::None;
         MemoryUsage memoryUsage = MemoryUsage::GPUOnly;
 
+        // Direct initialization requires CPUToGPU or GPUToCPU memory.
         const void* initialData = nullptr;
     };
 }

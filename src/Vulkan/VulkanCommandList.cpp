@@ -76,12 +76,19 @@ namespace RealRHI {
             }
             m_State = CommandListState::Recording;
             m_ComputePipelineBound = false;
+            m_GraphicsPipelineBound = false;
+            m_Rendering = false;
         }
 
         return Result::Success;
     }
 
     Result VulkanCommandList::End() {
+        if (m_Rendering) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "End: Call EndRendering before ending command recording.");
+            return Result::InvalidParameter;
+        }
         {
             std::scoped_lock lock(m_StateMutex);
             if (m_State != CommandListState::Recording) {
@@ -153,6 +160,13 @@ namespace RealRHI {
     }
 
     void VulkanCommandList::BeginRendering(const RenderingInfo& renderingInfo) {
+        if (GetState() != CommandListState::Recording || m_Rendering ||
+            renderingInfo.renderArea.width == 0 || renderingInfo.renderArea.height == 0) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "BeginRendering: Requires recording outside a rendering scope and a nonzero render area.");
+            return;
+        }
+
         std::vector<VkRenderingAttachmentInfo> colorAttachmentInfos(renderingInfo.colorAttachments.size());
         for (uint32_t i = 0; i < renderingInfo.colorAttachments.size(); i++) {
             const auto& attachment = renderingInfo.colorAttachments[i];
@@ -162,6 +176,11 @@ namespace RealRHI {
             }
 
             auto* textureView = static_cast<VulkanTextureView*>(attachment.target);
+            if (!textureView->HasNativeImageView()) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                    "BeginRendering: Color attachments require native Vulkan render-target views.");
+                return;
+            }
             RetainResource(const_cast<VulkanTexture*>(textureView->GetTexture()));
 
             VkClearValue clearColor = { {{attachment.clearColor.r, attachment.clearColor.g, attachment.clearColor.b, attachment.clearColor.a}} };
@@ -190,6 +209,12 @@ namespace RealRHI {
             }
 
             auto* textureView = static_cast<VulkanTextureView*>(attachment.target);
+            if (!textureView->HasNativeImageView()) {
+                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                    "BeginRendering: Depth attachment requires a native Vulkan depth/stencil view.");
+                return;
+            }
+
             RetainResource(const_cast<VulkanTexture*>(textureView->GetTexture()));
 
             const VkImageAspectFlags aspectMask = textureView->GetImageViewCreateInfo().subresourceRange.aspectMask;
@@ -242,13 +267,25 @@ namespace RealRHI {
         };
 
         vkCmdBeginRendering(m_CommandBuffer, &renderPassInfo);
+        m_Rendering = true;
     }
 
     void VulkanCommandList::EndRendering() {
+        if (GetState() != CommandListState::Recording || !m_Rendering) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "EndRendering: Call BeginRendering before ending a rendering scope.");
+            return;
+        }
         vkCmdEndRendering(m_CommandBuffer);
+        m_Rendering = false;
     }
 
     void VulkanCommandList::SetViewport(const Viewport& vp) {
+        if (GetState() != CommandListState::Recording) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "SetViewport: Call Begin before setting the viewport.");
+            return;
+        }
         VkViewport viewport{
             .x = vp.x,
             .y = vp.y,
@@ -261,6 +298,11 @@ namespace RealRHI {
     }
 
     void VulkanCommandList::SetScissor(const Rect& rect) {
+        if (GetState() != CommandListState::Recording) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "SetScissor: Call Begin before setting the scissor.");
+            return;
+        }
         VkRect2D scissor{
             .offset = {
                 .x = rect.x,
@@ -281,14 +323,7 @@ namespace RealRHI {
 			return;
 		}
 
-		auto* resource = dynamic_cast<VulkanTexture*>(texture);
-		if (resource == nullptr) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
-				"UseResource: Resource must belong to the Vulkan backend.");
-			return;
-		}
-
-		RetainResource(resource);
+		RetainResource(texture);
 	}
 
 	void VulkanCommandList::UseResource(Buffer* buffer) {
@@ -298,19 +333,14 @@ namespace RealRHI {
 			return;
 		}
 
-		auto* resource = dynamic_cast<VulkanBuffer*>(buffer);
-		if (resource == nullptr) {
-			return;
-		}
-
-		RetainResource(resource);
+		RetainResource(buffer);
 	}
 
     void VulkanCommandList::BindPipeline(Pipeline* pipeline) {
-        auto* vulkanPipeline = dynamic_cast<VulkanPipeline*>(pipeline);
+        auto* vulkanPipeline = static_cast<VulkanPipeline*>(pipeline);
         if (GetState() != CommandListState::Recording || vulkanPipeline == nullptr) {
             m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
-                "BindPipeline: Begin command recording and provide a valid Vulkan pipeline before binding.");
+                "BindPipeline: Begin command recording and provide a non-null pipeline before binding.");
             
 			return;
         }
@@ -324,11 +354,14 @@ namespace RealRHI {
 		if (vulkanPipeline->GetBindPoint() == VK_PIPELINE_BIND_POINT_COMPUTE) {
 			m_ComputePipelineBound = true;
 		}
+        else {
+            m_GraphicsPipelineBound = true;
+        }
 
     }
 
 	void VulkanCommandList::DispatchCompute(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) {
-		if (GetState() != CommandListState::Recording || !m_ComputePipelineBound ||
+		if (GetState() != CommandListState::Recording || m_Rendering || !m_ComputePipelineBound ||
 			groupCountX == 0 || groupCountY == 0 || groupCountZ == 0) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
 				"DispatchCompute: A compute pipeline must be bound, the command list must be recording, and all three dispatch group counts must be nonzero.");
@@ -360,6 +393,12 @@ namespace RealRHI {
 	}
 
     void VulkanCommandList::BindVertexBuffer(Buffer* vertexBuffer) {
+        auto* buffer = static_cast<VulkanBuffer*>(vertexBuffer);
+        if (GetState() != CommandListState::Recording || buffer == nullptr || !Any(buffer->GetUsage() & BufferUsage::Vertex)) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "BindVertexBuffer: Requires recording and a Vulkan buffer with Vertex usage.");
+            return;
+        }
         RetainResource(vertexBuffer);
         VkBuffer vertexBuffers[] = { static_cast<VulkanBuffer*>(vertexBuffer)->GetBuffer() };
         VkDeviceSize offsets[] = { 0 };
@@ -367,6 +406,12 @@ namespace RealRHI {
     }
 
     void VulkanCommandList::BindIndexBuffer(Buffer* indexBuffer) {
+        auto* buffer = static_cast<VulkanBuffer*>(indexBuffer);
+        if (GetState() != CommandListState::Recording || buffer == nullptr || !Any(buffer->GetUsage() & BufferUsage::Index)) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "BindIndexBuffer: Requires recording and a Vulkan buffer with Index usage.");
+            return;
+        }
         RetainResource(indexBuffer);
         vkCmdBindIndexBuffer(m_CommandBuffer, static_cast<VulkanBuffer*>(indexBuffer)->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
     }
@@ -378,10 +423,13 @@ namespace RealRHI {
             return;
 		}
 
-		auto* sourceBuffer = dynamic_cast<VulkanBuffer*>(source);
-		auto* destinationBuffer = dynamic_cast<VulkanBuffer*>(destination);
-		if (sourceBuffer == nullptr || destinationBuffer == nullptr ) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "CopyBuffer failed: Source or destination buffer is not a VulkanBuffer.");
+		auto* sourceBuffer = static_cast<VulkanBuffer*>(source);
+		auto* destinationBuffer = static_cast<VulkanBuffer*>(destination);
+		if (sourceBuffer == nullptr || destinationBuffer == nullptr ||
+			!Any(sourceBuffer->GetUsage() & BufferUsage::TransferSrc) ||
+			!Any(destinationBuffer->GetUsage() & BufferUsage::TransferDst)) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+				"CopyBuffer: Provide non-null source and destination buffers with TransferSrc and TransferDst usage respectively.");
 
 			return;
 		}
@@ -460,14 +508,14 @@ namespace RealRHI {
             return;
 		}
 
-		auto* sourceBuffer = dynamic_cast<VulkanBuffer*>(source);
-		auto* destinationTexture = dynamic_cast<VulkanTexture*>(destination);
+		auto* sourceBuffer = static_cast<VulkanBuffer*>(source);
+		auto* destinationTexture = static_cast<VulkanTexture*>(destination);
 		if (sourceBuffer == nullptr || destinationTexture == nullptr ||
-			!HasRecordedLayout(destinationTexture, region.mipLevel, region.baseArrayLayer,
-                region.layerCount, TextureLayout::TransferDst) ||
 			region.mipLevel >= destinationTexture->m_MipLevels ||
 			region.baseArrayLayer >= destinationTexture->m_ArrayLayers ||
-			region.layerCount > destinationTexture->m_ArrayLayers - region.baseArrayLayer) {
+			region.layerCount > destinationTexture->m_ArrayLayers - region.baseArrayLayer ||
+			!Any(sourceBuffer->GetUsage() & BufferUsage::TransferSrc) ||
+			!Any(destinationTexture->m_Usage & TextureUsage::TransferDst)) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "CopyBufferToTexture failed: Invalid source buffer or destination texture, or invalid copy region parameters.");
 			
             return;
@@ -482,6 +530,16 @@ namespace RealRHI {
 			region.bufferOffset >= sourceBuffer->GetSize()) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "CopyBufferToTexture failed: Copy region dimensions exceed mip level extent or buffer offset is out of bounds.");
 
+			return;
+		}
+
+		const uint32_t texelSize = Utils::TextureFormatByteSize(Utils::VkFormatToTextureFormat(destinationTexture->m_Format));
+		if (texelSize == 0 || region.bufferOffset % texelSize != 0 ||
+			region.width > UINT64_MAX / region.height / region.depth / region.layerCount / texelSize ||
+			static_cast<uint64_t>(region.width) * region.height * region.depth * region.layerCount * texelSize >
+				sourceBuffer->GetSize() - region.bufferOffset) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+				"CopyBufferToTexture: Unsupported format, misaligned buffer offset, or insufficient source buffer capacity.");
 			return;
 		}
 
@@ -510,9 +568,11 @@ namespace RealRHI {
 			return;
 		}
 
-		auto* texture = dynamic_cast<VulkanTexture*>(source);
-		auto* buffer = dynamic_cast<VulkanBuffer*>(destination);
+		auto* texture = static_cast<VulkanTexture*>(source);
+		auto* buffer = static_cast<VulkanBuffer*>(destination);
 		if (texture == nullptr || buffer == nullptr ||
+			!Any(texture->m_Usage & TextureUsage::TransferSrc) ||
+			!Any(buffer->GetUsage() & BufferUsage::TransferDst) ||
 
 			region.mipLevel >= texture->m_MipLevels ||
 			region.baseArrayLayer >= texture->m_ArrayLayers ||
@@ -570,9 +630,11 @@ namespace RealRHI {
 			return;
 		}
 
-		auto* sourceTexture = dynamic_cast<VulkanTexture*>(source);
-		auto* destinationTexture = dynamic_cast<VulkanTexture*>(destination);
+		auto* sourceTexture = static_cast<VulkanTexture*>(source);
+		auto* destinationTexture = static_cast<VulkanTexture*>(destination);
 		if (sourceTexture == nullptr || destinationTexture == nullptr ||
+			!Any(sourceTexture->m_Usage & TextureUsage::TransferSrc) ||
+			!Any(destinationTexture->m_Usage & TextureUsage::TransferDst) ||
 
 			sourceTexture == destinationTexture ||
 			sourceTexture->m_Format != destinationTexture->m_Format ||
@@ -667,7 +729,7 @@ namespace RealRHI {
 		}
 
 		for (const BufferBarrier& barrier : barriers.buffers) {
-			auto* buffer = dynamic_cast<VulkanBuffer*>(barrier.buffer);
+			auto* buffer = static_cast<VulkanBuffer*>(barrier.buffer);
 			if (buffer == nullptr || 
 				barrier.size == 0 || barrier.offset >= buffer->GetSize() ||
 				barrier.size > buffer->GetSize() - barrier.offset) {
@@ -693,7 +755,7 @@ namespace RealRHI {
 		}
 
 		for (const TextureBarrier& barrier : barriers.textures) {
-			auto* texture = dynamic_cast<VulkanTexture*>(barrier.texture);
+			auto* texture = static_cast<VulkanTexture*>(barrier.texture);
 			if (texture == nullptr || 
 				barrier.subresources.mipLevelCount == 0 || barrier.subresources.arrayLayerCount == 0 ||
 				barrier.subresources.baseMipLevel >= texture->m_MipLevels ||
@@ -791,10 +853,20 @@ namespace RealRHI {
 	}
 
     void VulkanCommandList::Draw(uint32_t vertexCount) {
+        if (GetState() != CommandListState::Recording || !m_Rendering || !m_GraphicsPipelineBound) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "Draw: Requires an active rendering scope and a bound graphics pipeline.");
+            return;
+        }
         vkCmdDraw(m_CommandBuffer, vertexCount, 1, 0, 0);
     }
 
     void VulkanCommandList::DrawIndexed(uint32_t indexCount) {
+        if (GetState() != CommandListState::Recording || !m_Rendering || !m_GraphicsPipelineBound) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "DrawIndexed: Requires an active rendering scope and a bound graphics pipeline.");
+            return;
+        }
         vkCmdDrawIndexed(m_CommandBuffer, indexCount, 1, 0, 0, 0);
     }
 }

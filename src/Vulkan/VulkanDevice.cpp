@@ -16,6 +16,7 @@
 #include <iostream>
 #include <limits>
 #include <cstring>
+#include <algorithm>
 
 namespace RealRHI {
 	VulkanDevice::~VulkanDevice() {
@@ -60,7 +61,7 @@ namespace RealRHI {
 	Result VulkanDevice::Init(const DeviceDesc& desc) {
 		m_EnableDebug = desc.enableDebug;
 		m_ShaderDirectory = desc.shaderDirectory;
-		m_DebugCallback = desc.debugCallback;
+		m_DebugCallback = desc.debugCallback != nullptr ? desc.debugCallback : DefaultDebugCallback;
 
 		if (!SDL_Init(SDL_INIT_VIDEO)) {
 			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to init SDL video.");
@@ -194,31 +195,30 @@ namespace RealRHI {
 		return res;
 	}
 
-	Result VulkanDevice::CreateCommandAllocator(Ref<CommandAllocator>& outAllocator) const {
-		return CreateCommandAllocator(QueueType::Graphics, outAllocator);
-	}
-
 	Result VulkanDevice::CreateCommandAllocator(QueueType type, Ref<CommandAllocator>& outAllocator) const {
 		Ref<VulkanCommandAllocator> allocator;
 		const auto* queue = static_cast<VulkanCommandQueue*>(GetCommandQueue(type));
 		if (queue == nullptr) {
 			return Result::Failed;
 		}
+
 		const Result result = VulkanCommandAllocator::Create(this, queue->GetQueueId().familyIndex, allocator);
 		if (result == Result::Success) {
 			outAllocator = allocator.As<CommandAllocator>();
 		}
+
 		return result;
 	}
 
 	Result VulkanDevice::CreateCommandList(CommandAllocator* allocator, Ref<CommandList>& outCommandList) const {
-		auto* vkAllocator = dynamic_cast<VulkanCommandAllocator*>(allocator);
+		auto* vkAllocator = static_cast<VulkanCommandAllocator*>(allocator);
 		if (vkAllocator == nullptr) {
 			return Result::Failed;
 		}
 		Ref<VulkanCommandList> list;
 		const Result result = VulkanCommandList::Create(this, Ref<VulkanCommandAllocator>(vkAllocator), list);
-		if (result == Result::Success) {
+		
+        if (result == Result::Success) {
 			outCommandList = list.As<CommandList>();
 		}
 		return result;
@@ -227,6 +227,7 @@ namespace RealRHI {
 	CommandQueue* VulkanDevice::GetCommandQueue(QueueType type) const {
 		uint32_t family = m_GraphicsQueueFamily;
 		switch (type) {
+			// This will default to the graphics queue
 			case QueueType::Graphics: break;
 			case QueueType::Compute: family = m_ComputeQueueFamily; break;
 			case QueueType::Transfer: family = m_TransferQueueFamily; break;
@@ -273,9 +274,15 @@ namespace RealRHI {
 		}
 
 		auto* vkSC = static_cast<VulkanSwapchain*>(sc);
-		auto* vkCmd = dynamic_cast<VulkanCommandList*>(cmd);
-		if (vkCmd == nullptr) {
-			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Submit received a command list from the wrong backend.");
+		auto* vkCmd = static_cast<VulkanCommandList*>(cmd);
+		if (!vkSC->IsFrameValid(frame)) {
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+				"Submit: Frame must match the swapchain.");
+			return Result::Failed;
+		}
+
+		if (!vkSC->PrepareFrameSubmission(frame.frameIndex)) {
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Submit: Frame is not ready for submission.");
 			return Result::Failed;
 		}
 
@@ -304,11 +311,6 @@ namespace RealRHI {
 
 		std::array<CommandList*, 1> tracked = { cmd };
 
-		if (!vkSC->PrepareFrameSubmission(frame.frameIndex)) {
-			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Frame was not ready for submission.");
-			return Result::Failed;
-		}
-
 		const SubmissionToken token = m_GraphicsCommandQueue->SubmitTracked(
 			{ cmdInfos.data(), cmdInfos.size() },
 			{ &waitInfo, 1 },
@@ -329,56 +331,19 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
-		auto* vkCmd = dynamic_cast<VulkanCommandList*>(cmd);
-		if (vkCmd == nullptr) {
-			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "ImmediateSubmit received a command list from the wrong backend.");
-			return Result::Failed;
-		}
-
-		VkCommandBufferSubmitInfo cmdInfo{
-			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-			.commandBuffer = vkCmd->GetCommandBuffer(),
-		};
-
-		VkFenceCreateInfo fenceInfo{
-			.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-		};
-
-		VkFence fence = VK_NULL_HANDLE;
-		if (vkCreateFence(m_Device, &fenceInfo, nullptr, &fence) != VK_SUCCESS) {
-			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create fence for immediate submit.");
-			return Result::Failed;
-		}
-
-		std::array<CommandList*, 1> tracked = { cmd };
-		const SubmissionToken token = m_GraphicsCommandQueue->SubmitTracked(
-			{ &cmdInfo, 1 },
-			{},
-			{},
-			tracked,
-			fence);
-
-		if (token.value == 0) {
-			vkDestroyFence(m_Device, fence, nullptr);
-			return Result::Failed;
-		}
-
-		if (vkWaitForFences(m_Device, 1, &fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
-			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to wait for fence during immediate submit.");
-			vkDestroyFence(m_Device, fence, nullptr);
+		const SubmissionToken token = m_GraphicsCommandQueue->Submit(*cmd);
+		if (!token.IsValid()) {
 			return Result::Failed;
 		}
 
 		m_GraphicsCommandQueue->Wait(token);
-		vkDestroyFence(m_Device, fence, nullptr);
-		return Result::Success;
+		return m_GraphicsCommandQueue->IsComplete(token) ? Result::Success : Result::Failed;
 	}
 
 	void VulkanDevice::WaitIdle() {
-		if (m_GraphicsCommandQueue != nullptr) {
-			m_GraphicsCommandQueue->WaitIdle();
+		for (const auto& [id, queue] : m_Queues) {
+			queue->WaitIdle();
 		}
-		vkDeviceWaitIdle(m_Device);
 		ProcessDeferredDeletions();
 	}
 
@@ -506,48 +471,141 @@ namespace RealRHI {
         return true;
     }
 
-    int VulkanDevice::RatePhysicalDevice(VkPhysicalDevice device) {
-        VkPhysicalDeviceFeatures features;
+	bool VulkanDevice::SupportsRequiredExtensions(VkPhysicalDevice device) const {
+		uint32_t extensionCount = 0;
+		if (vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr) != VK_SUCCESS) {
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+				"Failed to query Vulkan device extension count.");
+			return false;
+		}
 
-        VkPhysicalDeviceDescriptorHeapPropertiesEXT descriptorHeapProperties{
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT
-        };
-		VkPhysicalDeviceProperties2 properties2{
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-			.pNext = &descriptorHeapProperties
+		std::vector<VkExtensionProperties> extensions(extensionCount);
+		if (vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, extensions.data()) != VK_SUCCESS) {
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+				"Failed to enumerate Vulkan device extensions.");
+			return false;
+		}
+		extensions.resize(extensionCount);
+
+		for (const char* requiredExtension : s_DeviceExtensions) {
+			const auto extension = std::find_if(extensions.begin(), extensions.end(),
+				[requiredExtension](const VkExtensionProperties& availableExtension) {
+					return std::strcmp(requiredExtension, availableExtension.extensionName) == 0;
+				});
+
+			if (extension == extensions.end()) {
+				const std::string message = std::string("Skipping Vulkan device: Missing required extension ") + requiredExtension;
+				SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, message.c_str());
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	bool VulkanDevice::SupportsRequiredFeatures(VkPhysicalDevice device) const {
+		VkPhysicalDeviceDescriptorHeapFeaturesEXT descriptorHeapFeatures{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_FEATURES_EXT,
+		};
+		VkPhysicalDeviceMaintenance5FeaturesKHR maintenance5Features{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES_KHR,
+			.pNext = &descriptorHeapFeatures,
+		};
+		VkPhysicalDeviceShaderUntypedPointersFeaturesKHR untypedPointerFeatures{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_UNTYPED_POINTERS_FEATURES_KHR,
+			.pNext = &maintenance5Features,
+		};
+		VkPhysicalDeviceVulkan13Features vulkan13Features{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+			.pNext = &untypedPointerFeatures,
+		};
+		VkPhysicalDeviceVulkan12Features vulkan12Features{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+			.pNext = &vulkan13Features,
+		};
+		VkPhysicalDeviceFeatures2 features{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+			.pNext = &vulkan12Features,
+		};
+		vkGetPhysicalDeviceFeatures2(device, &features);
+
+		struct RequiredFeature {
+			VkBool32 supported;
+			const char* name;
 		};
 
-        vkGetPhysicalDeviceProperties2(device, &properties2);
-        vkGetPhysicalDeviceFeatures(device, &features);
+		const RequiredFeature requiredFeatures[] = {
+			{ vulkan12Features.bufferDeviceAddress, "bufferDeviceAddress" },
+			{ vulkan12Features.timelineSemaphore, "timelineSemaphore" },
+			{ vulkan13Features.synchronization2, "synchronization2" },
+			{ vulkan13Features.dynamicRendering, "dynamicRendering" },
+			{ untypedPointerFeatures.shaderUntypedPointers, "shaderUntypedPointers" },
+			{ maintenance5Features.maintenance5, "maintenance5" },
+			{ descriptorHeapFeatures.descriptorHeap, "descriptorHeap" },
+		};
 
-		// Must support required queues
-		QueueFamilyIndices indices = FindQueueFamilies(device);
-		if (!indices.IsComplete()) {
+		for (const RequiredFeature& feature : requiredFeatures) {
+			if (feature.supported == VK_FALSE) {
+				const std::string message = std::string("Skipping Vulkan device: Missing required feature ") + feature.name;
+				SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, message.c_str());
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	int VulkanDevice::RatePhysicalDevice(VkPhysicalDevice device) {
+		if (!SupportsRequiredExtensions(device) || !SupportsRequiredFeatures(device)) {
 			return 0;
 		}
 
-		int score = 0;
+		VkPhysicalDeviceDescriptorHeapPropertiesEXT descriptorHeapProperties{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT,
+		};
+		VkPhysicalDeviceProperties2 properties{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+			.pNext = &descriptorHeapProperties,
+		};
+		vkGetPhysicalDeviceProperties2(device, &properties);
 
-		// Must support required features
+		if (properties.properties.apiVersion < VK_API_VERSION_1_3) {
+			SendDebugMessage(DebugSeverity::Info, DebugMessageType::General,
+				"Skipping Vulkan device: Vulkan 1.3 or newer is required.");
+			return 0;
+		}
+
+		if (descriptorHeapProperties.maxPushDataSize == 0) {
+			SendDebugMessage(DebugSeverity::Info, DebugMessageType::General,
+				"Skipping Vulkan device: Descriptor heap push data is unavailable.");
+			return 0;
+		}
+
+		const QueueFamilyIndices queueFamilies = FindQueueFamilies(device);
+		if (!queueFamilies.IsComplete()) {
+			SendDebugMessage(DebugSeverity::Info, DebugMessageType::General,
+				"Skipping Vulkan device: Required graphics and presentation queues are unavailable.");
+			return 0;
+		}
+
+		int score = static_cast<int>(properties.properties.limits.maxImageDimension2D);
 		if (descriptorHeapProperties.bufferDescriptorSize > 0) {
 			score += 1000;
 		}
 
-		// Prefer discrete GPU
-		if (properties2.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
-			score += 1000;
+		switch (properties.properties.deviceType) {
+			case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+				score += 1000;
+				break;
+			case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+				score += 100;
+				break;
+			default:
+				break;
 		}
 
-		// Slight preference for integrated if no discrete
-		if (properties2.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
-			score += 100;
-		}
-
-        // Prefer larger max image dimension (usually stronger GPU)
-        score += properties2.properties.limits.maxImageDimension2D;
-
-        return score;
-    }
+		return score;
+	}
 
     bool VulkanDevice::PickPhysicalDevice() {
         uint32_t deviceCount = 0;
@@ -625,9 +683,15 @@ namespace RealRHI {
 			.descriptorHeap = VK_TRUE,
         };
 
+        VkPhysicalDeviceMaintenance5FeaturesKHR maintenance5{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES_KHR,
+            .pNext = &heapFeatures,
+            .maintenance5 = VK_TRUE,
+        };
+
         VkPhysicalDeviceShaderUntypedPointersFeaturesKHR untypedPtrFeatures{
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_UNTYPED_POINTERS_FEATURES_KHR,
-            .pNext = &heapFeatures,
+            .pNext = &maintenance5,
             .shaderUntypedPointers = VK_TRUE,
 		};
         
@@ -640,12 +704,18 @@ namespace RealRHI {
 		VkPhysicalDeviceVulkan12Features enabledVk12Features{
 			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
 			.pNext = &enabledVk13Features,
+            .timelineSemaphore = VK_TRUE,
+            .bufferDeviceAddress = VK_TRUE,
 		};
-		enabledVk12Features.bufferDeviceAddress = VK_TRUE;
-		enabledVk12Features.timelineSemaphore = VK_TRUE;
+
+        VkPhysicalDeviceFeatures supportedFeatures{};
+        vkGetPhysicalDeviceFeatures(m_PhysicalDevice, &supportedFeatures);
+        m_SupportsWireframe = supportedFeatures.fillModeNonSolid == VK_TRUE;
+        
         VkPhysicalDeviceFeatures deviceFeatures{
-            .samplerAnisotropy = VK_TRUE,
+            .fillModeNonSolid = supportedFeatures.fillModeNonSolid
         };
+
         VkDeviceCreateInfo createInfo{
             .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
             .pNext = &enabledVk12Features,
@@ -733,7 +803,13 @@ namespace RealRHI {
                 return false;
             }
 
-            m_Queues[id] = new VulkanCommandQueue(this, family, 0, queue);
+            std::unique_ptr<VulkanCommandQueue> commandQueue;
+            if (VulkanCommandQueue::Create(this, family, 0, queue, commandQueue) != Result::Success) {
+                return false;
+            }
+
+            m_Queues.emplace(id, commandQueue.get());
+            commandQueue.release();
         }
 
         m_GraphicsCommandQueue = m_Queues.at(QueueId{ m_GraphicsQueueFamily, 0 });
@@ -782,19 +858,15 @@ namespace RealRHI {
                 message.severity = DebugSeverity::Info;
         }
 
-        switch (type) {
-            case VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT:
-                message.type = DebugMessageType::General;
-                break;
-            case VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT:
-                message.type = DebugMessageType::Validation;
-                break;
-            case VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT:
-                message.type = DebugMessageType::Performance;
-                break;
-            default:
-                message.type = DebugMessageType::General;
-		}
+        if ((type & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT) != 0) {
+            message.type = DebugMessageType::Validation;
+        }
+        else if ((type & VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT) != 0) {
+            message.type = DebugMessageType::Performance;
+        }
+        else {
+            message.type = DebugMessageType::General;
+        }
 
         message.message = callbackData->pMessage;
         debugCallback(message);

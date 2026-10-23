@@ -47,6 +47,7 @@ namespace RealRHI {
         Pending
     };
 
+    // Callers must serialize recording, reset, and submission of each list.
     class CommandList : public RefCounted {
     public:
         virtual ~CommandList() = default;

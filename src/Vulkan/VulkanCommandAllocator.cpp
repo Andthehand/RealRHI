@@ -5,10 +5,6 @@ namespace RealRHI {
     VulkanCommandAllocator::VulkanCommandAllocator(const VulkanDevice* device, uint32_t family)
         : m_Device(device), m_Family(family) {}
 
-    Result VulkanCommandAllocator::Create(const VulkanDevice* device, Ref<VulkanCommandAllocator>& out) {
-        return Create(device, device->GetGraphicsQueueFamily(), out);
-    }
-
     Result VulkanCommandAllocator::Create(const VulkanDevice* device, uint32_t family, Ref<VulkanCommandAllocator>& out) {
         Ref<VulkanCommandAllocator> allocator = Ref<VulkanCommandAllocator>::Create(device, family);
         VkCommandPoolCreateInfo info{

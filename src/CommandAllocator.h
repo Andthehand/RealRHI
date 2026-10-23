@@ -4,7 +4,8 @@
 
 namespace RealRHI {
     // Owns command-buffer allocation storage. Reset is only valid when no
-    // command lists are allocated from this allocator.
+    // command lists are allocated from this allocator. Lists from one allocator
+    // must be recorded on one thread at a time.
     class CommandAllocator : public RefCounted {
     public:
         virtual ~CommandAllocator() = default;

@@ -20,11 +20,14 @@ namespace RealRHI {
 		m_BufferDescriptorSize = heapProperties.bufferDescriptorSize;
 		m_ImageDescriptorSize = heapProperties.imageDescriptorSize;
 		m_SamplerDescriptorSize = heapProperties.samplerDescriptorSize;
+		if (m_BufferDescriptorSize == 0 || m_ImageDescriptorSize == 0 || m_SamplerDescriptorSize == 0) {
+			return Result::Failed;
+		}
 
 		// Initialize descriptor indices
 		m_NextBufferDescriptorIndex = 0;
 		// For image descriptors, we start from the end of the heap and decrement
-		m_ImageDescriptorCapacity = static_cast<uint32_t>(m_DescriptorHeaps->GetResourceHeap().heapSize / m_ImageDescriptorSize);
+		m_ImageDescriptorCapacity = static_cast<uint32_t>(m_DescriptorHeaps->GetResourceHeap().usableSize / m_ImageDescriptorSize);
 		m_NextImageDescriptorIndex = m_ImageDescriptorCapacity;
 		m_NextSamplerDescriptorIndex = 0;
 
@@ -188,7 +191,7 @@ namespace RealRHI {
 		}
 		else {
 			if ((static_cast<VkDeviceSize>(m_NextSamplerDescriptorIndex) + 1) * m_SamplerDescriptorSize >
-				m_DescriptorHeaps->GetSamplerHeap().heapSize) {
+				m_DescriptorHeaps->GetSamplerHeap().usableSize) {
 				return UINT32_MAX;
 			}
 			samplerDescriptorIndex = m_NextSamplerDescriptorIndex++;

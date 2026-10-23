@@ -3,17 +3,21 @@ cmake_minimum_required(VERSION 3.15)
 project(RealRHI VERSION 1.0.0 LANGUAGES CXX)
 
 include(FetchContent)
-if(REALRHI_BUILD_TESTS)
-    include(CTest)
-endif()
 
 # Options
 option(BUILD_EXAMPLES "Build example applications" ON)
 option(REALRHI_BUILD_TESTS "Build RealRHI tests" ON)
+if(REALRHI_BUILD_TESTS)
+    enable_testing()
+endif()
+
+if(WIN32)
+    set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_WIN32_KHR)
+endif()
 
 FetchContent_Declare(volk
     GIT_REPOSITORY https://github.com/zeux/volk.git
-    GIT_TAG master
+    GIT_TAG 0dc3ce00bf98b9f0b6fe708ca0f7eb74e2830173
 )
 FetchContent_MakeAvailable(volk)
 
@@ -40,6 +44,9 @@ set(REALRHI_SOURCES
   "src/Vulkan/VulkanSwapchain.cpp" "src/Vulkan/VulkanShader.cpp" "src/Vulkan/VulkanWindow.cpp" "src/Vulkan/VulkanPipeline.cpp" "src/Vulkan/VulkanBuffer.cpp" "src/Vulkan/VulkanCommandList.cpp" "src/Vulkan/VulkanTexture.cpp" "src/Vulkan/VulkanTextureView.cpp" "src/Vulkan/VulkanDescriptorHeaps.cpp" "src/Vulkan/VulkanDescriptorManager.cpp")
     
 add_library(RealRHI ${REALRHI_SOURCES} ${REALRHI_HEADERS})
+if(WIN32)
+    target_compile_definitions(RealRHI PUBLIC NOMINMAX)
+endif()
     
 target_include_directories(RealRHI
     PUBLIC
@@ -55,17 +62,22 @@ target_link_libraries(RealRHI
 target_compile_features(RealRHI PUBLIC cxx_std_20)
 
 if(REALRHI_BUILD_TESTS)
+    add_executable(CoreTests tests/CoreTests.cpp)
+    target_link_libraries(CoreTests PRIVATE RealRHI)
+    add_test(NAME CoreTests COMMAND CoreTests)
+
+    add_executable(ResourceSafetyTests tests/ResourceSafetyTests.cpp)
+    target_link_libraries(ResourceSafetyTests PRIVATE RealRHI)
+    target_compile_definitions(ResourceSafetyTests PRIVATE
+        REALRHI_TEST_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/examples/TriangleExample/shaders")
+    add_test(NAME ResourceSafetyTests COMMAND ResourceSafetyTests)
+
     add_executable(QueueSubmissionTests tests/QueueSubmissionTests.cpp)
     target_link_libraries(QueueSubmissionTests PRIVATE RealRHI)
     target_include_directories(QueueSubmissionTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     add_test(NAME QueueSubmissionTests COMMAND QueueSubmissionTests)
 endif()
 
-# Define platform-specific Vulkan macros
-if(WIN32)
-    set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_WIN32_KHR)
-endif()
-    
 # Add examples directory if enabled
 if(BUILD_EXAMPLES)
     add_subdirectory(examples)

@@ -21,10 +21,6 @@ namespace RealRHI {
 			return newCount == 0;
 		}
 
-		void ZeroRefCount() const {
-			m_RefCount = 0;
-		}
-
 		uint32_t GetRefCount() const { return m_RefCount.load(); }
 	private:
 		mutable std::atomic<std::uint32_t> m_RefCount = 0;
@@ -57,16 +53,16 @@ namespace RealRHI {
 		}
 
 		template<typename T2>
-		requires(std::is_base_of_v<T, T2> || std::is_base_of_v<T2, T>)
+		requires(std::is_convertible_v<T2*, T*>)
 		Ref(const Ref<T2>& other) {
-			m_Instance = (T*)other.m_Instance;
+			m_Instance = other.m_Instance;
 			IncRef();
 		}
 
 		template<typename T2>
-		requires(std::is_base_of_v<T, T2> || std::is_base_of_v<T2, T>)
+		requires(std::is_convertible_v<T2*, T*>)
 		Ref(Ref<T2>&& other) noexcept {
-			m_Instance = (T*)other.m_Instance;
+			m_Instance = other.m_Instance;
 			other.m_Instance = nullptr;
 		}
 
@@ -91,8 +87,9 @@ namespace RealRHI {
 		}
 
 		template<typename T2>
+		requires(std::is_convertible_v<T2*, T*>)
 		Ref& operator=(const Ref<T2>& other) {
-			T* newInstance = (T*)other.m_Instance;
+			T* newInstance = other.m_Instance;
 			// Self-assignment: do nothing
 			if (m_Instance == newInstance) {
 				return *this;
@@ -106,7 +103,7 @@ namespace RealRHI {
 
 		Ref& operator=(Ref<T>&& other) noexcept {
 			// Self-assignment: do nothing (moving to self is a no-op)
-			if (m_Instance == other.m_Instance) {
+			if (this == &other) {
 				return *this;
 			}
 			DecRef();
@@ -117,13 +114,9 @@ namespace RealRHI {
 		}
 
 		template<typename T2>
+		requires(std::is_convertible_v<T2*, T*>)
 		Ref& operator=(Ref<T2>&& other) noexcept {
-			T* newInstance = (T*)other.m_Instance;
-			// Self-assignment: do nothing
-			if (m_Instance == newInstance) {
-				other.m_Instance = nullptr;
-				return *this;
-			}
+			T* newInstance = other.m_Instance;
 			DecRef();
 
 			m_Instance = newInstance;
@@ -143,8 +136,7 @@ namespace RealRHI {
 		T* Raw() { return m_Instance; }
 		const T* Raw() const { return m_Instance; }
 
-		// Release this Ref's ownership without deleting the object
-		// The Ref becomes empty (nullptr)
+		// Release this reference, deleting the object if it was the last owner.
 		void Release() {
 			if (m_Instance) {
 				DecRef();
