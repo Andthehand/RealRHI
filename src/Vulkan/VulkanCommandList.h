@@ -28,19 +28,19 @@ namespace RealRHI {
 		void SetViewport(const Viewport& vp);
 		void SetScissor(const Rect& rect);
 
-		Result UseResource(Texture* texture) override;
-		Result UseResource(Buffer* buffer) override;
-		Result BindPipeline(Pipeline* pipeline) override;
-		Result DispatchCompute(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
+		void UseResource(Texture* texture) override;
+		void UseResource(Buffer* buffer) override;
+		void BindPipeline(Pipeline* pipeline) override;
+		void DispatchCompute(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
 		void BindVertexBuffer(Buffer* vertexBuffer) override;
 		void BindIndexBuffer(Buffer* indexBuffer) override;
 
-		Result CopyBuffer(Buffer* source, Buffer* destination, const BufferCopyRegion& region) override;
-		Result CopyBufferToTexture(Buffer* source, Texture* destination, const BufferTextureCopyRegion& region) override;
-		Result CopyTextureToBuffer(Texture* source, Buffer* destination, const BufferTextureCopyRegion& region) override;
-		Result CopyTexture(Texture* source, Texture* destination, const TextureCopyRegion& region) override;
+		void CopyBuffer(Buffer* source, Buffer* destination, const BufferCopyRegion& region) override;
+		void CopyBufferToTexture(Buffer* source, Texture* destination, const BufferTextureCopyRegion& region) override;
+		void CopyTextureToBuffer(Texture* source, Buffer* destination, const BufferTextureCopyRegion& region) override;
+		void CopyTexture(Texture* source, Texture* destination, const TextureCopyRegion& region) override;
 
-		Result Barrier(const BarrierDesc& barriers) override;
+		void Barrier(const BarrierDesc& barriers) override;
 
 		void Draw(uint32_t vertexCount) override;
 		void DrawIndexed(uint32_t indexCount) override;

@@ -56,15 +56,15 @@ namespace RealRHI {
         return Result::Success;
     }
 
-    Result VulkanBuffer::WriteData(const void* data, uint64_t size, uint64_t offset) {
+    void VulkanBuffer::WriteData(const void* data, uint64_t size, uint64_t offset) {
         if (offset + size > m_AllocInfo.size) {
             m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Trying to write data outside of the buffer bounds.");
-            return Result::InvalidParameter;
+            return;
 		}
 
         memcpy((char*)m_AllocInfo.pMappedData + offset, data, (size_t)size);
 
-		return Result::Success;
+		return;
     }
 
 	Result VulkanBuffer::ReadData(void* data, uint64_t size, uint64_t offset) const {

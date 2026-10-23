@@ -1,3 +1,10 @@
+### Error reporting and API contracts
+- Use `Result` only for recoverable runtime failures, such as Vulkan allocation, compilation, or command-buffer begin/end/reset failures.
+- Command-recording operations whose failure conditions are solely invalid caller usage return `void`. Log the specific violated precondition using `m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, ...)` and return without recording the invalid Vulkan command.
+- Diagnostic messages must identify the operation and actionable cause; avoid generic messages such as "Invalid operation".
+- Do not add recording-error flags, automatic recovery, or later `End()`/`Submit()` failures solely because a programmer error was logged.
+- Keep return values for operations that can fail due to drivers, graphics APIs, resource allocation, or other runtime conditions.
+
 # Copilot Instructions
 
 ## Project Style Guide

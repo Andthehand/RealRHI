@@ -158,11 +158,7 @@ namespace RealRHI {
 			return UINT32_MAX;
 		}
 
-		if (m_DescriptorHeaps->GetResourceHeap().buffer->WriteData(descriptorMemory.data(), m_ImageDescriptorSize, imageDescriptorIndex * m_ImageDescriptorSize) != Result::Success) {
-			m_FreeImageDescriptors.push_back(imageDescriptorIndex);
-
-			return UINT32_MAX;
-		}
+		m_DescriptorHeaps->GetResourceHeap().buffer->WriteData(descriptorMemory.data(), m_ImageDescriptorSize, imageDescriptorIndex * m_ImageDescriptorSize);
 		m_AllocatedImageDescriptors.insert(imageDescriptorIndex);
 		return imageDescriptorIndex;
 	}

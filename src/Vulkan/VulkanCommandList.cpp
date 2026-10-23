@@ -273,41 +273,47 @@ namespace RealRHI {
         vkCmdSetScissor(m_CommandBuffer, 0, 1, &scissor);
     }
 
-	Result VulkanCommandList::UseResource(Texture* texture) {
+	void VulkanCommandList::UseResource(Texture* texture) {
 		if (texture == nullptr || GetState() != CommandListState::Recording) {
-			return Result::Failed;
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+				"UseResource(Texture): Requires an active recording and a non-null texture.");
+			return;
 		}
 
 		auto* resource = dynamic_cast<VulkanTexture*>(texture);
 		if (resource == nullptr) {
-			return Result::Failed;
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+				"UseResource: Resource must belong to the Vulkan backend.");
+			return;
 		}
 
 		RetainResource(resource);
-		return Result::Success;
+		return;
 	}
 
-	Result VulkanCommandList::UseResource(Buffer* buffer) {
+	void VulkanCommandList::UseResource(Buffer* buffer) {
 		if (buffer == nullptr || GetState() != CommandListState::Recording) {
-			return Result::Failed;
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+				"UseResource(Buffer): Requires an active recording and a non-null buffer.");
+			return;
 		}
 
 		auto* resource = dynamic_cast<VulkanBuffer*>(buffer);
 		if (resource == nullptr) {
-			return Result::Failed;
+			return;
 		}
 
 		RetainResource(resource);
-		return Result::Success;
+		return;
 	}
 
-    Result VulkanCommandList::BindPipeline(Pipeline* pipeline) {
+    void VulkanCommandList::BindPipeline(Pipeline* pipeline) {
         auto* vulkanPipeline = dynamic_cast<VulkanPipeline*>(pipeline);
         if (GetState() != CommandListState::Recording || vulkanPipeline == nullptr) {
             m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
-                "BindPipeline requires a valid pipeline and an active recording.");
+                "BindPipeline: Begin command recording and provide a valid Vulkan pipeline before binding.");
             
-			return Result::Failed;
+			return;
         }
 
         RetainResource(vulkanPipeline);
@@ -320,19 +326,19 @@ namespace RealRHI {
 			m_ComputePipelineBound = true;
 		}
 
-		return Result::Success;
+		return;
     }
 
-	Result VulkanCommandList::DispatchCompute(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) {
+	void VulkanCommandList::DispatchCompute(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) {
 		if (GetState() != CommandListState::Recording || !m_ComputePipelineBound ||
 			groupCountX == 0 || groupCountY == 0 || groupCountZ == 0) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
-				"DispatchCompute requires a bound compute pipeline and nonzero group counts.");
-			return Result::Failed;
+				"DispatchCompute: A compute pipeline must be bound, the command list must be recording, and all three dispatch group counts must be nonzero.");
+			return;
 		}
 
 		vkCmdDispatch(m_CommandBuffer, groupCountX, groupCountY, groupCountZ);
-		return Result::Success;
+		return;
 	}
 
     void VulkanCommandList::BindVertexBuffer(Buffer* vertexBuffer) {
@@ -347,11 +353,11 @@ namespace RealRHI {
         vkCmdBindIndexBuffer(m_CommandBuffer, static_cast<VulkanBuffer*>(indexBuffer)->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
     }
 
-	Result VulkanCommandList::CopyBuffer(Buffer* source, Buffer* destination, const BufferCopyRegion& region) {
+	void VulkanCommandList::CopyBuffer(Buffer* source, Buffer* destination, const BufferCopyRegion& region) {
 		if (GetState() != CommandListState::Recording || region.size == 0) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "CopyBuffer failed: Command list is not recording or region size is zero.");
 			
-            return Result::Failed;
+            return;
 		}
 
 		auto* sourceBuffer = dynamic_cast<VulkanBuffer*>(source);
@@ -359,7 +365,7 @@ namespace RealRHI {
 		if (sourceBuffer == nullptr || destinationBuffer == nullptr ) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "CopyBuffer failed: Source or destination buffer is not a VulkanBuffer.");
 
-			return Result::Failed;
+			return;
 		}
 
 		if (region.sourceOffset > sourceBuffer->GetSize() ||
@@ -368,7 +374,7 @@ namespace RealRHI {
 			region.size > destinationBuffer->GetSize() - region.destinationOffset) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "CopyBuffer failed: Copy region is out of bounds of source or destination buffer.");
 
-			return Result::Failed;
+			return;
 		}
 
 		RetainResource(sourceBuffer);
@@ -380,7 +386,7 @@ namespace RealRHI {
 			.size = region.size,
 		};
 		vkCmdCopyBuffer(m_CommandBuffer, sourceBuffer->GetBuffer(), destinationBuffer->GetBuffer(), 1, &copyRegion);
-		return Result::Success;
+		return;
 	}
 
 	TextureLayout VulkanCommandList::GetExpectedLayout(const VulkanTexture* texture, uint32_t mip, uint32_t layer) const {
@@ -429,12 +435,12 @@ namespace RealRHI {
 		return true;
 	}
 
-	Result VulkanCommandList::CopyBufferToTexture(Buffer* source, Texture* destination, const BufferTextureCopyRegion& region) {
+	void VulkanCommandList::CopyBufferToTexture(Buffer* source, Texture* destination, const BufferTextureCopyRegion& region) {
 		if (GetState() != CommandListState::Recording ||
 			region.width == 0 || region.height == 0 || region.depth == 0 || region.layerCount == 0) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "CopyBufferToTexture failed: Command list is not recording or region dimensions are zero.");
             
-            return Result::Failed;
+            return;
 		}
 
 		auto* sourceBuffer = dynamic_cast<VulkanBuffer*>(source);
@@ -447,7 +453,7 @@ namespace RealRHI {
 			region.layerCount > destinationTexture->m_ArrayLayers - region.baseArrayLayer) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "CopyBufferToTexture failed: Invalid source buffer or destination texture, or invalid copy region parameters.");
 			
-            return Result::Failed;
+            return;
 		}
 
 		const VkExtent3D mipExtent{
@@ -459,7 +465,7 @@ namespace RealRHI {
 			region.bufferOffset >= sourceBuffer->GetSize()) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "CopyBufferToTexture failed: Copy region dimensions exceed mip level extent or buffer offset is out of bounds.");
 
-			return Result::Failed;
+			return;
 		}
 
 		RegisterRequiredLayout(destinationTexture, region.mipLevel, region.baseArrayLayer,
@@ -478,14 +484,14 @@ namespace RealRHI {
 		};
 		vkCmdCopyBufferToImage(m_CommandBuffer, sourceBuffer->GetBuffer(), destinationTexture->m_Image,
 			                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
-		return Result::Success;
+		return;
 	}
 
-	Result VulkanCommandList::CopyTextureToBuffer(Texture* source, Buffer* destination, const BufferTextureCopyRegion& region) {
+	void VulkanCommandList::CopyTextureToBuffer(Texture* source, Buffer* destination, const BufferTextureCopyRegion& region) {
 		if (GetState() != CommandListState::Recording || region.width == 0 || region.height == 0 ||
 			region.depth == 0 || region.layerCount == 0) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Texture copy failed: Command list is not recording or region dimensions are zero.");
-			return Result::Failed;
+			return;
 		}
 
 		auto* texture = dynamic_cast<VulkanTexture*>(source);
@@ -499,7 +505,7 @@ namespace RealRHI {
             !HasRecordedLayout(texture, region.mipLevel, region.baseArrayLayer,
                 region.layerCount, TextureLayout::TransferSrc)) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "CopyTextureToBuffer failed: Invalid source texture, destination buffer, or subresource range.");
-			return Result::Failed;
+			return;
 		}
 
 		const VkExtent3D mipExtent{
@@ -510,7 +516,7 @@ namespace RealRHI {
 		if (region.width > mipExtent.width || region.height > mipExtent.height ||
 			region.depth > mipExtent.depth) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "CopyTextureToBuffer failed: Copy dimensions exceed source mip extent.");
-			return Result::Failed;
+			return;
 		}
 
 		// Initial readback supports tightly packed RGBA8 data. Other formats
@@ -520,7 +526,7 @@ namespace RealRHI {
 			static_cast<uint64_t>(region.width) * region.height * region.depth * region.layerCount * 4 >
 				buffer->GetSize() - region.bufferOffset) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "CopyTextureToBuffer failed: Unsupported texture format or insufficient readback buffer capacity.");
-			return Result::Failed;
+			return;
 		}
 
 		RegisterRequiredLayout(texture, region.mipLevel, region.baseArrayLayer,
@@ -539,14 +545,14 @@ namespace RealRHI {
 		};
 		vkCmdCopyImageToBuffer(m_CommandBuffer, texture->m_Image,
 			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer->GetBuffer(), 1, &copyRegion);
-		return Result::Success;
+		return;
 	}
 
-	Result VulkanCommandList::CopyTexture(Texture* source, Texture* destination, const TextureCopyRegion& region) {
+	void VulkanCommandList::CopyTexture(Texture* source, Texture* destination, const TextureCopyRegion& region) {
 		if (GetState() != CommandListState::Recording || region.width == 0 || region.height == 0 ||
 			region.depth == 0 || region.layerCount == 0) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Texture copy failed: Command list is not recording or region dimensions are zero.");
-			return Result::Failed;
+			return;
 		}
 
 		auto* sourceTexture = dynamic_cast<VulkanTexture*>(source);
@@ -567,7 +573,7 @@ namespace RealRHI {
             !HasRecordedLayout(destinationTexture, region.destinationMipLevel, region.destinationBaseArrayLayer,
                 region.layerCount, TextureLayout::TransferDst)) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "CopyTexture failed: Invalid textures, formats, or subresource range.");
-			return Result::Failed;
+			return;
 		}
 
 		const auto fits = [&](const VulkanTexture* texture, uint32_t mipLevel) {
@@ -578,7 +584,7 @@ namespace RealRHI {
 		if (!fits(sourceTexture, region.sourceMipLevel) ||
 			!fits(destinationTexture, region.destinationMipLevel)) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "CopyTexture failed: Copy dimensions exceed source or destination mip extent.");
-			return Result::Failed;
+			return;
 		}
 
 		RegisterRequiredLayout(sourceTexture, region.sourceMipLevel, region.sourceBaseArrayLayer,
@@ -604,12 +610,14 @@ namespace RealRHI {
 		};
 		vkCmdCopyImage(m_CommandBuffer, sourceTexture->m_Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 			destinationTexture->m_Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
-		return Result::Success;
+		return;
 	}
 
-	Result VulkanCommandList::Barrier(const BarrierDesc& barriers) {
+	void VulkanCommandList::Barrier(const BarrierDesc& barriers) {
 		if (GetState() != CommandListState::Recording) {
-			return Result::Failed;
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+				"Barrier: Call Begin() before recording resource barriers.");
+			return;
 		}
 
 		std::vector<VkMemoryBarrier2> memoryBarriers;
@@ -634,7 +642,9 @@ namespace RealRHI {
 			if (buffer == nullptr || 
 				barrier.size == 0 || barrier.offset >= buffer->GetSize() ||
 				barrier.size > buffer->GetSize() - barrier.offset) {
-				return Result::Failed;
+				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+					"Barrier: Buffer range is invalid. Provide a non-null buffer, nonzero size, and in-bounds offset and size.");
+				return;
 			}
 
 			bufferBarriers.push_back({
@@ -659,7 +669,9 @@ namespace RealRHI {
 				barrier.subresources.mipLevelCount > texture->m_MipLevels - barrier.subresources.baseMipLevel ||
 				barrier.subresources.baseArrayLayer >= texture->m_ArrayLayers ||
 				barrier.subresources.arrayLayerCount > texture->m_ArrayLayers - barrier.subresources.baseArrayLayer) {
-				return Result::Failed;
+				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+					"Barrier: Texture subresource range is invalid. Check mip and array-layer bounds.");
+				return;
 			}
 
             for (uint32_t mip = barrier.subresources.baseMipLevel;
@@ -668,7 +680,7 @@ namespace RealRHI {
                     barrier.subresources.arrayLayerCount, barrier.oldLayout)) {
                     m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
                         "Texture barrier old layout disagrees with an earlier transition in this command list.");
-                    return Result::Failed;
+                    return;
                 }
             }
 
@@ -704,7 +716,7 @@ namespace RealRHI {
                     if (!touched.insert({ texture, mip, layer }).second) {
                         m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
                             "Overlapping texture barriers must be recorded in separate calls.");
-                        return Result::Failed;
+                        return;
                     }
                 }
             }
@@ -743,7 +755,7 @@ namespace RealRHI {
 			.pImageMemoryBarriers = imageBarriers.data(),
 		};
 		vkCmdPipelineBarrier2(m_CommandBuffer, &dependencyInfo);
-		return Result::Success;
+		return;
 	}
 
     void VulkanCommandList::Draw(uint32_t vertexCount) {

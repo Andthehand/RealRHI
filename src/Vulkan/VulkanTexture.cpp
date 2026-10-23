@@ -189,9 +189,7 @@ namespace RealRHI {
             .baseArrayLayer = 0,
             .layerCount = m_ArrayLayers
         };
-        if (commandList->CopyBufferToTexture(transferBuffer.Raw(), this, copyRegion) != Result::Success) {
-            return Result::Failed;
-        }
+        commandList->CopyBufferToTexture(transferBuffer.Raw(), this, copyRegion);
         if (ChangeLayout(commandList.Raw(), TextureLayout::ShaderRead) != Result::Success) {
             return Result::Failed;
         }
