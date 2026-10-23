@@ -74,6 +74,7 @@ namespace RealRHI {
                 return Result::Failed;
             }
             m_State = CommandListState::Recording;
+            m_ComputePipelineBound = false;
         }
 
         return Result::Success;
@@ -144,6 +145,7 @@ namespace RealRHI {
         // Release outside the state mutex (destructors may invoke other locks).
         std::vector<Ref<RefCounted>> released;
         released.swap(m_ReferencedResources);
+        m_ComputePipelineBound = false;
         m_RecordedLayouts.clear();
         m_InitialLayouts.clear();
         return Result::Success;
@@ -299,12 +301,39 @@ namespace RealRHI {
 		return Result::Success;
 	}
 
-    void VulkanCommandList::BindPipeline(Pipeline* pipeline) {
-        RetainResource(pipeline);
-        vkCmdBindPipeline(m_CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, static_cast<VulkanPipeline*>(pipeline)->GetPipeline());
+    Result VulkanCommandList::BindPipeline(Pipeline* pipeline) {
+        auto* vulkanPipeline = dynamic_cast<VulkanPipeline*>(pipeline);
+        if (GetState() != CommandListState::Recording || vulkanPipeline == nullptr) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "BindPipeline requires a valid pipeline and an active recording.");
+            
+			return Result::Failed;
+        }
 
+        RetainResource(vulkanPipeline);
+        vkCmdBindPipeline(m_CommandBuffer, vulkanPipeline->GetBindPoint(), vulkanPipeline->GetPipeline());
         m_Device->BindDescriptorHeaps(m_CommandBuffer);
+
+		// Since you can bind graphics and compute pipelines
+		// we need to track if a compute pipeline is bound for DispatchCompute validation.
+		if (vulkanPipeline->GetBindPoint() == VK_PIPELINE_BIND_POINT_COMPUTE) {
+			m_ComputePipelineBound = true;
+		}
+
+		return Result::Success;
     }
+
+	Result VulkanCommandList::DispatchCompute(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) {
+		if (GetState() != CommandListState::Recording || !m_ComputePipelineBound ||
+			groupCountX == 0 || groupCountY == 0 || groupCountZ == 0) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+				"DispatchCompute requires a bound compute pipeline and nonzero group counts.");
+			return Result::Failed;
+		}
+
+		vkCmdDispatch(m_CommandBuffer, groupCountX, groupCountY, groupCountZ);
+		return Result::Success;
+	}
 
     void VulkanCommandList::BindVertexBuffer(Buffer* vertexBuffer) {
         RetainResource(vertexBuffer);

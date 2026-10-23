@@ -4,16 +4,16 @@
 #include "VulkanConvertions.h"
 
 namespace RealRHI {
-    VulkanPipeline::VulkanPipeline(const VulkanDevice* device) : m_Device(device) {
-    }
+    VulkanPipeline::VulkanPipeline(const VulkanDevice* device) 
+        : m_Device(device) { }
 
     VulkanPipeline::~VulkanPipeline() {
         vkDestroyPipeline(m_Device->GetDevice(), m_Pipeline, nullptr);
     }
 
-    Result VulkanPipeline::Create(const VulkanDevice* device, const PipelineDesc& desc, Ref<VulkanPipeline>& outPipeline) {
+    Result VulkanPipeline::CreateGraphics(const VulkanDevice* device, const PipelineDesc& desc, Ref<VulkanPipeline>& outPipeline) {
         Ref<VulkanPipeline> pipeline = Ref<VulkanPipeline>::Create(device);
-        Result res = pipeline->Init(desc);
+        Result res = pipeline->InitGraphics(desc);
         if (res != Result::Success) {
             return res;
         }
@@ -22,7 +22,61 @@ namespace RealRHI {
         return Result::Success;
 	}
 
-    Result VulkanPipeline::Init(const PipelineDesc& desc) {
+    Result VulkanPipeline::CreateCompute(const VulkanDevice* device, const ComputePipelineDesc& desc,
+        Ref<VulkanPipeline>& outPipeline) {
+        Ref<VulkanPipeline> pipeline = Ref<VulkanPipeline>::Create(device);
+        const Result result = pipeline->InitCompute(desc);
+        if (result != Result::Success) {
+            return result;
+        }
+
+        outPipeline = pipeline;
+        return Result::Success;
+    }
+
+    Result VulkanPipeline::InitCompute(const ComputePipelineDesc& desc) {
+        const auto* shader = dynamic_cast<const VulkanShader*>(desc.shader);
+        if (shader == nullptr) {
+            return Result::Failed;
+        }
+
+        const auto& entryPoints = shader->GetEntryPoints();
+        if (entryPoints.size() != 1 || entryPoints[0].stage != SLANG_STAGE_COMPUTE) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "Compute pipeline requires exactly one compute shader entry point.");
+            return Result::Failed;
+        }
+
+        const VkPipelineShaderStageCreateInfo stage{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+            .module = shader->GetShaderModule(),
+            // Slang's linked SPIR-V module exports the compute entry point as "main".
+            .pName = "main",
+        };
+        const VkPipelineCreateFlags2CreateInfo flags{
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO,
+            .flags = VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT,
+        };
+        const VkComputePipelineCreateInfo info{
+            .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+            .pNext = &flags,
+            .stage = stage,
+            .layout = VK_NULL_HANDLE,
+        };
+
+        if (vkCreateComputePipelines(m_Device->GetDevice(), VK_NULL_HANDLE, 1, &info,
+            nullptr, &m_Pipeline) != VK_SUCCESS) {
+            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+                "Failed to create Vulkan compute pipeline.");
+            return Result::Failed;
+        }
+
+        m_BindPoint = VK_PIPELINE_BIND_POINT_COMPUTE;
+        return Result::Success;
+    }
+
+    Result VulkanPipeline::InitGraphics(const PipelineDesc& desc) {
         const VulkanShader* shader = static_cast<VulkanShader*>(desc.shader);
         VkShaderModule shaderModule = shader->GetShaderModule();
 
@@ -168,6 +222,7 @@ namespace RealRHI {
             return Result::Failed;
         }
 
+		m_BindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         return Result::Success;
     }
 }

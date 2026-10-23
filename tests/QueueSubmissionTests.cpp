@@ -35,10 +35,10 @@ int main() {
     Expect(graphicsQueue != nullptr, "Graphics queue was not created");
 
     RealRHI::Ref<RealRHI::CommandAllocator> allocator;
-    Expect(device->CreateCommandAllocator(allocator) == RealRHI::Result::Success, "Create command allocator");
+    Expect(device->CreateCommandAllocator(allocator) == RealRHI::Result::Success, "CreateGraphics command allocator");
 
     RealRHI::Ref<RealRHI::CommandList> firstList;
-    Expect(device->CreateCommandList(allocator.Raw(), firstList) == RealRHI::Result::Success, "Create first command list");
+    Expect(device->CreateCommandList(allocator.Raw(), firstList) == RealRHI::Result::Success, "CreateGraphics first command list");
     Expect(firstList->Begin() == RealRHI::Result::Success, "Begin first command list");
     Expect(firstList->End() == RealRHI::Result::Success, "End first command list");
 
@@ -49,7 +49,7 @@ int main() {
     Expect(firstList->GetState() == RealRHI::CommandListState::Executable, "Command list returned to executable state");
 
     RealRHI::Ref<RealRHI::CommandList> secondList;
-    Expect(device->CreateCommandList(allocator.Raw(), secondList) == RealRHI::Result::Success, "Create second command list");
+    Expect(device->CreateCommandList(allocator.Raw(), secondList) == RealRHI::Result::Success, "CreateGraphics second command list");
     Expect(secondList->Begin() == RealRHI::Result::Success, "Begin second command list");
     Expect(secondList->End() == RealRHI::Result::Success, "End second command list");
 
@@ -61,8 +61,8 @@ int main() {
 
     RealRHI::Ref<RealRHI::CommandList> listA;
     RealRHI::Ref<RealRHI::CommandList> listB;
-    Expect(device->CreateCommandList(allocator.Raw(), listA) == RealRHI::Result::Success, "Create list A");
-    Expect(device->CreateCommandList(allocator.Raw(), listB) == RealRHI::Result::Success, "Create list B");
+    Expect(device->CreateCommandList(allocator.Raw(), listA) == RealRHI::Result::Success, "CreateGraphics list A");
+    Expect(device->CreateCommandList(allocator.Raw(), listB) == RealRHI::Result::Success, "CreateGraphics list B");
     Expect(listA->Begin() == RealRHI::Result::Success, "Begin list A");
     Expect(listA->End() == RealRHI::Result::Success, "End list A");
     Expect(listB->Begin() == RealRHI::Result::Success, "Begin list B");
@@ -79,7 +79,7 @@ int main() {
     {
         RealRHI::FrameResources frames;
         Expect(frames.Initialize(*device, *graphicsQueue, 2) == RealRHI::Result::Success,
-               "Create two frame resource slots");
+               "CreateGraphics two frame resource slots");
         for (uint32_t i = 0; i < 8; ++i) {
             const uint32_t slot = i % frames.GetSlotCount();
             RealRHI::CommandList* cmd = nullptr;
@@ -103,10 +103,10 @@ int main() {
         desc.size = 64;
         desc.usage = RealRHI::BufferUsage::Vertex;
         Expect(device->CreateBuffer(desc, buffer) == RealRHI::Result::Success,
-               "Create lifetime-test vertex buffer");
+               "CreateGraphics lifetime-test vertex buffer");
         RealRHI::Ref<RealRHI::CommandList> list;
         Expect(device->CreateCommandList(allocator.Raw(), list) == RealRHI::Result::Success,
-               "Create lifetime-test command list");
+               "CreateGraphics lifetime-test command list");
         Expect(list->Begin() == RealRHI::Result::Success, "Begin lifetime-test list");
         const auto beforeBind = buffer->GetRefCount();
         list->BindVertexBuffer(buffer.Raw());
@@ -142,10 +142,10 @@ int main() {
         desc.size = 64;
         desc.usage = RealRHI::BufferUsage::Storage;
         Expect(device->CreateBuffer(desc, bindless) == RealRHI::Result::Success,
-               "Create bindless lifetime buffer");
+               "CreateGraphics bindless lifetime buffer");
         RealRHI::Ref<RealRHI::CommandList> list;
         Expect(device->CreateCommandList(allocator.Raw(), list) == RealRHI::Result::Success,
-               "Create bindless lifetime command list");
+               "CreateGraphics bindless lifetime command list");
         Expect(list->Begin() == RealRHI::Result::Success, "Begin bindless lifetime list");
         const auto initialReferences = bindless->GetRefCount();
         Expect(list->UseResource(bindless.Raw()) == RealRHI::Result::Success,
@@ -169,10 +169,10 @@ int main() {
         desc.size = 64;
         desc.usage = RealRHI::BufferUsage::Storage;
         Expect(device->CreateBuffer(desc, resource) == RealRHI::Result::Success,
-               "Create retained bindless buffer");
+               "CreateGraphics retained bindless buffer");
         RealRHI::Ref<RealRHI::CommandList> list;
         Expect(device->CreateCommandList(allocator.Raw(), list) == RealRHI::Result::Success,
-               "Create retained bindless list");
+               "CreateGraphics retained bindless list");
         Expect(list->Begin() == RealRHI::Result::Success, "Begin retained bindless list");
         Expect(list->UseResource(resource.Raw()) == RealRHI::Result::Success,
                "Register bindless buffer");
@@ -200,11 +200,11 @@ int main() {
         desc.size = 64;
         desc.usage = RealRHI::BufferUsage::TransferDst;
         Expect(device->CreateBuffer(desc, buffer) == RealRHI::Result::Success,
-               "Create invalid-range barrier test buffer");
+               "CreateGraphics invalid-range barrier test buffer");
 
         RealRHI::Ref<RealRHI::CommandList> list;
         Expect(device->CreateCommandList(allocator.Raw(), list) == RealRHI::Result::Success,
-               "Create invalid-range barrier test list");
+               "CreateGraphics invalid-range barrier test list");
         Expect(list->Begin() == RealRHI::Result::Success, "Begin invalid-range barrier test list");
 
         RealRHI::BarrierDesc barriers;
@@ -228,7 +228,7 @@ int main() {
 
         RealRHI::Ref<RealRHI::Texture> texture;
         Expect(device->CreateTexture(textureDesc, texture) == RealRHI::Result::Success,
-               "Create invalid-range barrier test texture");
+               "CreateGraphics invalid-range barrier test texture");
         barriers.buffers.clear();
         barriers.textures.push_back({
             .texture = texture.Raw(),
@@ -260,9 +260,9 @@ int main() {
         RealRHI::Ref<RealRHI::Texture> source;
         RealRHI::Ref<RealRHI::Texture> destination;
         Expect(device->CreateTexture(textureDesc, source) == RealRHI::Result::Success,
-               "Create source transfer texture");
+               "CreateGraphics source transfer texture");
         Expect(device->CreateTexture(textureDesc, destination) == RealRHI::Result::Success,
-               "Create destination transfer texture");
+               "CreateGraphics destination transfer texture");
         Expect(source->UploadData(pixels.data(), static_cast<uint32_t>(pixels.size())) == RealRHI::Result::Success,
                "Upload source texture data");
 
@@ -272,11 +272,11 @@ int main() {
         readbackDesc.memoryUsage = RealRHI::MemoryUsage::GPUToCPU;
         RealRHI::Ref<RealRHI::Buffer> readback;
         Expect(device->CreateBuffer(readbackDesc, readback) == RealRHI::Result::Success,
-               "Create texture readback buffer");
+               "CreateGraphics texture readback buffer");
 
         RealRHI::Ref<RealRHI::CommandList> list;
         Expect(device->CreateCommandList(allocator.Raw(), list) == RealRHI::Result::Success,
-               "Create texture transfer list");
+               "CreateGraphics texture transfer list");
         Expect(list->Begin() == RealRHI::Result::Success, "Begin texture transfer list");
 
         RealRHI::BarrierDesc barriers;
@@ -345,11 +345,11 @@ int main() {
 
         RealRHI::Ref<RealRHI::Texture> texture;
         Expect(device->CreateTexture(desc, texture) == RealRHI::Result::Success,
-               "Create tracked-layout texture");
+               "CreateGraphics tracked-layout texture");
 
         RealRHI::Ref<RealRHI::CommandList> list;
         Expect(device->CreateCommandList(allocator.Raw(), list) == RealRHI::Result::Success,
-               "Create tracked-layout command list");
+               "CreateGraphics tracked-layout command list");
         Expect(list->Begin() == RealRHI::Result::Success, "Begin tracked-layout list");
 
         RealRHI::BarrierDesc barriers;
@@ -391,14 +391,14 @@ int main() {
 
         RealRHI::Ref<RealRHI::Texture> texture;
         Expect(device->CreateTexture(desc, texture) == RealRHI::Result::Success,
-               "Create submission-state texture");
+               "CreateGraphics submission-state texture");
 
         RealRHI::Ref<RealRHI::CommandList> first;
         RealRHI::Ref<RealRHI::CommandList> stale;
         Expect(device->CreateCommandList(allocator.Raw(), first) == RealRHI::Result::Success,
-               "Create first state list");
+               "CreateGraphics first state list");
         Expect(device->CreateCommandList(allocator.Raw(), stale) == RealRHI::Result::Success,
-               "Create stale state list");
+               "CreateGraphics stale state list");
 
         RealRHI::BarrierDesc transition;
         transition.textures.push_back({
@@ -412,7 +412,7 @@ int main() {
         // Establish a non-Undefined state before recording competing transitions.
         RealRHI::Ref<RealRHI::CommandList> prime;
         Expect(device->CreateCommandList(allocator.Raw(), prime) == RealRHI::Result::Success,
-            "Create initial state list");
+            "CreateGraphics initial state list");
         Expect(prime->Begin() == RealRHI::Result::Success, "Begin initial state list");
         Expect(prime->Barrier(transition) == RealRHI::Result::Success, "Record initial state");
         Expect(prime->End() == RealRHI::Result::Success, "End initial state list");
@@ -473,10 +473,10 @@ int main() {
 
         RealRHI::Ref<RealRHI::Texture> texture;
         Expect(device->CreateTexture(desc, texture) == RealRHI::Result::Success,
-            "Create discard transition texture");
+            "CreateGraphics discard transition texture");
         RealRHI::Ref<RealRHI::CommandList> list;
         Expect(device->CreateCommandList(allocator.Raw(), list) == RealRHI::Result::Success,
-            "Create discard transition list");
+            "CreateGraphics discard transition list");
         RealRHI::BarrierDesc barriers;
         barriers.textures.push_back({
             .texture = texture.Raw(),
@@ -508,6 +508,19 @@ int main() {
         Expect(list->Barrier(barriers) == RealRHI::Result::Success,
             "Accept non-overlapping barrier after rejection");
         Expect(list->End() == RealRHI::Result::Success, "End overlap test");
+    }
+
+    // Compute dispatch requires an explicitly bound compute pipeline.
+    {
+        RealRHI::Ref<RealRHI::CommandList> computeList;
+        Expect(device->CreateCommandList(allocator.Raw(), computeList) == RealRHI::Result::Success,
+            "CreateGraphics compute validation command list");
+        Expect(computeList->Begin() == RealRHI::Result::Success,
+            "Begin compute validation command list");
+        Expect(computeList->DispatchCompute(1, 1, 1) != RealRHI::Result::Success,
+            "Reject dispatch without a compute pipeline");
+        Expect(computeList->End() == RealRHI::Result::Success,
+            "End compute validation command list");
     }
 
     std::cout << "QueueSubmissionTests passed" << std::endl;

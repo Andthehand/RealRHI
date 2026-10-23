@@ -161,7 +161,7 @@ namespace RealRHI::Utils {
 		if (Any(usage & BufferUsage::Heap)) {
 			flags |= VK_BUFFER_USAGE_DESCRIPTOR_HEAP_BIT_EXT;
 		}
-		if (Any(usage & BufferUsage::Addressable)) {
+		if (Any(usage & (BufferUsage::Storage | BufferUsage::Uniform | BufferUsage::Addressable))) {
 			flags |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 		}
 		return flags;

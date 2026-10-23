@@ -30,7 +30,8 @@ namespace RealRHI {
 
 		Result UseResource(Texture* texture) override;
 		Result UseResource(Buffer* buffer) override;
-		void BindPipeline(Pipeline* pipeline) override;
+		Result BindPipeline(Pipeline* pipeline) override;
+		Result DispatchCompute(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
 		void BindVertexBuffer(Buffer* vertexBuffer) override;
 		void BindIndexBuffer(Buffer* indexBuffer) override;
 
@@ -104,6 +105,7 @@ namespace RealRHI {
 		mutable std::mutex m_StateMutex;
 		std::vector<Ref<RefCounted>> m_ReferencedResources;
 		CommandListState m_State = CommandListState::Initial;
+		bool m_ComputePipelineBound = false;
 
 		// Initial layout = the layout that was expected at the start of recording for a given subresource.
 		// Recorded layout = the layout that was recorded for a given subresource during command recording.

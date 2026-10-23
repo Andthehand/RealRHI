@@ -60,6 +60,7 @@ namespace RealRHI {
 		Result CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) const override;
 		Result CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) const override;
 		Result CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) const override;
+		Result CreateComputePipeline(const ComputePipelineDesc& desc, Ref<Pipeline>& outPipeline) const override;
 		Result CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) const override;
 		Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) const override;
 		Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const override;
