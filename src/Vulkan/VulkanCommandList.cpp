@@ -313,6 +313,9 @@ namespace RealRHI {
         RetainResource(vulkanPipeline);
         vkCmdBindPipeline(m_CommandBuffer, vulkanPipeline->GetBindPoint(), vulkanPipeline->GetPipeline());
         m_Device->BindDescriptorHeaps(m_CommandBuffer);
+
+		// Since you can bind graphics and compute pipelines
+		// we need to track if a compute pipeline is bound for DispatchCompute validation.
 		if (vulkanPipeline->GetBindPoint() == VK_PIPELINE_BIND_POINT_COMPUTE) {
 			m_ComputePipelineBound = true;
 		}
