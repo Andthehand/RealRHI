@@ -79,6 +79,7 @@ namespace RealRHI {
 
 		// Properties
 		VkPhysicalDeviceDescriptorHeapPropertiesEXT GetDescriptorHeapProperties() const;
+		uint32_t GetMaxPushDataSize() const { return m_MaxPushDataSize; }
 	private:
 		bool CreateInstance(const char* appName, bool enableValidationLayer);
 		bool SetupDebugMessenger();
@@ -114,6 +115,7 @@ namespace RealRHI {
 
 			// Allocator
 			VmaAllocator m_Allocator = VK_NULL_HANDLE;
+			uint32_t m_MaxPushDataSize = 0;
 
 			// User Defined settings
 			std::filesystem::path m_ShaderDirectory;

@@ -1,5 +1,6 @@
 #include "VulkanShader.h"
 #include <array>
+#include <algorithm>
 
 #include "VulkanConvertions.h"
 
@@ -8,6 +9,7 @@ namespace RealRHI {
 		struct DescriptorSetBuilderContext {
 			DescriptorsDesc& descriptors;
 			const VulkanDevice* device = nullptr;
+			uint32_t& pushDataSize;
 		};
 
 		DescriptorSetLayoutDesc& GetSet(DescriptorSetBuilderContext& context, uint32_t setIndex) {
@@ -137,22 +139,16 @@ namespace RealRHI {
 			AddRangesForParameterBlockElement(parameterBlockTypeLayout->getElementTypeLayout(), setIndex, context, prefix);
 		}
 
-		void WarnIfPushConstantsIgnored(
-			slang::TypeLayoutReflection* pushConstantTypeLayout,
-			const VulkanDevice* device) {
-			if (!device || !pushConstantTypeLayout) {
+		void RecordPushDataSize(slang::TypeLayoutReflection* typeLayout,
+			DescriptorSetBuilderContext& context) {
+			if (typeLayout == nullptr) {
 				return;
 			}
-
-			slang::TypeLayoutReflection* elementTypeLayout = pushConstantTypeLayout->getElementTypeLayout();
-			if (!elementTypeLayout || elementTypeLayout->getSize() == 0) {
-				return;
+			auto* element = typeLayout->getElementTypeLayout();
+			if (element != nullptr) {
+				context.pushDataSize = std::max(context.pushDataSize,
+					static_cast<uint32_t>(element->getSize()));
 			}
-
-			device->SendDebugMessage(
-				DebugSeverity::Warning,
-				DebugMessageType::ShaderCompilation,
-				"Slang reflection reported push constants, but RealRHI currently ignores push-constant ranges when building Vulkan pipeline layouts.");
 		}
 
 		void AddSubObjectRanges(
@@ -186,7 +182,7 @@ namespace RealRHI {
 							AddRangesForParameterBlockElement(leafTypeLayout->getElementTypeLayout(), setIndex, context, fieldName);
 							break;
 						case slang::BindingType::PushConstant:
-							WarnIfPushConstantsIgnored(leafTypeLayout, context.device);
+							RecordPushDataSize(leafTypeLayout, context);
 							break;
 						default:
 							break;
@@ -254,6 +250,11 @@ namespace RealRHI {
 
 		// 3b. Reflect descriptor sets from shader parameter blocks
 		m_DescriptorsDesc = ReflectDescriptors(composedProgram, diagnostics);
+		if (m_PushDataSize > m_Device->GetMaxPushDataSize()) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::ShaderCompilation,
+				"Shader push-constant data exceeds the device descriptor heap maxPushDataSize.");
+			return Result::Failed;
+		}
 
 		// 4. Link program
 		auto linkedProgram = LinkProgram(composedProgram, diagnostics);
@@ -368,7 +369,8 @@ namespace RealRHI {
 		DescriptorsDesc result;
 		DescriptorSetBuilderContext context{
 			.descriptors = result,
-			.device = m_Device
+			.device = m_Device,
+			.pushDataSize = m_PushDataSize
 		};
 
 		result.sets.push_back(DescriptorSetLayoutDesc{

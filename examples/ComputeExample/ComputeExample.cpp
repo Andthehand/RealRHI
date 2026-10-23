@@ -40,13 +40,6 @@ int main() {
         return 1;
     }
 
-    // The smoke-test shader uses descriptor index zero. This is the first
-    // storage-buffer allocation made after device initialization.
-    if (output->GetDescriptorIndex() != 0) {
-        std::cerr << "Unexpected compute output descriptor index.\n";
-        return 1;
-    }
-
     RealRHI::Ref<RealRHI::Buffer> readback;
     RealRHI::BufferDesc readbackDesc{
         .size = outputDesc.size,
@@ -64,8 +57,23 @@ int main() {
         list->Begin() != RealRHI::Result::Success) {
         return 1;
     }
+    struct ComputeParameters {
+        uint32_t outputIndex;
+        uint32_t multiplier;
+        uint32_t addend;
+        uint32_t elementCount;
+    };
+
+    const ComputeParameters parameters{
+        .outputIndex = output->GetDescriptorIndex(),
+        .multiplier = 2,
+        .addend = 1,
+        .elementCount = elementCount,
+    };
+
     list->BindPipeline(pipeline.Raw());
     list->UseResource(output.Raw());
+    list->SetPushConstants(&parameters, sizeof(parameters));
     list->DispatchCompute(1, 1, 1);
 
     RealRHI::BarrierDesc barriers;

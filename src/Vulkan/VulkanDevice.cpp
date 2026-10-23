@@ -93,6 +93,13 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
+		m_MaxPushDataSize = GetDescriptorHeapProperties().maxPushDataSize;
+		if (m_MaxPushDataSize == 0) {
+			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+				"Selected device does not report descriptor heap push data support.");
+			return Result::Failed;
+		}
+
 		if (!CreateLogicalDevice()) {
 			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan logical device.");
 			return Result::Failed;

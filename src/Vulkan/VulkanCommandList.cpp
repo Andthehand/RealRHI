@@ -337,6 +337,27 @@ namespace RealRHI {
 		vkCmdDispatch(m_CommandBuffer, groupCountX, groupCountY, groupCountZ);
 	}
 
+	void VulkanCommandList::SetPushConstants(const void* data, uint32_t size, uint32_t offset) {
+		const uint32_t maxSize = m_Device->GetMaxPushDataSize();
+		if (GetState() != CommandListState::Recording || data == nullptr ||
+			size == 0 || (size % 4) != 0 || (offset % 4) != 0 ||
+			offset > maxSize || size > maxSize - offset) {
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+				"SetPushConstants: Requires an active recording, non-null data, nonzero 4-byte-aligned size and offset, and a range within maxPushDataSize.");
+			return;
+		}
+
+		const VkPushDataInfoEXT pushDataInfo{
+			.sType = VK_STRUCTURE_TYPE_PUSH_DATA_INFO_EXT,
+			.offset = offset,
+			.data = {
+				.address = data,
+				.size = size,
+			},
+		};
+		vkCmdPushDataEXT(m_CommandBuffer, &pushDataInfo);
+	}
+
     void VulkanCommandList::BindVertexBuffer(Buffer* vertexBuffer) {
         RetainResource(vertexBuffer);
         VkBuffer vertexBuffers[] = { static_cast<VulkanBuffer*>(vertexBuffer)->GetBuffer() };
