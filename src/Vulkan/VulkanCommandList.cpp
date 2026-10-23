@@ -17,7 +17,7 @@
 namespace RealRHI {
 
     VulkanCommandList::VulkanCommandList(const VulkanDevice* device, Ref<VulkanCommandAllocator> allocator)
-        : m_Device(device), m_Allocator(std::move(allocator)), m_QueueId{ device->GetGraphicsQueueFamily() } {}
+        : m_Device(device), m_Allocator(std::move(allocator)), m_QueueId{ m_Allocator->GetQueueFamilyIndex(), 0 } {}
 
     VulkanCommandList::~VulkanCommandList() {
         std::scoped_lock lock(m_StateMutex);
