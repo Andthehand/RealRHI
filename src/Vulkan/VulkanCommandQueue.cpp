@@ -147,8 +147,9 @@ namespace RealRHI {
         // are published unless vkQueueSubmit2 succeeds.
         std::scoped_lock stateLock(m_Device->GetStateTrackingMutex());
 		VulkanCommandList::LayoutMap predictedLayouts;
+		VulkanCommandList::OwnershipMap predictedOwnership;
         for (CommandList* commandList : trackedLists) {
-            if (!static_cast<VulkanCommandList*>(commandList)->ValidateSubmissionOwnership(GetQueueId(), waitTokens)) {
+            if (!static_cast<VulkanCommandList*>(commandList)->ValidateSubmissionOwnership(GetQueueId(), waitTokens, predictedOwnership)) {
                 m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
                     "Submission rejected: texture ownership transfer is missing a matching release or timeline dependency.");
                 return {};

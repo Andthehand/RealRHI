@@ -811,6 +811,28 @@ int main() {
         const auto releaseToken = sourceQueue->Submit(*release);
         Expect(releaseToken.IsValid(), "Submit texture release");
 
+        if (sourceFamily != targetFamily) {
+            // Ordinary texture use cannot bypass the pending ownership acquire.
+            RealRHI::Ref<RealRHI::CommandList> unauthorized;
+            Expect(device->CreateCommandList(targetAllocator.Raw(), unauthorized) ==
+                RealRHI::Result::Success, "Create unauthorized texture-use list");
+            Expect(unauthorized->Begin() == RealRHI::Result::Success,
+                "Begin unauthorized texture-use list");
+            RealRHI::BarrierDesc ordinary;
+            ordinary.textures.push_back({
+                .texture = texture.Raw(),
+                .oldLayout = RealRHI::TextureLayout::TransferDst,
+                .newLayout = RealRHI::TextureLayout::TransferDst,
+            });
+            unauthorized->Barrier(ordinary);
+            Expect(unauthorized->End() == RealRHI::Result::Success,
+                "End unauthorized texture-use list");
+            const auto errorsBefore = g_ProgrammerErrors;
+            const auto rejected = targetQueue->Submit(*unauthorized);
+            Expect(!rejected.IsValid() && g_ProgrammerErrors > errorsBefore,
+                "Reject ordinary texture use without ownership acquire");
+        }
+
         RealRHI::BarrierDesc acquireBarrier = releaseBarrier;
         // Release and acquire must describe the same layout transition.
         acquireBarrier.textures[0].after = {

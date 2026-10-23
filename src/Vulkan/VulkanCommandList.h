@@ -2,6 +2,7 @@
 #include "CommandList.h"
 #include "VulkanDevice.h"
 #include "VulkanPipeline.h"
+#include "VulkanTexture.h"
 #include "VulkanCommandAllocator.h"
 
 #include <volk.h>
