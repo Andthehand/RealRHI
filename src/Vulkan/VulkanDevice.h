@@ -19,6 +19,7 @@ namespace RealRHI {
 	class VulkanCommandQueue;
 
 	struct QueueFamilyIndices {
+		// Optional values because they could be empty during device discovery
 		std::optional<uint32_t> graphicsFamily;
 		std::optional<uint32_t> presentFamily;
 		std::optional<uint32_t> computeFamily;

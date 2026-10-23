@@ -520,26 +520,6 @@ namespace RealRHI {
         vkGetPhysicalDeviceProperties2(device, &properties2);
         vkGetPhysicalDeviceFeatures(device, &features);
 
-        // Temp
-		// Print out heap properties for debugging
-        SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, "Heap properties:");
-		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Sampler heap alignment: " + std::to_string(descriptorHeapProperties.samplerHeapAlignment)).c_str());
-		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Resource heap alignment: " + std::to_string(descriptorHeapProperties.resourceHeapAlignment)).c_str());
-		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Max sampler heap size: " + std::to_string(descriptorHeapProperties.maxSamplerHeapSize)).c_str());
-		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Max resource heap size: " + std::to_string(descriptorHeapProperties.maxResourceHeapSize)).c_str());
-		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Min sampler heap reserved range: " + std::to_string(descriptorHeapProperties.minSamplerHeapReservedRange)).c_str());
-		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Min sampler heap reserved range with embedded: " + std::to_string(descriptorHeapProperties.minSamplerHeapReservedRangeWithEmbedded)).c_str());
-		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Min resource heap reserved range: " + std::to_string(descriptorHeapProperties.minResourceHeapReservedRange)).c_str());
-		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Sampler descriptor size: " + std::to_string(descriptorHeapProperties.samplerDescriptorSize)).c_str());
-		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Image descriptor size: " + std::to_string(descriptorHeapProperties.imageDescriptorSize)).c_str());
-		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Buffer descriptor size: " + std::to_string(descriptorHeapProperties.bufferDescriptorSize)).c_str());
-		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Max push data size: " + std::to_string(descriptorHeapProperties.maxPushDataSize)).c_str());
-		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Max descriptor heap embedded samplers: " + std::to_string(descriptorHeapProperties.maxDescriptorHeapEmbeddedSamplers)).c_str());
-		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Sampler YCbCr conversion count: " + std::to_string(descriptorHeapProperties.samplerYcbcrConversionCount)).c_str());
-		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Sparse descriptor heaps: " + std::to_string(descriptorHeapProperties.sparseDescriptorHeaps)).c_str());
-		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, ("Protected descriptor heaps: " + std::to_string(descriptorHeapProperties.protectedDescriptorHeaps)).c_str());
-		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, "End of heap properties.");
-
 		// Must support required queues
 		QueueFamilyIndices indices = FindQueueFamilies(device);
 		if (!indices.IsComplete()) {
@@ -721,9 +701,13 @@ namespace RealRHI {
         if (!indices.computeFamily) {
             indices.computeFamily = indices.graphicsFamily;
         }
+
+		// If no dedicated transfer queue is found, use the compute queue if available,
+		// otherwise fallback to graphics.
         if (!indices.transferFamily) {
             indices.transferFamily = indices.computeFamily;
         }
+
         return indices;
     }
 
@@ -748,12 +732,14 @@ namespace RealRHI {
             if (queue == VK_NULL_HANDLE) {
                 return false;
             }
+
             m_Queues[id] = new VulkanCommandQueue(this, family, 0, queue);
         }
 
         m_GraphicsCommandQueue = m_Queues.at(QueueId{ m_GraphicsQueueFamily, 0 });
         m_GraphicsQueue = m_GraphicsCommandQueue->GetQueue();
         m_PresentQueue = m_Queues.at(QueueId{ m_PresentQueueFamily, 0 })->GetQueue();
+
         return true;
     }
 
