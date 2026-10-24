@@ -1,3 +1,4 @@
+#include "../ExampleSupport.h"
 #include "Device.h"
 #include "Queue.h"
 
@@ -13,6 +14,7 @@ int main() {
 	desc.shaderDirectory = std::filesystem::current_path() / "shaders";
 	desc.enableValidationLayers = true;
 	desc.enableDebug = true;
+	desc.debugCallback = RealRHI::Examples::CaptureDebugMessage;
 
 	std::unique_ptr<RealRHI::Device> device;
 	if (RealRHI::Device::Create(desc, device) != RealRHI::Result::Success) {
@@ -110,6 +112,17 @@ int main() {
 	}
 
 	device->WaitIdle();
+	// Check diagnostics after destroying resources and the device as well.
+	list.Reset();
+	allocator.Reset();
+	readback.Reset();
+	output.Reset();
+	pipeline.Reset();
+	shader.Reset();
+	device.reset();
+	if (RealRHI::Examples::s_ErrorCount != 0) {
+		return 1;
+	}
 	std::cout << "ComputeExample passed\n";
 	return 0;
 }

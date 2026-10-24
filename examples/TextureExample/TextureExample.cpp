@@ -1,3 +1,4 @@
+#include "../ExampleSupport.h"
 #include "Device.h"
 #include "FrameContext.h"
 #include "FrameResources.h"
@@ -100,6 +101,7 @@ void CreateSwapChain() {
 		{.Title = "RealRHI Texture Example", .Width = s_WindowWidth, .Height = s_WindowHeight}, window);
 	if (result != RealRHI::Result::Success) {
 		std::cerr << "Failed to create window" << std::endl;
+		return;
 	}
 
 	result = device->CreateSwapchain(
@@ -121,6 +123,7 @@ void CreateGraphicsPipeline() {
 	RealRHI::Result result = device->CreateShader(shaderDesc, shader);
 	if (result != RealRHI::Result::Success) {
 		std::cerr << "Failed to create shader" << std::endl;
+		return;
 	}
 
 	RealRHI::PipelineDesc desc{
@@ -300,7 +303,7 @@ bool RecordCommandBuffer(RealRHI::CommandList* cmd, const RealRHI::FrameContext&
 	return true;
 }
 
-bool DrawFrame() {
+bool DrawFrame(uint32_t& framesRendered) {
 	if (window->GetWidth() == 0 || window->GetHeight() == 0) {
 		SDL_Delay(16);
 		return true;
@@ -331,6 +334,7 @@ bool DrawFrame() {
 		return false;
 	}
 	swapchain->Present(frame);
+	++framesRendered;
 	return true;
 }
 
@@ -349,7 +353,11 @@ void Cleanup() {
 	device.reset();
 }
 
-int main() {
+int main(int argc, char** argv) {
+	uint32_t frameLimit = 0;
+	if (!RealRHI::Examples::ParseFrameLimit(argc, argv, frameLimit)) {
+		return 1;
+	}
 	std::cout << "RealRHI Texture Example - Raw CPU Buffer Upload" << std::endl;
 	std::cout << "================================================" << std::endl;
 
@@ -358,6 +366,7 @@ int main() {
 		.shaderDirectory = "shaders",
 		.enableDebug = true,
 		.enableValidationLayers = true,
+		.debugCallback = RealRHI::Examples::CaptureDebugMessage,
 	};
 
 	RealRHI::Result result = RealRHI::Device::Create(createInfo, device);
@@ -368,30 +377,54 @@ int main() {
 	std::cout << "Device created successfully" << std::endl;
 
 	CreateSwapChain();
+	if (!swapchain) {
+		Cleanup();
+		return 1;
+	}
 	CreateGraphicsPipeline();
+	if (!pipeline) {
+		Cleanup();
+		return 1;
+	}
 	CreateTextures();
+	if (RealRHI::Examples::s_ErrorCount != 0) {
+		Cleanup();
+		return 1;
+	}
 	CreateVertexBuffer();
+	if (!vertexBuffer) {
+		Cleanup();
+		return 1;
+	}
 	if (!CreateCommandLists()) {
 		std::cerr << "Failed to initialize frame resources" << std::endl;
+		Cleanup();
 		return -1;
 	}
 
 	std::cout << "Rendering procedural textures..." << std::endl;
 
 	bool running = true;
+	bool succeeded = true;
+	uint32_t framesRendered = 0;
 	SDL_Event event;
-	while (running) {
+	while (running && (frameLimit == 0 || framesRendered < frameLimit)) {
 		while (SDL_PollEvent(&event)) {
 			if (event.type == SDL_EVENT_QUIT) {
 				running = false;
 			}
 		}
 
-		if (!DrawFrame()) {
+		if (!DrawFrame(framesRendered)) {
+			succeeded = false;
 			break;
 		}
 	}
 
 	Cleanup();
+	if (!succeeded || RealRHI::Examples::s_ErrorCount != 0 ||
+		(frameLimit != 0 && framesRendered != frameLimit)) {
+		return 1;
+	}
 	return 0;
 }

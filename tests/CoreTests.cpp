@@ -1,6 +1,5 @@
 #include "DeferredDeletionQueue.h"
 #include "RefCounted.h"
-#include "Vulkan/VulkanConvertions.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -28,7 +27,6 @@ static_assert(std::is_constructible_v<RealRHI::Ref<Base>, RealRHI::Ref<Derived>>
 static_assert(!std::is_constructible_v<RealRHI::Ref<Derived>, RealRHI::Ref<Base>>);
 static_assert(!std::is_assignable_v<RealRHI::Ref<Derived>&, RealRHI::Ref<Base>>);
 static_assert(!std::is_assignable_v<RealRHI::Ref<Base>&, RealRHI::Ref<Unrelated>>);
-static_assert(RealRHI::Utils::ScalarTypeToVkFormat(RealRHI::Float32) == VK_FORMAT_R32_SFLOAT);
 
 int main() {
 	{

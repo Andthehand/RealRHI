@@ -1,3 +1,4 @@
+#include "../ExampleSupport.h"
 #include "Device.h"
 #include "FrameContext.h"
 #include "FrameResources.h"
@@ -31,6 +32,7 @@ void CreateSwapChain() {
 		{.Title = "RealRHI Triangle Example", .Width = s_WindowWidth, .Height = s_WindowHeight}, window);
 	if (result != RealRHI::Result::Success) {
 		std::cerr << "Failed to create window" << std::endl;
+		return;
 	}
 
 	result = device->CreateSwapchain(
@@ -52,6 +54,7 @@ void CreateGraphicsPipeline() {
 	RealRHI::Result result = device->CreateShader(shaderDesc, shader);
 	if (result != RealRHI::Result::Success) {
 		std::cerr << "Failed to create shader" << std::endl;
+		return;
 	}
 
 	RealRHI::PipelineDesc desc{
@@ -157,7 +160,7 @@ bool RecordCommandBuffer(RealRHI::CommandList* cmd, const RealRHI::FrameContext&
 	return true;
 }
 
-bool DrawFrame() {
+bool DrawFrame(uint32_t& framesRendered) {
 	if (window->GetWidth() == 0 || window->GetHeight() == 0) {
 		SDL_Delay(16);
 		return true;
@@ -188,6 +191,7 @@ bool DrawFrame() {
 		return false;
 	}
 	swapchain->Present(frame);
+	++framesRendered;
 	return true;
 }
 
@@ -202,7 +206,11 @@ void Cleanup() {
 	device.reset();
 }
 
-int main() {
+int main(int argc, char** argv) {
+	uint32_t frameLimit = 0;
+	if (!RealRHI::Examples::ParseFrameLimit(argc, argv, frameLimit)) {
+		return 1;
+	}
 	std::cout << "RealRHI Triangle Example - Simple Triangle Rendering" << std::endl;
 	std::cout << "====================================================" << std::endl;
 
@@ -211,6 +219,7 @@ int main() {
 		.shaderDirectory = "shaders",
 		.enableDebug = true,
 		.enableValidationLayers = true,
+		.debugCallback = RealRHI::Examples::CaptureDebugMessage,
 	};
 
 	RealRHI::Result result = RealRHI::Device::Create(createInfo, device);
@@ -221,16 +230,29 @@ int main() {
 	std::cout << " Device created successfully" << std::endl;
 
 	CreateSwapChain();
+	if (!swapchain) {
+		Cleanup();
+		return 1;
+	}
 	std::cout << " Swapchain created" << std::endl;
 
 	CreateGraphicsPipeline();
+	if (!pipeline) {
+		Cleanup();
+		return 1;
+	}
 	std::cout << " Graphics pipeline created" << std::endl;
 
 	CreateVertexBuffer();
+	if (!vertexBuffer) {
+		Cleanup();
+		return 1;
+	}
 	std::cout << " Vertex buffer created" << std::endl;
 
 	if (!CreateCommandLists()) {
 		std::cerr << "Failed to initialize frame resources" << std::endl;
+		Cleanup();
 		return -1;
 	}
 	std::cout << " Command lists created" << std::endl;
@@ -238,20 +260,27 @@ int main() {
 	std::cout << std::endl << "Rendering triangle..." << std::endl;
 
 	bool running = true;
+	bool succeeded = true;
+	uint32_t framesRendered = 0;
 	SDL_Event event;
-	while (running) {
+	while (running && (frameLimit == 0 || framesRendered < frameLimit)) {
 		while (SDL_PollEvent(&event)) {
 			if (event.type == SDL_EVENT_QUIT) {
 				running = false;
 			}
 		}
-		if (!DrawFrame()) {
+		if (!DrawFrame(framesRendered)) {
+			succeeded = false;
 			break;
 		}
 	}
 
 	Cleanup();
 
+	if (!succeeded || RealRHI::Examples::s_ErrorCount != 0 ||
+		(frameLimit != 0 && framesRendered != frameLimit)) {
+		return 1;
+	}
 	std::cout << std::endl << "Program completed successfully!" << std::endl;
 	return 0;
 }

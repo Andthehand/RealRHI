@@ -1,6 +1,7 @@
 #include "Device.h"
 #include "FrameResources.h"
 #include "Vulkan/VulkanCommandQueue.h"
+#include "Vulkan/VulkanConvertions.h"
 #include "Vulkan/VulkanDescriptorHeaps.h"
 #include "Vulkan/VulkanDevice.h"
 
@@ -11,6 +12,8 @@
 #include <iostream>
 #include <limits>
 #include <thread>
+
+static_assert(RealRHI::Utils::ScalarTypeToVkFormat(RealRHI::Float32) == VK_FORMAT_R32_SFLOAT);
 
 namespace {
 	VKAPI_ATTR VkResult VKAPI_CALL FailSemaphoreCreation(VkDevice,
