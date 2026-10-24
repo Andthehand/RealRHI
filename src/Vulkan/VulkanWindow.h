@@ -1,9 +1,8 @@
 #pragma once
+#include "Result.h"
+#include "VulkanDevice.h"
 #include "Window.h"
 #include "WindowDesc.h"
-
-#include "VulkanDevice.h"
-#include "Result.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -19,11 +18,13 @@ namespace RealRHI {
 
 		uint32_t GetWidth() const override;
 		uint32_t GetHeight() const override;
+
 	protected:
 		friend class VulkanSwapchain;
 
 		bool CreateVulkanSurface(VkSurfaceKHR* surface) const;
 		void DestroyVulkanSurface(VkSurfaceKHR surface) const;
+
 	private:
 		const VulkanDevice* m_Device = nullptr;
 		SDL_Window* m_Window = nullptr;

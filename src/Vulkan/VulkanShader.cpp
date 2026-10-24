@@ -1,8 +1,10 @@
 #include "VulkanShader.h"
-#include <array>
-#include <algorithm>
 
 #include "VulkanConvertions.h"
+
+#include <algorithm>
+#include <array>
+#include <utility>
 
 namespace RealRHI {
 	namespace {
@@ -30,8 +32,7 @@ namespace RealRHI {
 			return prefix + "." + name;
 		}
 
-		void CollectDescriptorBindingNames(
-			slang::TypeLayoutReflection* typeLayout,
+		void CollectDescriptorBindingNames(slang::TypeLayoutReflection* typeLayout,
 			const std::string& prefix,
 			std::vector<std::string>& outNames) {
 			const uint32_t fieldCount = static_cast<uint32_t>(typeLayout->getFieldCount());
@@ -52,8 +53,7 @@ namespace RealRHI {
 			}
 		}
 
-		void AddDescriptorRanges(
-			slang::TypeLayoutReflection* typeLayout,
+		void AddDescriptorRanges(slang::TypeLayoutReflection* typeLayout,
 			uint32_t setIndex,
 			DescriptorSetBuilderContext& context,
 			const std::string& prefix) {
@@ -70,18 +70,23 @@ namespace RealRHI {
 					continue;
 				}
 
-				GetSet(context, setIndex).bindings.push_back(DescriptorBinding{
-					.name = descriptorNameIndex < descriptorNames.size() ? descriptorNames[descriptorNameIndex++] : std::string{},
-					.binding = GetNextBindingIndex(context, setIndex),
-					.vkType = Utils::SlangBindingTypeToVkDescriptorType(bindingType),
-					.descriptorCount = static_cast<uint32_t>(
-						typeLayout->getDescriptorSetDescriptorRangeDescriptorCount(relativeSetIndex, rangeIndex))
-				});
+				std::string descriptorName;
+				if (descriptorNameIndex < descriptorNames.size()) {
+					descriptorName = descriptorNames[descriptorNameIndex++];
+				}
+
+				GetSet(context, setIndex)
+					.bindings.push_back(DescriptorBinding{
+						.name = std::move(descriptorName),
+						.binding = GetNextBindingIndex(context, setIndex),
+						.vkType = Utils::SlangBindingTypeToVkDescriptorType(bindingType),
+						.descriptorCount = static_cast<uint32_t>(
+							typeLayout->getDescriptorSetDescriptorRangeDescriptorCount(relativeSetIndex, rangeIndex)),
+					});
 			}
 		}
 
-		void AddRangesForParameterBlockElement(
-			slang::TypeLayoutReflection* elementTypeLayout,
+		void AddRangesForParameterBlockElement(slang::TypeLayoutReflection* elementTypeLayout,
 			uint32_t setIndex,
 			DescriptorSetBuilderContext& context,
 			const std::string& prefix);
@@ -103,13 +108,11 @@ namespace RealRHI {
 			descriptors.sets = std::move(compactedSets);
 		}
 
-		void AddDescriptorSetForParameterBlock(
-			slang::TypeLayoutReflection* parameterBlockTypeLayout,
+		void AddDescriptorSetForParameterBlock(slang::TypeLayoutReflection* parameterBlockTypeLayout,
 			DescriptorSetBuilderContext& context,
 			const std::string& prefix);
 
-		void AddProgramParameters(
-			slang::ProgramLayout* programLayout,
+		void AddProgramParameters(slang::ProgramLayout* programLayout,
 			uint32_t defaultSetIndex,
 			DescriptorSetBuilderContext& context) {
 			const uint32_t parameterCount = static_cast<uint32_t>(programLayout->getParameterCount());
@@ -127,8 +130,7 @@ namespace RealRHI {
 			}
 		}
 
-		void AddDescriptorSetForParameterBlock(
-			slang::TypeLayoutReflection* parameterBlockTypeLayout,
+		void AddDescriptorSetForParameterBlock(slang::TypeLayoutReflection* parameterBlockTypeLayout,
 			DescriptorSetBuilderContext& context,
 			const std::string& prefix) {
 			const uint32_t setIndex = static_cast<uint32_t>(context.descriptors.sets.size());
@@ -136,23 +138,21 @@ namespace RealRHI {
 				.setIndex = setIndex,
 			});
 
-			AddRangesForParameterBlockElement(parameterBlockTypeLayout->getElementTypeLayout(), setIndex, context, prefix);
+			AddRangesForParameterBlockElement(
+				parameterBlockTypeLayout->getElementTypeLayout(), setIndex, context, prefix);
 		}
 
-		void RecordPushDataSize(slang::TypeLayoutReflection* typeLayout,
-			DescriptorSetBuilderContext& context) {
+		void RecordPushDataSize(slang::TypeLayoutReflection* typeLayout, DescriptorSetBuilderContext& context) {
 			if (typeLayout == nullptr) {
 				return;
 			}
 			auto* element = typeLayout->getElementTypeLayout();
 			if (element != nullptr) {
-				context.pushDataSize = std::max(context.pushDataSize,
-					static_cast<uint32_t>(element->getSize()));
+				context.pushDataSize = std::max(context.pushDataSize, static_cast<uint32_t>(element->getSize()));
 			}
 		}
 
-		void AddSubObjectRanges(
-			slang::TypeLayoutReflection* typeLayout,
+		void AddSubObjectRanges(slang::TypeLayoutReflection* typeLayout,
 			uint32_t setIndex,
 			DescriptorSetBuilderContext& context,
 			const std::string& prefix) {
@@ -172,14 +172,16 @@ namespace RealRHI {
 
 				const int subObjectRangeCount = fieldTypeLayout->getSubObjectRangeCount();
 				for (int subObjectRangeIndex = 0; subObjectRangeIndex < subObjectRangeCount; ++subObjectRangeIndex) {
-					const int bindingRangeIndex = fieldTypeLayout->getSubObjectRangeBindingRangeIndex(subObjectRangeIndex);
+					const int bindingRangeIndex =
+						fieldTypeLayout->getSubObjectRangeBindingRangeIndex(subObjectRangeIndex);
 					const slang::BindingType bindingType = fieldTypeLayout->getBindingRangeType(bindingRangeIndex);
 					slang::TypeLayoutReflection* leafTypeLayout =
 						fieldTypeLayout->getBindingRangeLeafTypeLayout(bindingRangeIndex);
 
 					switch (bindingType) {
 						case slang::BindingType::ConstantBuffer:
-							AddRangesForParameterBlockElement(leafTypeLayout->getElementTypeLayout(), setIndex, context, fieldName);
+							AddRangesForParameterBlockElement(
+								leafTypeLayout->getElementTypeLayout(), setIndex, context, fieldName);
 							break;
 						case slang::BindingType::PushConstant:
 							RecordPushDataSize(leafTypeLayout, context);
@@ -191,18 +193,18 @@ namespace RealRHI {
 			}
 		}
 
-		void AddRangesForParameterBlockElement(
-			slang::TypeLayoutReflection* elementTypeLayout,
+		void AddRangesForParameterBlockElement(slang::TypeLayoutReflection* elementTypeLayout,
 			uint32_t setIndex,
 			DescriptorSetBuilderContext& context,
 			const std::string& prefix) {
 			if (elementTypeLayout->getSize() > 0) {
-				GetSet(context, setIndex).bindings.push_back(DescriptorBinding{
-					.name = prefix,
-					.binding = GetNextBindingIndex(context, setIndex),
-					.vkType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-					.descriptorCount = 1
-				});
+				GetSet(context, setIndex)
+					.bindings.push_back(DescriptorBinding{
+						.name = prefix,
+						.binding = GetNextBindingIndex(context, setIndex),
+						.vkType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+						.descriptorCount = 1,
+					});
 			}
 
 			AddDescriptorRanges(elementTypeLayout, setIndex, context, prefix);
@@ -210,8 +212,8 @@ namespace RealRHI {
 		}
 	}
 
-	VulkanShader::VulkanShader(const VulkanDevice* device) : m_Device(device) {
-	}
+	VulkanShader::VulkanShader(const VulkanDevice* device)
+		: m_Device(device) { }
 
 	VulkanShader::~VulkanShader() {
 		vkDestroyShaderModule(m_Device->GetDevice(), m_ShaderModule, nullptr);
@@ -235,36 +237,31 @@ namespace RealRHI {
 
 		Slang::ComPtr<slang::IBlob> diagnostics;
 
-		// 1. Load module
 		m_SlangModule = LoadModule(desc, diagnostics);
 		if (!m_SlangModule) {
 			return Result::Failed;
 		}
 
-		// 2. Compose program (entry points)
 		auto composedProgram = ComposeProgram(m_SlangModule, diagnostics);
 		if (!composedProgram) {
 			return Result::Failed;
 		}
 
-		// 3. Reflect layout
 		m_BufferLayout = ReflectLayout(composedProgram, m_EntryPoints, diagnostics);
 
-		// 3b. Reflect descriptor sets from shader parameter blocks
 		m_DescriptorsDesc = ReflectDescriptors(composedProgram, diagnostics);
 		if (m_PushDataSize > m_Device->GetMaxPushDataSize()) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::ShaderCompilation,
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::ShaderCompilation,
 				"Shader push-constant data exceeds the device descriptor heap maxPushDataSize.");
 			return Result::Failed;
 		}
 
-		// 4. Link program
 		auto linkedProgram = LinkProgram(composedProgram, diagnostics);
 		if (!linkedProgram) {
 			return Result::Failed;
 		}
 
-		// 5. Create Vulkan module
 		m_ShaderModule = CreateVkShaderModule(linkedProgram);
 		if (!m_ShaderModule) {
 			return Result::Failed;
@@ -273,38 +270,34 @@ namespace RealRHI {
 		return Result::Success;
 	}
 
-	Slang::ComPtr<slang::IModule> VulkanShader::LoadModule(
-			const ShaderDesc& desc,
-			Slang::ComPtr<slang::IBlob>& diagnostics) {
-		Slang::ComPtr<slang::IModule> module(
-			s_SlangSession->loadModule(
-				desc.moduleName,
-				diagnostics.writeRef()
-			)
-		);
+	Slang::ComPtr<slang::IModule> VulkanShader::LoadModule(const ShaderDesc& desc,
+		Slang::ComPtr<slang::IBlob>& diagnostics) {
+		Slang::ComPtr<slang::IModule> module(s_SlangSession->loadModule(desc.moduleName, diagnostics.writeRef()));
 
-		if (!CheckSlangDiagnostics(diagnostics, module ? SLANG_OK : SLANG_FAIL)) {
+		if (!module) {
+			CheckSlangDiagnostics(diagnostics, SLANG_FAIL);
 			return nullptr;
 		}
+		CheckSlangDiagnostics(diagnostics, SLANG_OK);
 
 		return module;
 	}
 
-	Slang::ComPtr<slang::IComponentType> VulkanShader::ComposeProgram(
-			slang::IModule* module,
-			Slang::ComPtr<slang::IBlob>& diagnostics) {
+	Slang::ComPtr<slang::IComponentType> VulkanShader::ComposeProgram(slang::IModule* module,
+		Slang::ComPtr<slang::IBlob>& diagnostics) {
 		const uint32_t entryCount = module->getDefinedEntryPointCount();
 		std::vector<Slang::ComPtr<slang::IComponentType>> componentsToLink(entryCount + 1);
 
-		// The module itself is the first component to link, which ensures that any shared code (e.g., functions, types) is included in the linking process even if not directly referenced by entry points.
+		// Include the module so shared code is linked with its entry points.
 		componentsToLink[0] = Slang::ComPtr<slang::IComponentType>(module);
 
 		std::vector<Slang::ComPtr<slang::IEntryPoint>> entryPoints(entryCount);
 		for (uint32_t i = 0; i < entryCount; ++i) {
 			if (SLANG_FAILED(module->getDefinedEntryPoint(i, entryPoints[i].writeRef())) || !entryPoints[i]) {
-				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::ShaderCompilation,
+				m_Device->SendDebugMessage(DebugSeverity::Error,
+					DebugMessageType::ShaderCompilation,
 					"CreateShader: Failed to retrieve a Slang entry point.");
-				
+
 				return nullptr;
 			}
 			componentsToLink[i + 1] = Slang::ComPtr<slang::IComponentType>(entryPoints[i].get());
@@ -325,15 +318,16 @@ namespace RealRHI {
 		return composedProgram;
 	}
 
-	BufferLayout VulkanShader::ReflectLayout(
-		slang::IComponentType* composedProgram,
+	BufferLayout VulkanShader::ReflectLayout(slang::IComponentType* composedProgram,
 		std::vector<EntryPoint>& outEntryPoints,
 		Slang::ComPtr<slang::IBlob>& diagnostics) {
 		slang::ProgramLayout* programLayout = composedProgram->getLayout(0, diagnostics.writeRef());
 
-		if (!CheckSlangDiagnostics(diagnostics, programLayout ? SLANG_OK : SLANG_FAIL)) {
+		if (programLayout == nullptr) {
+			CheckSlangDiagnostics(diagnostics, SLANG_FAIL);
 			return {};
 		}
+		CheckSlangDiagnostics(diagnostics, SLANG_OK);
 
 		const uint32_t entryCount = programLayout->getEntryPointCount();
 		outEntryPoints.resize(entryCount);
@@ -362,19 +356,20 @@ namespace RealRHI {
 		return bufferLayout;
 	}
 
-	DescriptorsDesc VulkanShader::ReflectDescriptors(
-		slang::IComponentType* composedProgram,
+	DescriptorsDesc VulkanShader::ReflectDescriptors(slang::IComponentType* composedProgram,
 		Slang::ComPtr<slang::IBlob>& diagnostics) {
 		slang::ProgramLayout* programLayout = composedProgram->getLayout(0, diagnostics.writeRef());
-		if (!CheckSlangDiagnostics(diagnostics, programLayout ? SLANG_OK : SLANG_FAIL)) {
+		if (programLayout == nullptr) {
+			CheckSlangDiagnostics(diagnostics, SLANG_FAIL);
 			return {};
 		}
+		CheckSlangDiagnostics(diagnostics, SLANG_OK);
 
 		DescriptorsDesc result;
 		DescriptorSetBuilderContext context{
 			.descriptors = result,
 			.device = m_Device,
-			.pushDataSize = m_PushDataSize
+			.pushDataSize = m_PushDataSize,
 		};
 
 		result.sets.push_back(DescriptorSetLayoutDesc{
@@ -387,7 +382,8 @@ namespace RealRHI {
 		const uint32_t entryPointCount = programLayout->getEntryPointCount();
 		for (uint32_t i = 0; i < entryPointCount; ++i) {
 			auto* entryPointLayout = programLayout->getEntryPointByIndex(i);
-			AddRangesForParameterBlockElement(entryPointLayout->getTypeLayout(), defaultSetIndex, context, entryPointLayout->getName());
+			AddRangesForParameterBlockElement(
+				entryPointLayout->getTypeLayout(), defaultSetIndex, context, entryPointLayout->getName());
 		}
 
 		CompactDescriptorSets(result);
@@ -395,16 +391,11 @@ namespace RealRHI {
 		return result;
 	}
 
-	Slang::ComPtr<slang::IComponentType>
-		VulkanShader::LinkProgram(
-			slang::IComponentType* composed,
-			Slang::ComPtr<slang::IBlob>& diagnostics) {
+	Slang::ComPtr<slang::IComponentType> VulkanShader::LinkProgram(slang::IComponentType* composed,
+		Slang::ComPtr<slang::IBlob>& diagnostics) {
 		Slang::ComPtr<slang::IComponentType> linkedProgram;
 
-		const SlangResult result = composed->link(
-			linkedProgram.writeRef(),
-			diagnostics.writeRef()
-		);
+		const SlangResult result = composed->link(linkedProgram.writeRef(), diagnostics.writeRef());
 
 		if (!CheckSlangDiagnostics(diagnostics, result)) {
 			return nullptr;
@@ -429,7 +420,8 @@ namespace RealRHI {
 
 		VkShaderModule shaderModule = VK_NULL_HANDLE;
 		if (vkCreateShaderModule(m_Device->GetDevice(), &ci, nullptr, &shaderModule) != VK_SUCCESS) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan shader module.");
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan shader module.");
 
 			return VK_NULL_HANDLE;
 		}
@@ -437,108 +429,106 @@ namespace RealRHI {
 		return shaderModule;
 	}
 
-	std::vector<BufferAttribute> VulkanShader::CalculateCumulativeOffset(slang::TypeLayoutReflection* typeReflection, uint32_t* offset) {
+	std::vector<BufferAttribute> VulkanShader::CalculateCumulativeOffset(slang::TypeLayoutReflection* typeReflection,
+		uint32_t* offset) {
 		std::vector<BufferAttribute> attributes;
 
 		uint8_t fieldCount = typeReflection->getFieldCount();
 		for (uint8_t i = 0; i < fieldCount; i++) {
 			auto fieldTypeLayout = typeReflection->getFieldByIndex(i)->getTypeLayout();
 
-			ScalarType fieldType = ScalarType::None; // float, int, uint, vec, etc...
-			slang::TypeReflection::Kind fieldKind = fieldTypeLayout->getKind(); // Struct, Array, Vector, etc...
-			uint8_t elementCount = 1; // Default to 1 for non-array/vector types
+			ScalarType fieldType = ScalarType::None;
+			slang::TypeReflection::Kind fieldKind = fieldTypeLayout->getKind();
+			uint8_t elementCount = 1;
 			switch (fieldKind) {
 				case slang::TypeReflection::Kind::Struct: {
-					// Recursively calculate offsets for nested structs
 					std::vector<BufferAttribute> otherAttribs = CalculateCumulativeOffset(fieldTypeLayout, offset);
 					attributes.insert(attributes.end(), otherAttribs.begin(), otherAttribs.end());
 					continue;
 				}
 				case slang::TypeReflection::Kind::Array: {
-					// TODO: Fix.. Arrays are handled where each element is in a different location so we need to push a new BufferAttribute for every array element
-					fieldType = (ScalarType)fieldTypeLayout->getElementTypeLayout()->getScalarType();
-					elementCount = fieldTypeLayout->getElementCount(); // Usualy float[3]
+					// TODO: Emit a separate vertex attribute location for each array element.
+					fieldType = static_cast<ScalarType>(fieldTypeLayout->getElementTypeLayout()->getScalarType());
+					elementCount = fieldTypeLayout->getElementCount();
 					break;
 				}
 				case slang::TypeReflection::Kind::Vector: {
-					elementCount = fieldTypeLayout->getElementCount(); // Usualy float3, float4, etc...
-					fieldType = Utils::SlangVectorToRealRHIScalarType(fieldTypeLayout->getElementTypeLayout()->getScalarType(), elementCount);
+					elementCount = fieldTypeLayout->getElementCount();
+					fieldType = Utils::SlangVectorToRealRHIScalarType(
+						fieldTypeLayout->getElementTypeLayout()->getScalarType(), elementCount);
 					break;
 				}
 				case slang::TypeReflection::Kind::Scalar: {
-					fieldType = (ScalarType)fieldTypeLayout->getScalarType(); // This should always be a 1-1 mapping
+					fieldType = static_cast<ScalarType>(fieldTypeLayout->getScalarType());
 					break;
 				}
 			}
 
-			attributes.push_back(BufferAttribute{
-				.type = fieldType,
-				.offset = *offset
-			});
+			attributes.push_back(BufferAttribute{.type = fieldType, .offset = *offset});
 			*offset += elementCount * Utils::ScalarTypeToSizeOf(fieldType);
 		}
 
 		return attributes;
 	}
 
-	bool VulkanShader::InitializeSlang(const VulkanDevice* m_Device) {
+	bool VulkanShader::InitializeSlang(const VulkanDevice* device) {
 		if (!s_SlangSession) {
 			if (!s_SlangGlobalSession && SLANG_FAILED(slang::createGlobalSession(s_SlangGlobalSession.writeRef()))) {
-				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::ShaderCompilation,
+				device->SendDebugMessage(DebugSeverity::Error,
+					DebugMessageType::ShaderCompilation,
 					"CreateShader: Failed to create the Slang global session.");
-				
+
 				return false;
 			}
 			std::array<slang::TargetDesc, 1> slangTargets{
-				std::to_array<slang::TargetDesc>({
-					slang::TargetDesc{
-						.format{SLANG_SPIRV}, // Compile to SPIR-V
-						.profile{s_SlangGlobalSession->findProfile("spirv_1_6")}
-					}
-				})
+				slang::TargetDesc{
+					.format = SLANG_SPIRV,
+					.profile = s_SlangGlobalSession->findProfile("spirv_1_6"),
+				},
 			};
 
 			SlangCapabilityID spvDescriptorHeapEXT = s_SlangGlobalSession->findCapability("spvDescriptorHeapEXT");
 			if (spvDescriptorHeapEXT == SLANG_CAPABILITY_UNKNOWN) {
-				m_Device->SendDebugMessage(
-					DebugSeverity::Error, 
+				device->SendDebugMessage(DebugSeverity::Error,
 					DebugMessageType::ShaderCompilation,
-					"CreateShader: The installed Slang compiler does not support spvDescriptorHeapEXT."
-				);
+					"CreateShader: The installed Slang compiler does not support spvDescriptorHeapEXT.");
 				return false;
 			}
 
 			std::array<slang::CompilerOptionEntry, 3> slangOptions{
-				std::to_array<slang::CompilerOptionEntry>({
-					slang::CompilerOptionEntry{
-						slang::CompilerOptionName::EmitSpirvDirectly, // Emit SPIR-V directly instead of generating source code that will be compiled by a downstream compiler.
-						slang::CompilerOptionValue{slang::CompilerOptionValueKind::Int, 1} // Set to 1 to enable, 0 to disable. Default is false (0).
-					},
-					slang::CompilerOptionEntry{
-						slang::CompilerOptionName::Capability,
-						slang::CompilerOptionValue{slang::CompilerOptionValueKind::Int, spvDescriptorHeapEXT}
-					},
-					slang::CompilerOptionEntry{
-						slang::CompilerOptionName::DebugInformation,
-						slang::CompilerOptionValue{slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_STANDARD}
-					}
-				})
+				slang::CompilerOptionEntry{
+					slang::CompilerOptionName::EmitSpirvDirectly,
+					slang::CompilerOptionValue{slang::CompilerOptionValueKind::Int, 1},
+				},
+				slang::CompilerOptionEntry{
+					slang::CompilerOptionName::Capability,
+					slang::CompilerOptionValue{slang::CompilerOptionValueKind::Int, spvDescriptorHeapEXT},
+				},
+				slang::CompilerOptionEntry{
+					slang::CompilerOptionName::DebugInformation,
+					slang::CompilerOptionValue{slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_STANDARD},
+				},
 			};
 
-			uint32_t slangOptionsCount = m_Device->IsDebugEnabled() ? slangOptions.size() : slangOptions.size() - 1;
-			std::string shaderSearchPath = m_Device->GetShaderDirectory().string();
+			uint32_t slangOptionsCount = static_cast<uint32_t>(slangOptions.size());
+			if (!device->IsDebugEnabled()) {
+				--slangOptionsCount;
+			}
+			std::string shaderSearchPath = device->GetShaderDirectory().string();
 			const char* shaderSearchPathCStr = shaderSearchPath.c_str();
 			slang::SessionDesc slangSessionDesc{
-				.targets{slangTargets.data()},
-				.targetCount{SlangInt(slangTargets.size())},
-				.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR, // Because we use glm which uses column-major layout
+				.targets = slangTargets.data(),
+				.targetCount = static_cast<SlangInt>(slangTargets.size()),
+				.defaultMatrixLayoutMode =
+					SLANG_MATRIX_LAYOUT_COLUMN_MAJOR, // Match the renderer's column-major matrix convention.
 				.searchPaths = &shaderSearchPathCStr,
 				.searchPathCount = 1,
-				.compilerOptionEntries{slangOptions.data()},
-				.compilerOptionEntryCount{slangOptionsCount}
+				.compilerOptionEntries = slangOptions.data(),
+				.compilerOptionEntryCount = slangOptionsCount,
 			};
 			if (SLANG_FAILED(s_SlangGlobalSession->createSession(slangSessionDesc, s_SlangSession.writeRef()))) {
-				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::ShaderCompilation,
+				device->SendDebugMessage(DebugSeverity::Error,
+					DebugMessageType::ShaderCompilation,
 					"CreateShader: Failed to create the Slang compilation session.");
 				return false;
 			}
@@ -548,11 +538,17 @@ namespace RealRHI {
 
 	bool VulkanShader::CheckSlangDiagnostics(const Slang::ComPtr<slang::IBlob>& diagnostics, SlangResult result) {
 		if (diagnostics) {
-			m_Device->SendDebugMessage(SLANG_FAILED(result) ? DebugSeverity::Error : DebugSeverity::Warning, DebugMessageType::ShaderCompilation,
+			DebugSeverity severity = DebugSeverity::Warning;
+			if (SLANG_FAILED(result)) {
+				severity = DebugSeverity::Error;
+			}
+			m_Device->SendDebugMessage(severity,
+				DebugMessageType::ShaderCompilation,
 				static_cast<const char*>(diagnostics->getBufferPointer()));
 		}
 		else if (SLANG_FAILED(result)) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::ShaderCompilation,
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::ShaderCompilation,
 				"CreateShader: Slang compilation operation failed without diagnostics.");
 		}
 		return SLANG_SUCCEEDED(result);

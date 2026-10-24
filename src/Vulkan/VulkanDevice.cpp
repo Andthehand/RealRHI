@@ -2,42 +2,40 @@
 #define VMA_IMPLEMENTATION
 #include "VulkanDevice.h"
 
-#include "VulkanWindow.h"
-#include "VulkanSwapchain.h"
-#include "VulkanShader.h"
-#include "VulkanPipeline.h"
 #include "VulkanBuffer.h"
-#include "VulkanCommandList.h"
 #include "VulkanCommandAllocator.h"
+#include "VulkanCommandList.h"
 #include "VulkanCommandQueue.h"
 #include "VulkanDescriptorManager.h"
+#include "VulkanPipeline.h"
+#include "VulkanShader.h"
+#include "VulkanSwapchain.h"
+#include "VulkanWindow.h"
 
-#include <set>
+#include <algorithm>
+#include <cstring>
 #include <iostream>
 #include <limits>
-#include <cstring>
-#include <algorithm>
+#include <set>
 
 namespace RealRHI {
 	VulkanDevice::~VulkanDevice() {
-        if (m_Device != VK_NULL_HANDLE) {
-            // Complete submissions before callbacks destroy Vulkan resources.
-            vkDeviceWaitIdle(m_Device);
-            ProcessDeferredDeletions();
-        }
+		if (m_Device != VK_NULL_HANDLE) {
+			// Complete submissions before callbacks destroy Vulkan resources.
+			vkDeviceWaitIdle(m_Device);
+			ProcessDeferredDeletions();
+		}
 		for (auto& [queueId, queue] : m_Queues) {
 			delete queue;
 		}
 		m_Queues.clear();
 		m_GraphicsCommandQueue = nullptr;
 
-		// Guard against partial initialization - only cleanup if constructed
 		if (m_DescriptorManager) {
 			m_DescriptorManager->Cleanup();
 		}
 
 		if (m_Device != VK_NULL_HANDLE) {
-			// Ensure all GPU work is complete before destroying device resources
 			vkDeviceWaitIdle(m_Device);
 
 			if (m_Allocator != VK_NULL_HANDLE) {
@@ -61,7 +59,10 @@ namespace RealRHI {
 	Result VulkanDevice::Init(const DeviceDesc& desc) {
 		m_EnableDebug = desc.enableDebug;
 		m_ShaderDirectory = desc.shaderDirectory;
-		m_DebugCallback = desc.debugCallback != nullptr ? desc.debugCallback : DefaultDebugCallback;
+		m_DebugCallback = DefaultDebugCallback;
+		if (desc.debugCallback != nullptr) {
+			m_DebugCallback = desc.debugCallback;
+		}
 
 		if (!SDL_Init(SDL_INIT_VIDEO)) {
 			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to init SDL video.");
@@ -84,7 +85,8 @@ namespace RealRHI {
 
 		if (desc.enableValidationLayers) {
 			if (!SetupDebugMessenger()) {
-				SendDebugMessage(DebugSeverity::Error, DebugMessageType::Validation, "Failed to setup Vulkan debug messenger.");
+				SendDebugMessage(
+					DebugSeverity::Error, DebugMessageType::Validation, "Failed to setup Vulkan debug messenger.");
 				return Result::Failed;
 			}
 		}
@@ -96,29 +98,34 @@ namespace RealRHI {
 
 		m_MaxPushDataSize = GetDescriptorHeapProperties().maxPushDataSize;
 		if (m_MaxPushDataSize == 0) {
-			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+			SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
 				"Selected device does not report descriptor heap push data support.");
 			return Result::Failed;
 		}
 
 		if (!CreateLogicalDevice()) {
-			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan logical device.");
+			SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan logical device.");
 			return Result::Failed;
 		}
 
 		if (!CreateCommandQueues()) {
-			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan command queues.");
+			SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan command queues.");
 			return Result::Failed;
 		}
 
 		if (!CreateAllocator()) {
-			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan memory allocator.");
+			SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan memory allocator.");
 			return Result::Failed;
 		}
 
 		m_DescriptorManager = std::make_unique<VulkanDescriptorManager>(this);
 		if (m_DescriptorManager->Init() != Result::Success) {
-			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to initialize Vulkan descriptor manager.");
+			SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Failed to initialize Vulkan descriptor manager.");
 			return Result::Failed;
 		}
 
@@ -217,8 +224,8 @@ namespace RealRHI {
 		}
 		Ref<VulkanCommandList> list;
 		const Result result = VulkanCommandList::Create(this, Ref<VulkanCommandAllocator>(vkAllocator), list);
-		
-        if (result == Result::Success) {
+
+		if (result == Result::Success) {
 			outCommandList = list.As<CommandList>();
 		}
 		return result;
@@ -227,39 +234,46 @@ namespace RealRHI {
 	CommandQueue* VulkanDevice::GetCommandQueue(QueueType type) const {
 		uint32_t family = m_GraphicsQueueFamily;
 		switch (type) {
-			// This will default to the graphics queue
-			case QueueType::Graphics: break;
-			case QueueType::Compute: family = m_ComputeQueueFamily; break;
-			case QueueType::Transfer: family = m_TransferQueueFamily; break;
+			case QueueType::Graphics:
+				break;
+			case QueueType::Compute:
+				family = m_ComputeQueueFamily;
+				break;
+			case QueueType::Transfer:
+				family = m_TransferQueueFamily;
+				break;
 		}
-		return GetCommandQueue(QueueId{ family, 0 });
+		return GetCommandQueue(QueueId{family, 0});
 	}
 
 	CommandQueue* VulkanDevice::GetGraphicsCommandQueue() const {
 		return m_GraphicsCommandQueue;
 	}
 
-    void VulkanDevice::DeferDeletion(std::vector<SubmissionToken> dependencies, std::function<void()> destroy) const {
-        m_DeferredDeletions.Enqueue(std::move(dependencies), std::move(destroy));
-    }
+	void VulkanDevice::DeferDeletion(std::vector<SubmissionToken> dependencies, std::function<void()> destroy) const {
+		m_DeferredDeletions.Enqueue(std::move(dependencies), std::move(destroy));
+	}
 
-    void VulkanDevice::ProcessDeferredDeletions() {
-        // Tokens identify their owning queue; queue index zero is valid.
-        m_DeferredDeletions.Process([this](const SubmissionToken& token) {
-            auto* queue = GetCommandQueue(token.queue);
-            return queue != nullptr && queue->IsComplete(token);
-        });
-    }
+	void VulkanDevice::ProcessDeferredDeletions() {
+		// Tokens identify their owning queue; queue index zero is valid.
+		m_DeferredDeletions.Process([this](const SubmissionToken& token) {
+			auto* queue = GetCommandQueue(token.queue);
+			return queue != nullptr && queue->IsComplete(token);
+		});
+	}
 
 	VulkanCommandQueue* VulkanDevice::GetCommandQueue(const QueueId& queueId) const {
 		auto it = m_Queues.find(queueId);
-		return it == m_Queues.end() ? nullptr : it->second;
+		if (it == m_Queues.end()) {
+			return nullptr;
+		}
+
+		return it->second;
 	}
 
 	void VulkanDevice::BindDescriptorHeaps(VkCommandBuffer commandBuffer) const {
 		m_DescriptorManager->BindDescriptorHeaps(commandBuffer);
 	}
-
 
 	Result VulkanDevice::Submit(CommandList* cmd, Swapchain* sc, const FrameContext& frame, SubmissionToken* outToken) {
 		if (outToken) {
@@ -276,13 +290,14 @@ namespace RealRHI {
 		auto* vkSC = static_cast<VulkanSwapchain*>(sc);
 		auto* vkCmd = static_cast<VulkanCommandList*>(cmd);
 		if (!vkSC->IsFrameValid(frame)) {
-			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
-				"Submit: Frame must match the swapchain.");
+			SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Submit: Frame must match the swapchain.");
 			return Result::Failed;
 		}
 
 		if (!vkSC->PrepareFrameSubmission(frame.frameIndex)) {
-			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Submit: Frame is not ready for submission.");
+			SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Submit: Frame is not ready for submission.");
 			return Result::Failed;
 		}
 
@@ -290,9 +305,18 @@ namespace RealRHI {
 		VkCommandBuffer postCmdBuf = vkSC->RecordPostTransitionCmd(frame.frameIndex, frame.imageIndex);
 
 		std::array<VkCommandBufferSubmitInfo, 3> cmdInfos = {
-			VkCommandBufferSubmitInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = preCmdBuf },
-			VkCommandBufferSubmitInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = vkCmd->GetCommandBuffer() },
-			VkCommandBufferSubmitInfo{ .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = postCmdBuf },
+			VkCommandBufferSubmitInfo{
+				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+				.commandBuffer = preCmdBuf,
+			},
+			VkCommandBufferSubmitInfo{
+				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+				.commandBuffer = vkCmd->GetCommandBuffer(),
+			},
+			VkCommandBufferSubmitInfo{
+				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+				.commandBuffer = postCmdBuf,
+			},
 		};
 
 		VkSemaphoreSubmitInfo waitInfo{
@@ -309,13 +333,10 @@ namespace RealRHI {
 			.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
 		};
 
-		std::array<CommandList*, 1> tracked = { cmd };
+		std::array<CommandList*, 1> tracked = {cmd};
 
 		const SubmissionToken token = m_GraphicsCommandQueue->SubmitTracked(
-			{ cmdInfos.data(), cmdInfos.size() },
-			{ &waitInfo, 1 },
-			{ &signalInfo, 1 },
-			tracked);
+			{cmdInfos.data(), cmdInfos.size()}, {&waitInfo, 1}, {&signalInfo, 1}, tracked);
 		vkSC->FinishFrameSubmission(frame.frameIndex, token);
 		if (outToken && token.IsValid()) {
 			*outToken = token;
@@ -323,7 +344,11 @@ namespace RealRHI {
 		if (token.IsValid()) {
 			ProcessDeferredDeletions();
 		}
-		return token.IsValid() ? Result::Success : Result::Failed;
+		if (!token.IsValid()) {
+			return Result::Failed;
+		}
+
+		return Result::Success;
 	}
 
 	Result VulkanDevice::ImmediateSubmit(CommandList* cmd) const {
@@ -337,7 +362,11 @@ namespace RealRHI {
 		}
 
 		m_GraphicsCommandQueue->Wait(token);
-		return m_GraphicsCommandQueue->IsComplete(token) ? Result::Success : Result::Failed;
+		if (!m_GraphicsCommandQueue->IsComplete(token)) {
+			return Result::Failed;
+		}
+
+		return Result::Success;
 	}
 
 	void VulkanDevice::WaitIdle() {
@@ -359,142 +388,144 @@ namespace RealRHI {
 	}
 
 	bool VulkanDevice::CreateInstance(const char* appName, bool enableValidationLayer) {
-        VkApplicationInfo appInfo{
-            .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-            .pApplicationName = appName,
-            .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
-            .pEngineName = "RealEngine",
-            .engineVersion = VK_MAKE_VERSION(1, 0, 0),
-            .apiVersion = VK_API_VERSION_1_3,
-        };
+		VkApplicationInfo appInfo{
+			.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+			.pApplicationName = appName,
+			.applicationVersion = VK_MAKE_VERSION(1, 0, 0),
+			.pEngineName = "RealEngine",
+			.engineVersion = VK_MAKE_VERSION(1, 0, 0),
+			.apiVersion = VK_API_VERSION_1_3,
+		};
 
-        std::vector<const char*> extensions;
-        std::vector<const char*> layers;
+		std::vector<const char*> extensions;
+		std::vector<const char*> layers;
 
-        // Add SDL required extensions
-        uint32_t sdlExtensionsCount{ 0 };
-        char const* const* sdlExtensions{ SDL_Vulkan_GetInstanceExtensions(&sdlExtensionsCount) };
-        for (uint32_t i = 0; i < sdlExtensionsCount; ++i) {
-            extensions.push_back(sdlExtensions[i]);
-        }
-        
-        VkValidationFeatureEnableEXT syncValidation =
-            VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT;
-        VkValidationFeaturesEXT validationFeatures{
-            .sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT,
-            .enabledValidationFeatureCount = 1,
-            .pEnabledValidationFeatures = &syncValidation,
-        };
+		uint32_t sdlExtensionsCount{0};
+		char const* const* sdlExtensions{SDL_Vulkan_GetInstanceExtensions(&sdlExtensionsCount)};
+		for (uint32_t i = 0; i < sdlExtensionsCount; ++i) {
+			extensions.push_back(sdlExtensions[i]);
+		}
 
-        if (enableValidationLayer) {
-            extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-            layers.push_back("VK_LAYER_KHRONOS_validation");
+		VkValidationFeatureEnableEXT syncValidation = VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT;
+		VkValidationFeaturesEXT validationFeatures{
+			.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT,
+			.enabledValidationFeatureCount = 1,
+			.pEnabledValidationFeatures = &syncValidation,
+		};
 
-            uint32_t extensionCount = 0;
-            constexpr const char* layerName = "VK_LAYER_KHRONOS_validation";
-            if (vkEnumerateInstanceExtensionProperties(layerName, &extensionCount, nullptr) != VK_SUCCESS) {
-                return false;
-            }
-            std::vector<VkExtensionProperties> layerExtensions(extensionCount);
-            if (vkEnumerateInstanceExtensionProperties(layerName, &extensionCount, layerExtensions.data()) != VK_SUCCESS) {
-                return false;
-            }
-            bool supported = false;
-            for (const auto& extension : layerExtensions) {
-                if (std::strcmp(extension.extensionName, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME) == 0) {
-                    supported = true;
-                    break;
-                }
-            }
-            if (!supported) {
-                SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
-                    "VK_EXT_validation_features is not advertised by the validation layer.");
-                return false;
-            }
-            extensions.push_back(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
-        }
+		if (enableValidationLayer) {
+			extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+			layers.push_back("VK_LAYER_KHRONOS_validation");
 
-        VkInstanceCreateInfo createInfo{
-            .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-            .pNext = enableValidationLayer ? &validationFeatures : nullptr,
-            .pApplicationInfo = &appInfo,
-            .enabledLayerCount = static_cast<uint32_t>(layers.size()),
-            .ppEnabledLayerNames = layers.data(),
-            .enabledExtensionCount = static_cast<uint32_t>(extensions.size()),
-            .ppEnabledExtensionNames = extensions.data()
-        };
+			uint32_t extensionCount = 0;
+			constexpr const char* layerName = "VK_LAYER_KHRONOS_validation";
+			if (vkEnumerateInstanceExtensionProperties(layerName, &extensionCount, nullptr) != VK_SUCCESS) {
+				return false;
+			}
+			std::vector<VkExtensionProperties> layerExtensions(extensionCount);
+			if (vkEnumerateInstanceExtensionProperties(layerName, &extensionCount, layerExtensions.data()) !=
+				VK_SUCCESS) {
+				return false;
+			}
+			bool supported = false;
+			for (const auto& extension : layerExtensions) {
+				if (std::strcmp(extension.extensionName, VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME) == 0) {
+					supported = true;
+					break;
+				}
+			}
+			if (!supported) {
+				SendDebugMessage(DebugSeverity::Error,
+					DebugMessageType::General,
+					"VK_EXT_validation_features is not advertised by the validation layer.");
+				return false;
+			}
+			extensions.push_back(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
+		}
 
-        if (vkCreateInstance(&createInfo, nullptr, &m_Instance) != VK_SUCCESS) {
-            return false;
-        }
+		VkInstanceCreateInfo createInfo{
+			.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+			.pNext = nullptr,
+			.pApplicationInfo = &appInfo,
+			.enabledLayerCount = static_cast<uint32_t>(layers.size()),
+			.ppEnabledLayerNames = layers.data(),
+			.enabledExtensionCount = static_cast<uint32_t>(extensions.size()),
+			.ppEnabledExtensionNames = extensions.data(),
+		};
 
-        volkLoadInstance(m_Instance);
+		if (enableValidationLayer) {
+			createInfo.pNext = &validationFeatures;
+		}
 
-        return true;
-    }
+		if (vkCreateInstance(&createInfo, nullptr, &m_Instance) != VK_SUCCESS) {
+			return false;
+		}
 
-    VkPhysicalDeviceDescriptorHeapPropertiesEXT VulkanDevice::GetDescriptorHeapProperties() const {
-        VkPhysicalDeviceDescriptorHeapPropertiesEXT descriptorHeapProperties{
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT,
-            .pNext = nullptr,
-        };
+		volkLoadInstance(m_Instance);
 
-        VkPhysicalDeviceProperties2 physicalDeviceProperties{
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-            .pNext = &descriptorHeapProperties,
-        };
+		return true;
+	}
 
-        vkGetPhysicalDeviceProperties2(m_PhysicalDevice, &physicalDeviceProperties);
+	VkPhysicalDeviceDescriptorHeapPropertiesEXT VulkanDevice::GetDescriptorHeapProperties() const {
+		VkPhysicalDeviceDescriptorHeapPropertiesEXT descriptorHeapProperties{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_PROPERTIES_EXT,
+			.pNext = nullptr,
+		};
 
-        return descriptorHeapProperties;
-    }
+		VkPhysicalDeviceProperties2 physicalDeviceProperties{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+			.pNext = &descriptorHeapProperties,
+		};
 
-    bool VulkanDevice::SetupDebugMessenger() {
-        VkDebugUtilsMessengerCreateInfoEXT createInfo{
-            .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-            .messageSeverity =
-                VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
-                VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-                VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
-            .messageType =
-                VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-                VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-                VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
-            .pfnUserCallback = VulkanDebugCallback,
-            .pUserData = reinterpret_cast<void*>(m_DebugCallback)
-        };
+		vkGetPhysicalDeviceProperties2(m_PhysicalDevice, &physicalDeviceProperties);
 
-        if (vkCreateDebugUtilsMessengerEXT(m_Instance, &createInfo, nullptr, &m_DebugMessenger) != VK_SUCCESS) {
-            return false;
-        }
+		return descriptorHeapProperties;
+	}
 
-        return true;
-    }
+	bool VulkanDevice::SetupDebugMessenger() {
+		VkDebugUtilsMessengerCreateInfoEXT createInfo{
+			.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+			.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+				VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+			.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+				VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+			.pfnUserCallback = VulkanDebugCallback,
+			.pUserData = reinterpret_cast<void*>(m_DebugCallback),
+		};
+
+		if (vkCreateDebugUtilsMessengerEXT(m_Instance, &createInfo, nullptr, &m_DebugMessenger) != VK_SUCCESS) {
+			return false;
+		}
+
+		return true;
+	}
 
 	bool VulkanDevice::SupportsRequiredExtensions(VkPhysicalDevice device) const {
 		uint32_t extensionCount = 0;
 		if (vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr) != VK_SUCCESS) {
-			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
-				"Failed to query Vulkan device extension count.");
+			SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Failed to query Vulkan device extension count.");
 			return false;
 		}
 
 		std::vector<VkExtensionProperties> extensions(extensionCount);
 		if (vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, extensions.data()) != VK_SUCCESS) {
-			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
-				"Failed to enumerate Vulkan device extensions.");
+			SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Failed to enumerate Vulkan device extensions.");
 			return false;
 		}
 		extensions.resize(extensionCount);
 
 		for (const char* requiredExtension : s_DeviceExtensions) {
-			const auto extension = std::find_if(extensions.begin(), extensions.end(),
+			const auto extension = std::find_if(extensions.begin(),
+				extensions.end(),
 				[requiredExtension](const VkExtensionProperties& availableExtension) {
 					return std::strcmp(requiredExtension, availableExtension.extensionName) == 0;
 				});
 
 			if (extension == extensions.end()) {
-				const std::string message = std::string("Skipping Vulkan device: Missing required extension ") + requiredExtension;
+				const std::string message =
+					std::string("Skipping Vulkan device: Missing required extension ") + requiredExtension;
 				SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, message.c_str());
 				return false;
 			}
@@ -535,18 +566,19 @@ namespace RealRHI {
 		};
 
 		const RequiredFeature requiredFeatures[] = {
-			{ vulkan12Features.bufferDeviceAddress, "bufferDeviceAddress" },
-			{ vulkan12Features.timelineSemaphore, "timelineSemaphore" },
-			{ vulkan13Features.synchronization2, "synchronization2" },
-			{ vulkan13Features.dynamicRendering, "dynamicRendering" },
-			{ untypedPointerFeatures.shaderUntypedPointers, "shaderUntypedPointers" },
-			{ maintenance5Features.maintenance5, "maintenance5" },
-			{ descriptorHeapFeatures.descriptorHeap, "descriptorHeap" },
+			{vulkan12Features.bufferDeviceAddress, "bufferDeviceAddress"},
+			{vulkan12Features.timelineSemaphore, "timelineSemaphore"},
+			{vulkan13Features.synchronization2, "synchronization2"},
+			{vulkan13Features.dynamicRendering, "dynamicRendering"},
+			{untypedPointerFeatures.shaderUntypedPointers, "shaderUntypedPointers"},
+			{maintenance5Features.maintenance5, "maintenance5"},
+			{descriptorHeapFeatures.descriptorHeap, "descriptorHeap"},
 		};
 
 		for (const RequiredFeature& feature : requiredFeatures) {
 			if (feature.supported == VK_FALSE) {
-				const std::string message = std::string("Skipping Vulkan device: Missing required feature ") + feature.name;
+				const std::string message =
+					std::string("Skipping Vulkan device: Missing required feature ") + feature.name;
 				SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, message.c_str());
 				return false;
 			}
@@ -570,20 +602,23 @@ namespace RealRHI {
 		vkGetPhysicalDeviceProperties2(device, &properties);
 
 		if (properties.properties.apiVersion < VK_API_VERSION_1_3) {
-			SendDebugMessage(DebugSeverity::Info, DebugMessageType::General,
+			SendDebugMessage(DebugSeverity::Info,
+				DebugMessageType::General,
 				"Skipping Vulkan device: Vulkan 1.3 or newer is required.");
 			return 0;
 		}
 
 		if (descriptorHeapProperties.maxPushDataSize == 0) {
-			SendDebugMessage(DebugSeverity::Info, DebugMessageType::General,
+			SendDebugMessage(DebugSeverity::Info,
+				DebugMessageType::General,
 				"Skipping Vulkan device: Descriptor heap push data is unavailable.");
 			return 0;
 		}
 
 		const QueueFamilyIndices queueFamilies = FindQueueFamilies(device);
 		if (!queueFamilies.IsComplete()) {
-			SendDebugMessage(DebugSeverity::Info, DebugMessageType::General,
+			SendDebugMessage(DebugSeverity::Info,
+				DebugMessageType::General,
 				"Skipping Vulkan device: Required graphics and presentation queues are unavailable.");
 			return 0;
 		}
@@ -607,270 +642,258 @@ namespace RealRHI {
 		return score;
 	}
 
-    bool VulkanDevice::PickPhysicalDevice() {
-        uint32_t deviceCount = 0;
-        vkEnumeratePhysicalDevices(m_Instance, &deviceCount, nullptr);
+	bool VulkanDevice::PickPhysicalDevice() {
+		uint32_t deviceCount = 0;
+		vkEnumeratePhysicalDevices(m_Instance, &deviceCount, nullptr);
 
-        if (deviceCount == 0) {
-            return false;
-        }
+		if (deviceCount == 0) {
+			return false;
+		}
 
-        std::vector<VkPhysicalDevice> devices(deviceCount);
-        vkEnumeratePhysicalDevices(m_Instance, &deviceCount, devices.data());
+		std::vector<VkPhysicalDevice> devices(deviceCount);
+		vkEnumeratePhysicalDevices(m_Instance, &deviceCount, devices.data());
 
-        VkPhysicalDevice bestDevice = VK_NULL_HANDLE;
-        int bestScore = 0;
+		VkPhysicalDevice bestDevice = VK_NULL_HANDLE;
+		int bestScore = 0;
 
-        for (const auto& device : devices) {
-            int score = RatePhysicalDevice(device);
+		for (const auto& device : devices) {
+			int score = RatePhysicalDevice(device);
 
-            VkPhysicalDeviceProperties props;
-            vkGetPhysicalDeviceProperties(device, &props);
+			VkPhysicalDeviceProperties props;
+			vkGetPhysicalDeviceProperties(device, &props);
 
-            std::string foundDevice = "Found device: " + std::string(props.deviceName);
+			std::string foundDevice = "Found device: " + std::string(props.deviceName);
 			SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, foundDevice.c_str());
 
-            if (score > bestScore) {
-                bestScore = score;
-                bestDevice = device;
-            }
-        }
+			if (score > bestScore) {
+				bestScore = score;
+				bestDevice = device;
+			}
+		}
 
-        if (bestDevice == VK_NULL_HANDLE) {
-            return false;
-        }
+		if (bestDevice == VK_NULL_HANDLE) {
+			return false;
+		}
 
-        m_PhysicalDevice = bestDevice;
+		m_PhysicalDevice = bestDevice;
 
-        VkPhysicalDeviceProperties props;
-        vkGetPhysicalDeviceProperties(m_PhysicalDevice, &props);
+		VkPhysicalDeviceProperties props;
+		vkGetPhysicalDeviceProperties(m_PhysicalDevice, &props);
 		std::string selectedDevice = "Selected device: " + std::string(props.deviceName);
 		SendDebugMessage(DebugSeverity::Info, DebugMessageType::General, selectedDevice.c_str());
 
-        return true;
-    }
+		return true;
+	}
 
-    bool VulkanDevice::CreateLogicalDevice() {
-        QueueFamilyIndices indices = FindQueueFamilies(m_PhysicalDevice);
+	bool VulkanDevice::CreateLogicalDevice() {
+		QueueFamilyIndices indices = FindQueueFamilies(m_PhysicalDevice);
 
-        m_GraphicsQueueFamily = indices.graphicsFamily.value();
-        m_PresentQueueFamily = indices.presentFamily.value();
-        m_ComputeQueueFamily = indices.computeFamily.value_or(m_GraphicsQueueFamily);
-        m_TransferQueueFamily = indices.transferFamily.value_or(m_ComputeQueueFamily);
+		m_GraphicsQueueFamily = indices.graphicsFamily.value();
+		m_PresentQueueFamily = indices.presentFamily.value();
+		m_ComputeQueueFamily = indices.computeFamily.value_or(m_GraphicsQueueFamily);
+		m_TransferQueueFamily = indices.transferFamily.value_or(m_ComputeQueueFamily);
 
-        std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
-        std::set<uint32_t> uniqueQueueFamilies = {
-            m_GraphicsQueueFamily,
-            m_PresentQueueFamily,
-            m_ComputeQueueFamily,
-            m_TransferQueueFamily
-        };
+		std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+		std::set<uint32_t> uniqueQueueFamilies = {
+			m_GraphicsQueueFamily, m_PresentQueueFamily, m_ComputeQueueFamily, m_TransferQueueFamily};
 
-        float queuePriority = 1.0f;
-        for (uint32_t queueFamily : uniqueQueueFamilies) {
-            VkDeviceQueueCreateInfo queueCreateInfo{
-                .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-                .queueFamilyIndex = queueFamily,
-                .queueCount = 1,
-                .pQueuePriorities = &queuePriority
-            };
+		float queuePriority = 1.0f;
+		for (uint32_t queueFamily : uniqueQueueFamilies) {
+			VkDeviceQueueCreateInfo queueCreateInfo{
+				.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+				.queueFamilyIndex = queueFamily,
+				.queueCount = 1,
+				.pQueuePriorities = &queuePriority,
+			};
 
-            queueCreateInfos.push_back(queueCreateInfo);
-        }
+			queueCreateInfos.push_back(queueCreateInfo);
+		}
 
-        VkPhysicalDeviceDescriptorHeapFeaturesEXT heapFeatures{
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_FEATURES_EXT,
+		VkPhysicalDeviceDescriptorHeapFeaturesEXT heapFeatures{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_FEATURES_EXT,
 			.descriptorHeap = VK_TRUE,
-        };
-
-        VkPhysicalDeviceMaintenance5FeaturesKHR maintenance5{
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES_KHR,
-            .pNext = &heapFeatures,
-            .maintenance5 = VK_TRUE,
-        };
-
-        VkPhysicalDeviceShaderUntypedPointersFeaturesKHR untypedPtrFeatures{
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_UNTYPED_POINTERS_FEATURES_KHR,
-            .pNext = &maintenance5,
-            .shaderUntypedPointers = VK_TRUE,
 		};
-        
-        VkPhysicalDeviceVulkan13Features enabledVk13Features {
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-            .pNext = &untypedPtrFeatures,
-            .synchronization2 = VK_TRUE,
-            .dynamicRendering = VK_TRUE,
-        };
+
+		VkPhysicalDeviceMaintenance5FeaturesKHR maintenance5{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES_KHR,
+			.pNext = &heapFeatures,
+			.maintenance5 = VK_TRUE,
+		};
+
+		VkPhysicalDeviceShaderUntypedPointersFeaturesKHR untypedPtrFeatures{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_UNTYPED_POINTERS_FEATURES_KHR,
+			.pNext = &maintenance5,
+			.shaderUntypedPointers = VK_TRUE,
+		};
+
+		VkPhysicalDeviceVulkan13Features enabledVk13Features{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+			.pNext = &untypedPtrFeatures,
+			.synchronization2 = VK_TRUE,
+			.dynamicRendering = VK_TRUE,
+		};
 		VkPhysicalDeviceVulkan12Features enabledVk12Features{
 			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
 			.pNext = &enabledVk13Features,
-            .timelineSemaphore = VK_TRUE,
-            .bufferDeviceAddress = VK_TRUE,
+			.timelineSemaphore = VK_TRUE,
+			.bufferDeviceAddress = VK_TRUE,
 		};
 
-        VkPhysicalDeviceFeatures supportedFeatures{};
-        vkGetPhysicalDeviceFeatures(m_PhysicalDevice, &supportedFeatures);
-        m_SupportsWireframe = supportedFeatures.fillModeNonSolid == VK_TRUE;
-        
-        VkPhysicalDeviceFeatures deviceFeatures{
-            .fillModeNonSolid = supportedFeatures.fillModeNonSolid
-        };
+		VkPhysicalDeviceFeatures supportedFeatures{};
+		vkGetPhysicalDeviceFeatures(m_PhysicalDevice, &supportedFeatures);
+		m_SupportsWireframe = supportedFeatures.fillModeNonSolid == VK_TRUE;
 
-        VkDeviceCreateInfo createInfo{
-            .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-            .pNext = &enabledVk12Features,
-            .queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size()),
-            .pQueueCreateInfos = queueCreateInfos.data(),
-            .enabledExtensionCount = static_cast<uint32_t>(s_DeviceExtensions.size()),
-            .ppEnabledExtensionNames = s_DeviceExtensions.data(),
-            .pEnabledFeatures = &deviceFeatures,
-        };
-        
+		VkPhysicalDeviceFeatures deviceFeatures{.fillModeNonSolid = supportedFeatures.fillModeNonSolid};
 
-        if (vkCreateDevice(m_PhysicalDevice, &createInfo, nullptr, &m_Device) != VK_SUCCESS) {
-            return false;
-        }
+		VkDeviceCreateInfo createInfo{
+			.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+			.pNext = &enabledVk12Features,
+			.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size()),
+			.pQueueCreateInfos = queueCreateInfos.data(),
+			.enabledExtensionCount = static_cast<uint32_t>(s_DeviceExtensions.size()),
+			.ppEnabledExtensionNames = s_DeviceExtensions.data(),
+			.pEnabledFeatures = &deviceFeatures,
+		};
 
-        volkLoadDevice(m_Device);
-        // Queues are created once in Init(), after logical device creation.
-        return true;
-    }
+		if (vkCreateDevice(m_PhysicalDevice, &createInfo, nullptr, &m_Device) != VK_SUCCESS) {
+			return false;
+		}
 
-    QueueFamilyIndices VulkanDevice::FindQueueFamilies(VkPhysicalDevice device) {
-        QueueFamilyIndices indices;
+		volkLoadDevice(m_Device);
+		return true;
+	}
 
-        uint32_t count = 0;
-        vkGetPhysicalDeviceQueueFamilyProperties(device, &count, nullptr);
-        std::vector<VkQueueFamilyProperties> families(count);
-        vkGetPhysicalDeviceQueueFamilyProperties(device, &count, families.data());
+	QueueFamilyIndices VulkanDevice::FindQueueFamilies(VkPhysicalDevice device) {
+		QueueFamilyIndices indices;
 
-        for (uint32_t i = 0; i < count; ++i) {
-            const VkQueueFlags flags = families[i].queueFlags;
-            if (families[i].queueCount == 0) {
-                continue;
-            }
-            if (!indices.graphicsFamily && (flags & VK_QUEUE_GRAPHICS_BIT)) {
-                indices.graphicsFamily = i;
-            }
-            if (!indices.presentFamily && SDL_Vulkan_GetPresentationSupport(m_Instance, device, i)) {
-                indices.presentFamily = i;
-            }
-            if ((flags & VK_QUEUE_COMPUTE_BIT) &&
-                (!indices.computeFamily || !(flags & VK_QUEUE_GRAPHICS_BIT))) {
-                indices.computeFamily = i;
-            }
-            if ((flags & VK_QUEUE_TRANSFER_BIT) &&
-                (!indices.transferFamily || !(flags & (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)))) {
-                indices.transferFamily = i;
-            }
-        }
+		uint32_t count = 0;
+		vkGetPhysicalDeviceQueueFamilyProperties(device, &count, nullptr);
+		std::vector<VkQueueFamilyProperties> families(count);
+		vkGetPhysicalDeviceQueueFamilyProperties(device, &count, families.data());
 
-        if (!indices.presentFamily && indices.graphicsFamily) {
-            indices.presentFamily = indices.graphicsFamily;
-        }
-        if (!indices.computeFamily) {
-            indices.computeFamily = indices.graphicsFamily;
-        }
+		for (uint32_t i = 0; i < count; ++i) {
+			const VkQueueFlags flags = families[i].queueFlags;
+			if (families[i].queueCount == 0) {
+				continue;
+			}
+			if (!indices.graphicsFamily && (flags & VK_QUEUE_GRAPHICS_BIT)) {
+				indices.graphicsFamily = i;
+			}
+			if (!indices.presentFamily && SDL_Vulkan_GetPresentationSupport(m_Instance, device, i)) {
+				indices.presentFamily = i;
+			}
+			if ((flags & VK_QUEUE_COMPUTE_BIT) && (!indices.computeFamily || !(flags & VK_QUEUE_GRAPHICS_BIT))) {
+				indices.computeFamily = i;
+			}
+			if ((flags & VK_QUEUE_TRANSFER_BIT) &&
+				(!indices.transferFamily || !(flags & (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)))) {
+				indices.transferFamily = i;
+			}
+		}
+
+		if (!indices.presentFamily && indices.graphicsFamily) {
+			indices.presentFamily = indices.graphicsFamily;
+		}
+		if (!indices.computeFamily) {
+			indices.computeFamily = indices.graphicsFamily;
+		}
 
 		// If no dedicated transfer queue is found, use the compute queue if available,
 		// otherwise fallback to graphics.
-        if (!indices.transferFamily) {
-            indices.transferFamily = indices.computeFamily;
-        }
+		if (!indices.transferFamily) {
+			indices.transferFamily = indices.computeFamily;
+		}
 
-        return indices;
-    }
+		return indices;
+	}
 
-    bool VulkanDevice::CreateCommandQueues() {
-        if (!m_Queues.empty()) {
-            SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
-                "Command queues are already initialized.");
-            return false;
-        }
+	bool VulkanDevice::CreateCommandQueues() {
+		if (!m_Queues.empty()) {
+			SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Command queues are already initialized.");
+			return false;
+		}
 
-        const uint32_t families[] = {
-            m_GraphicsQueueFamily, m_PresentQueueFamily,
-            m_ComputeQueueFamily, m_TransferQueueFamily
-        };
-        for (uint32_t family : families) {
-            const QueueId id{ family, 0 };
-            if (m_Queues.contains(id)) {
-                continue;
-            }
-            VkQueue queue = VK_NULL_HANDLE;
-            vkGetDeviceQueue(m_Device, family, 0, &queue);
-            if (queue == VK_NULL_HANDLE) {
-                return false;
-            }
+		const uint32_t families[] = {
+			m_GraphicsQueueFamily, m_PresentQueueFamily, m_ComputeQueueFamily, m_TransferQueueFamily};
+		for (uint32_t family : families) {
+			const QueueId id{family, 0};
+			if (m_Queues.contains(id)) {
+				continue;
+			}
+			VkQueue queue = VK_NULL_HANDLE;
+			vkGetDeviceQueue(m_Device, family, 0, &queue);
+			if (queue == VK_NULL_HANDLE) {
+				return false;
+			}
 
-            std::unique_ptr<VulkanCommandQueue> commandQueue;
-            if (VulkanCommandQueue::Create(this, family, 0, queue, commandQueue) != Result::Success) {
-                return false;
-            }
+			std::unique_ptr<VulkanCommandQueue> commandQueue;
+			if (VulkanCommandQueue::Create(this, family, 0, queue, commandQueue) != Result::Success) {
+				return false;
+			}
 
-            m_Queues.emplace(id, commandQueue.get());
-            commandQueue.release();
-        }
+			m_Queues.emplace(id, commandQueue.get());
+			commandQueue.release();
+		}
 
-        m_GraphicsCommandQueue = m_Queues.at(QueueId{ m_GraphicsQueueFamily, 0 });
-        m_GraphicsQueue = m_GraphicsCommandQueue->GetQueue();
-        m_PresentQueue = m_Queues.at(QueueId{ m_PresentQueueFamily, 0 })->GetQueue();
+		m_GraphicsCommandQueue = m_Queues.at(QueueId{m_GraphicsQueueFamily, 0});
+		m_GraphicsQueue = m_GraphicsCommandQueue->GetQueue();
+		m_PresentQueue = m_Queues.at(QueueId{m_PresentQueueFamily, 0})->GetQueue();
 
-        return true;
-    }
+		return true;
+	}
 
-    bool VulkanDevice::CreateAllocator() {
-        VmaVulkanFunctions vkFunctions{ 
-            .vkGetInstanceProcAddr = vkGetInstanceProcAddr, 
-            .vkGetDeviceProcAddr = vkGetDeviceProcAddr, 
-            .vkCreateImage = vkCreateImage 
-        };
-        VmaAllocatorCreateInfo allocatorCI{ 
-            .flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
-            .physicalDevice = m_PhysicalDevice, 
-            .device = m_Device, 
-            .pVulkanFunctions = &vkFunctions, 
-            .instance = m_Instance
-        };
+	bool VulkanDevice::CreateAllocator() {
+		VmaVulkanFunctions vkFunctions{
+			.vkGetInstanceProcAddr = vkGetInstanceProcAddr,
+			.vkGetDeviceProcAddr = vkGetDeviceProcAddr,
+			.vkCreateImage = vkCreateImage,
+		};
+		VmaAllocatorCreateInfo allocatorCI{
+			.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
+			.physicalDevice = m_PhysicalDevice,
+			.device = m_Device,
+			.pVulkanFunctions = &vkFunctions,
+			.instance = m_Instance,
+		};
 
-        return vmaCreateAllocator(&allocatorCI, &m_Allocator) == VK_SUCCESS;
-    }
+		return vmaCreateAllocator(&allocatorCI, &m_Allocator) == VK_SUCCESS;
+	}
 
-    VKAPI_ATTR VkBool32 VulkanDevice::VulkanDebugCallback(
-        VkDebugUtilsMessageSeverityFlagBitsEXT severity, 
-        VkDebugUtilsMessageTypeFlagsEXT type, 
-        const VkDebugUtilsMessengerCallbackDataEXT* callbackData, 
-        void* userData) {
+	VKAPI_ATTR VkBool32 VulkanDevice::VulkanDebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+		VkDebugUtilsMessageTypeFlagsEXT type,
+		const VkDebugUtilsMessengerCallbackDataEXT* callbackData,
+		void* userData) {
 		DebugCallback debugCallback = reinterpret_cast<DebugCallback>(userData);
 
-        DebugMessage message;
+		DebugMessage message;
 		switch (severity) {
-            case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
-                message.severity = DebugSeverity::Info;
-                break;
-            case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
-                message.severity = DebugSeverity::Warning;
-                break;
-            case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
-                message.severity = DebugSeverity::Error;
-                break;
-            default:
-                message.severity = DebugSeverity::Info;
-        }
+			case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
+				message.severity = DebugSeverity::Info;
+				break;
+			case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
+				message.severity = DebugSeverity::Warning;
+				break;
+			case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
+				message.severity = DebugSeverity::Error;
+				break;
+			default:
+				message.severity = DebugSeverity::Info;
+		}
 
-        if ((type & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT) != 0) {
-            message.type = DebugMessageType::Validation;
-        }
-        else if ((type & VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT) != 0) {
-            message.type = DebugMessageType::Performance;
-        }
-        else {
-            message.type = DebugMessageType::General;
-        }
+		if ((type & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT) != 0) {
+			message.type = DebugMessageType::Validation;
+		}
+		else if ((type & VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT) != 0) {
+			message.type = DebugMessageType::Performance;
+		}
+		else {
+			message.type = DebugMessageType::General;
+		}
 
-        message.message = callbackData->pMessage;
-        debugCallback(message);
+		message.message = callbackData->pMessage;
+		debugCallback(message);
 
-        return VK_FALSE;
-    }
+		return VK_FALSE;
+	}
 }

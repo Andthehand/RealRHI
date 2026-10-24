@@ -10,9 +10,12 @@ namespace RealRHI {
 		}
 	}
 
-	Result VulkanTextureView::Init(const VulkanDevice* device, const VulkanTexture* texture, const TextureViewDesc& desc, bool createNativeImageView) {
+	Result VulkanTextureView::Init(const VulkanDevice* device,
+		const VulkanTexture* texture,
+		const TextureViewDesc& desc,
+		bool createNativeImageView) {
 		m_Device = device;
-        m_Texture = texture;
+		m_Texture = texture;
 		m_Image = texture->GetImage();
 		m_Format = texture->GetFormat();
 		m_ImageView = VK_NULL_HANDLE;
@@ -23,7 +26,8 @@ namespace RealRHI {
 		}
 
 		if (vkCreateImageView(m_Device->GetDevice(), &m_ImageViewCreateInfo, nullptr, &m_ImageView) != VK_SUCCESS) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan texture view.");
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan texture view.");
 			return Result::Failed;
 		}
 

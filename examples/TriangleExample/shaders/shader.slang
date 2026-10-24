@@ -1,24 +1,24 @@
 struct VSInput {
-    float2 Pos;
-    float3 Color;
+	float2 pos;
+	float3 color;
 };
 
 struct VSOutput {
-    float4 Pos   : SV_Position;
-    float3 Color;
+	float4 pos : SV_Position;
+	float3 color;
 };
 
 [shader("vertex")]
 VSOutput main(VSInput input) {
-    VSOutput output;
+	VSOutput output;
 
-    output.Pos = float4(input.Pos, 0.0, 1.0);
-    output.Color = input.Color;
+	output.pos = float4(input.pos, 0.0, 1.0);
+	output.color = input.color;
 
-    return output;
+	return output;
 }
 
 [shader("fragment")]
 float4 main(VSOutput input) : SV_Target {
-    return float4(input.Color, 1.0);
+	return float4(input.color, 1.0);
 }

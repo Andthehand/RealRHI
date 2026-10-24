@@ -1,18 +1,21 @@
 #pragma once
+#include "DeferredDeletionQueue.h"
 #include "Device.h"
 #include "Queue.h"
-#include "DeferredDeletionQueue.h"
 
 #include <volk.h>
+
 #include <vma/vk_mem_alloc.h>
 
 #include <array>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <unordered_map>
+#include <vector>
 
-#undef CreateWindow // Windows.h defines a macro for CreateWindow, which conflicts with our Device::CreateWindow method
+#undef CreateWindow  // Windows.h defines a macro for CreateWindow, which conflicts with our Device::CreateWindow method
 #undef MemoryBarrier // Windows.h also defines MemoryBarrier, which conflicts with the RHI barrier type.
 
 namespace RealRHI {
@@ -20,15 +23,12 @@ namespace RealRHI {
 	class VulkanCommandQueue;
 
 	struct QueueFamilyIndices {
-		// Optional values because they could be empty during device discovery
 		std::optional<uint32_t> graphicsFamily;
 		std::optional<uint32_t> presentFamily;
 		std::optional<uint32_t> computeFamily;
 		std::optional<uint32_t> transferFamily;
 
-		bool IsComplete() const {
-			return graphicsFamily.has_value() && presentFamily.has_value();
-		}
+		bool IsComplete() const { return graphicsFamily.has_value() && presentFamily.has_value(); }
 	};
 
 	class VulkanDevice : public Device {
@@ -38,7 +38,6 @@ namespace RealRHI {
 
 		Result Init(const DeviceDesc& desc);
 
-		// Getters for Vulkan objects, used internally by other Vulkan classes
 		VkInstance GetInstance() const { return m_Instance; }
 		VkDevice GetDevice() const { return m_Device; }
 		VkPhysicalDevice GetPhysicalDevice() const { return m_PhysicalDevice; }
@@ -51,15 +50,15 @@ namespace RealRHI {
 		VulkanCommandQueue* GetCommandQueue(const QueueId& queueId) const;
 		std::recursive_mutex& GetStateTrackingMutex() const { return m_StateTrackingMutex; }
 
-		// Allocator
 		VmaAllocator GetAllocator() const { return m_Allocator; }
 		VulkanDescriptorManager* GetDescriptorManager() const { return m_DescriptorManager.get(); }
 
 		std::filesystem::path GetShaderDirectory() const override { return m_ShaderDirectory; }
 		bool IsDebugEnabled() const override { return m_EnableDebug; }
-		void SendDebugMessage(DebugSeverity severity, DebugMessageType type, const char* message) const { m_DebugCallback({ .severity = severity, .type = type, .message = message }); }
+		void SendDebugMessage(DebugSeverity severity, DebugMessageType type, const char* message) const {
+			m_DebugCallback({.severity = severity, .type = type, .message = message});
+		}
 
-		// Device Creations
 		Result CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) const override;
 		Result CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) const override;
 		Result CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) const override;
@@ -68,22 +67,23 @@ namespace RealRHI {
 		Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) const override;
 		Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const override;
 		Result CreateCommandAllocator(QueueType type, Ref<CommandAllocator>& outAllocator) const override;
-        Result CreateCommandList(CommandAllocator* allocator, Ref<CommandList>& outCommandList) const override;
+		Result CreateCommandList(CommandAllocator* allocator, Ref<CommandList>& outCommandList) const override;
 
-		// TODO: Temp?
 		void BindDescriptorHeaps(VkCommandBuffer commandBuffer) const;
 
-		// Command submission and synchronization
-		Result Submit(CommandList* cmd, Swapchain* swapchain, const FrameContext& frame, SubmissionToken* outToken = nullptr) override;
+		Result Submit(CommandList* cmd,
+			Swapchain* swapchain,
+			const FrameContext& frame,
+			SubmissionToken* outToken = nullptr) override;
 		Result ImmediateSubmit(CommandList* cmd) const override;
 		void WaitIdle() override;
-        void DeferDeletion(std::vector<SubmissionToken> dependencies, std::function<void()> destroy) const override;
-        void ProcessDeferredDeletions() override;
+		void DeferDeletion(std::vector<SubmissionToken> dependencies, std::function<void()> destroy) const override;
+		void ProcessDeferredDeletions() override;
 
-		// Properties
 		VkPhysicalDeviceDescriptorHeapPropertiesEXT GetDescriptorHeapProperties() const;
 		uint32_t GetMaxPushDataSize() const { return m_MaxPushDataSize; }
 		bool SupportsWireframe() const { return m_SupportsWireframe; }
+
 	private:
 		bool CreateInstance(const char* appName, bool enableValidationLayer);
 		bool SetupDebugMessenger();
@@ -96,47 +96,41 @@ namespace RealRHI {
 		bool CreateAllocator();
 		bool CreateCommandQueues();
 
-		static VKAPI_ATTR VkBool32 VulkanDebugCallback(
-			VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+		static VKAPI_ATTR VkBool32 VulkanDebugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
 			VkDebugUtilsMessageTypeFlagsEXT type,
 			const VkDebugUtilsMessengerCallbackDataEXT* callbackData,
 			void* userData);
+
 	private:
-			// Vulkan instance and devices - explicitly initialized in Init()
-			VkInstance m_Instance = VK_NULL_HANDLE;
-			VkDebugUtilsMessengerEXT m_DebugMessenger = VK_NULL_HANDLE;
-			VkPhysicalDevice m_PhysicalDevice = VK_NULL_HANDLE;
-			VkDevice m_Device = VK_NULL_HANDLE;
-			uint32_t m_GraphicsQueueFamily = 0;
-			uint32_t m_PresentQueueFamily = 0;
-			uint32_t m_ComputeQueueFamily = 0;
-			uint32_t m_TransferQueueFamily = 0;
-			VkQueue m_GraphicsQueue = VK_NULL_HANDLE;
-			VkQueue m_PresentQueue = VK_NULL_HANDLE;
-			VulkanCommandQueue* m_GraphicsCommandQueue = nullptr;
-			std::unordered_map<QueueId, VulkanCommandQueue*> m_Queues;
-            mutable DeferredDeletionQueue m_DeferredDeletions;
-			mutable std::recursive_mutex m_StateTrackingMutex;
+		VkInstance m_Instance = VK_NULL_HANDLE;
+		VkDebugUtilsMessengerEXT m_DebugMessenger = VK_NULL_HANDLE;
+		VkPhysicalDevice m_PhysicalDevice = VK_NULL_HANDLE;
+		VkDevice m_Device = VK_NULL_HANDLE;
+		uint32_t m_GraphicsQueueFamily = 0;
+		uint32_t m_PresentQueueFamily = 0;
+		uint32_t m_ComputeQueueFamily = 0;
+		uint32_t m_TransferQueueFamily = 0;
+		VkQueue m_GraphicsQueue = VK_NULL_HANDLE;
+		VkQueue m_PresentQueue = VK_NULL_HANDLE;
+		VulkanCommandQueue* m_GraphicsCommandQueue = nullptr;
+		std::unordered_map<QueueId, VulkanCommandQueue*> m_Queues;
+		mutable DeferredDeletionQueue m_DeferredDeletions;
+		mutable std::recursive_mutex m_StateTrackingMutex;
 
-			// Pools
-			std::unique_ptr<VulkanDescriptorManager> m_DescriptorManager;
+		std::unique_ptr<VulkanDescriptorManager> m_DescriptorManager;
 
-			// Allocator
-			VmaAllocator m_Allocator = VK_NULL_HANDLE;
-			uint32_t m_MaxPushDataSize = 0;
-			bool m_SupportsWireframe = false;
+		VmaAllocator m_Allocator = VK_NULL_HANDLE;
+		uint32_t m_MaxPushDataSize = 0;
+		bool m_SupportsWireframe = false;
 
-			// User Defined settings
-			std::filesystem::path m_ShaderDirectory;
-			DebugCallback m_DebugCallback;
-			bool m_EnableDebug;
+		std::filesystem::path m_ShaderDirectory;
+		DebugCallback m_DebugCallback;
+		bool m_EnableDebug;
 
-			static constexpr std::array<const char*, 5> s_DeviceExtensions{
-				VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
-				VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-				VK_KHR_MAINTENANCE_5_EXTENSION_NAME,
-				VK_KHR_SHADER_UNTYPED_POINTERS_EXTENSION_NAME,
-				VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME
-			};
+		static constexpr std::array<const char*, 5> s_DeviceExtensions{VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+			VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+			VK_KHR_MAINTENANCE_5_EXTENSION_NAME,
+			VK_KHR_SHADER_UNTYPED_POINTERS_EXTENSION_NAME,
+			VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME};
 	};
 }

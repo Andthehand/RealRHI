@@ -1,12 +1,13 @@
 #include "VulkanDescriptorHeaps.h"
 
 #include <volk.h>
+
 #include <algorithm>
 #include <limits>
 
 namespace RealRHI {
 	VulkanDescriptorHeaps::VulkanDescriptorHeaps(const VulkanDevice* device)
-		: m_Device(device) {}
+		: m_Device(device) { }
 
 	Result RealRHI::VulkanDescriptorHeaps::Init(VkPhysicalDeviceDescriptorHeapPropertiesEXT heapProperties) {
 		m_HeapProperties = heapProperties;
@@ -17,69 +18,63 @@ namespace RealRHI {
 	void VulkanDescriptorHeaps::BindDescriptorHeaps(VkCommandBuffer commandBuffer) const {
 		VkBindHeapInfoEXT samplerBind{
 			.sType = VK_STRUCTURE_TYPE_BIND_HEAP_INFO_EXT,
-			.heapRange = { m_DescriptorHeapSamplers.heapAddress, m_DescriptorHeapSamplers.heapSize },
+			.heapRange = {m_DescriptorHeapSamplers.heapAddress, m_DescriptorHeapSamplers.heapSize},
 			.reservedRangeOffset = m_DescriptorHeapSamplers.usableSize,
-			.reservedRangeSize = m_DescriptorHeapSamplers.heapSize - m_DescriptorHeapSamplers.usableSize
+			.reservedRangeSize = m_DescriptorHeapSamplers.heapSize - m_DescriptorHeapSamplers.usableSize,
 		};
 		vkCmdBindSamplerHeapEXT(commandBuffer, &samplerBind);
 
 		VkBindHeapInfoEXT resourceBind{
 			.sType = VK_STRUCTURE_TYPE_BIND_HEAP_INFO_EXT,
-			.heapRange = { m_DescriptorHeapResources.heapAddress, m_DescriptorHeapResources.heapSize },
+			.heapRange = {m_DescriptorHeapResources.heapAddress, m_DescriptorHeapResources.heapSize},
 			.reservedRangeOffset = m_DescriptorHeapResources.usableSize,
-			.reservedRangeSize = m_DescriptorHeapResources.heapSize - m_DescriptorHeapResources.usableSize
+			.reservedRangeSize = m_DescriptorHeapResources.heapSize - m_DescriptorHeapResources.usableSize,
 		};
 		vkCmdBindResourceHeapEXT(commandBuffer, &resourceBind);
 	}
 
 	Result VulkanDescriptorHeaps::CreateDescriptorHeaps() {
-		// Create the resource descriptor heap
-		VkDeviceSize resourceDescriptorSize = std::max(m_HeapProperties.bufferDescriptorSize, m_HeapProperties.imageDescriptorSize);
-		Result resourceHeapResult = CreateDescriptorHeap(
-			m_HeapProperties.maxResourceHeapSize,
-			MaxResourceDescriptorHeapSize, 
-			resourceDescriptorSize, 
-			m_HeapProperties.resourceHeapAlignment, 
+		VkDeviceSize resourceDescriptorSize =
+			std::max(m_HeapProperties.bufferDescriptorSize, m_HeapProperties.imageDescriptorSize);
+		Result resourceHeapResult = CreateDescriptorHeap(m_HeapProperties.maxResourceHeapSize,
+			s_MaxResourceDescriptorCount,
+			resourceDescriptorSize,
+			m_HeapProperties.resourceHeapAlignment,
 			m_HeapProperties.minResourceHeapReservedRange,
 			std::max(m_HeapProperties.bufferDescriptorAlignment, m_HeapProperties.imageDescriptorAlignment),
-			m_DescriptorHeapResources
-		);
+			m_DescriptorHeapResources);
 
 		if (resourceHeapResult != Result::Success) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create resource descriptor heap.");
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Failed to create resource descriptor heap.");
 			return resourceHeapResult;
 		}
 
-		// Create the sampler descriptor heap
-		Result samplerHeapResult = CreateDescriptorHeap(
-			m_HeapProperties.maxSamplerHeapSize,
-			MaxSamplerDescriptorHeapSize,
+		Result samplerHeapResult = CreateDescriptorHeap(m_HeapProperties.maxSamplerHeapSize,
+			s_MaxSamplerDescriptorCount,
 			m_HeapProperties.samplerDescriptorSize,
 			m_HeapProperties.samplerHeapAlignment,
 			m_HeapProperties.minSamplerHeapReservedRange,
 			m_HeapProperties.samplerDescriptorAlignment,
-			m_DescriptorHeapSamplers
-		);
+			m_DescriptorHeapSamplers);
 
 		if (samplerHeapResult != Result::Success) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create sampler descriptor heap.");
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Failed to create sampler descriptor heap.");
 			return samplerHeapResult;
 		}
 
 		return Result::Success;
 	}
 
-	Result VulkanDescriptorHeaps::CreateDescriptorHeap(
-		VkDeviceSize hardwareMaxHeapSize,
+	Result VulkanDescriptorHeaps::CreateDescriptorHeap(VkDeviceSize hardwareMaxHeapSize,
 		VkDeviceSize preferredDescriptorCount,
 		VkDeviceSize descriptorSize,
 		VkDeviceSize heapAlignment,
 		VkDeviceSize reservedSize,
 		VkDeviceSize descriptorAlignment,
 		DescriptorHeap& heap) {
-		if (descriptorSize == 0 ||
-			heapAlignment == 0 ||
-			descriptorAlignment == 0 ||
+		if (descriptorSize == 0 || heapAlignment == 0 || descriptorAlignment == 0 ||
 			reservedSize >= hardwareMaxHeapSize ||
 			preferredDescriptorCount > (std::numeric_limits<VkDeviceSize>::max() - reservedSize) / descriptorSize) {
 			return Result::InvalidParameter;
@@ -88,7 +83,7 @@ namespace RealRHI {
 		const VkDeviceSize requestedSize = preferredDescriptorCount * descriptorSize + reservedSize;
 		VkDeviceSize heapSize = std::min(requestedSize, hardwareMaxHeapSize);
 
-		// Vulkan requires that the heap size be aligned to the heap alignment, so we need to round up to the nearest multiple of heapAlignment.
+		// Round up only when the result stays within the hardware limit.
 		const VkDeviceSize padding = (heapAlignment - heapSize % heapAlignment) % heapAlignment;
 		if (padding <= hardwareMaxHeapSize - heapSize) {
 			heapSize += padding;
@@ -109,7 +104,7 @@ namespace RealRHI {
 		BufferDesc bufferDesc = {
 			.size = heapSize,
 			.usage = BufferUsage::Heap | BufferUsage::Addressable,
-			.memoryUsage = MemoryUsage::CPUToGPU
+			.memoryUsage = MemoryUsage::CPUToGPU,
 		};
 
 		Ref<VulkanBuffer> buffer;

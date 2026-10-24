@@ -24,6 +24,10 @@ This library is written to be easy for another engineer to read and reason about
 - Write for a human reader first. Do not optimize for cleverness if it makes the code harder to understand.
 - Follow the current style of explicit initialization, direct control flow, and clear ownership boundaries.
 - Match the existing tab-based indentation and brace placement used in the library's C++ headers and Vulkan implementation files.
+- Use the root `.clang-format` configuration for C++ formatting so these conventions stay consistent.
+- In headers, keep function qualifiers, the return type, and the function name on the same line. Only wrap the parameter list; never put the function name on a separate line from its return type.
+- In `.cpp` constructor definitions, always start the member initializer list on the next line, with the colon at the start of that indented line, even when the list would fit on the signature line.
+- If a constructor body is empty, keep `{ }` on the same line as the final member initializer.
 - Keep spacing consistent and readable throughout the codebase: use whitespace deliberately around operators, after commas, and add clear newlines between logical blocks so the intent remains obvious at a glance.
 - Always use braces for `if` statements, even when there is only one statement after them, to keep the control flow explicit and easy to audit.
 - Prefer explicit `if`/`else if`/`else` statements over ternary expressions. Avoid nested or chained ternaries; use a ternary only when a simple choice is clearly easier to read.

@@ -1,0 +1,50 @@
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: c++20
+UseTab: ForContinuationAndIndentation
+IndentWidth: 4
+TabWidth: 4
+ContinuationIndentWidth: 4
+ColumnLimit: 120
+NamespaceIndentation: All
+AccessModifierOffset: -4
+IndentCaseLabels: true
+BreakBeforeBraces: Custom
+BraceWrapping:
+  BeforeElse: true
+  BeforeCatch: true
+AllowShortFunctionsOnASingleLine: Inline
+SpaceInEmptyBraces: Block
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortLambdasOnASingleLine: Empty
+AllowShortEnumsOnASingleLine: false
+BinPackParameters: OnePerLine
+AllowAllParametersOfDeclarationOnNextLine: false
+BinPackArguments: false
+BreakTemplateDeclarations: Yes
+BreakAfterReturnType: None
+PenaltyReturnTypeOnItsOwnLine: 1000000
+BreakConstructorInitializers: BeforeColon
+PackConstructorInitializers: NextLineOnly
+AlignOperands: DontAlign
+AlignAfterOpenBracket: false
+Cpp11BracedListStyle: FunctionCall
+InsertBraces: true
+PointerAlignment: Left
+ReferenceAlignment: Pointer
+DerivePointerAlignment: false
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^"'
+    Priority: 1
+  - Regex: '^<volk\.h>'
+    Priority: 2
+  - Regex: '^<(SDL3/|slang/|vma/)'
+    Priority: 3
+  - Regex: '.*'
+    Priority: 4
+SortIncludes: CaseSensitive
+FixNamespaceComments: false
+ReflowComments: false
+LineEnding: CRLF

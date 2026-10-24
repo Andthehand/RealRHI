@@ -24,19 +24,20 @@ namespace RealRHI {
 		DescriptorHeap& GetSamplerHeap() { return m_DescriptorHeapSamplers; }
 
 		void BindDescriptorHeaps(VkCommandBuffer commandBuffer) const;
+
 	private:
 		Result CreateDescriptorHeaps();
-		Result CreateDescriptorHeap(
-			VkDeviceSize hardwareMaxHeapSize,
+		Result CreateDescriptorHeap(VkDeviceSize hardwareMaxHeapSize,
 			VkDeviceSize preferredDescriptorCount,
 			VkDeviceSize descriptorSize,
 			VkDeviceSize heapAlignment,
 			VkDeviceSize reservedSize,
 			VkDeviceSize descriptorAlignment,
 			DescriptorHeap& heap);
+
 	private:
-		static constexpr uint32_t MaxResourceDescriptorHeapSize = 1024 * 1024; // 1 million descriptors, adjust as needed
-		static constexpr uint32_t MaxSamplerDescriptorHeapSize = 1024; // 1 thousand descriptors, adjust as needed
+		static constexpr uint32_t s_MaxResourceDescriptorCount = 1024 * 1024;
+		static constexpr uint32_t s_MaxSamplerDescriptorCount = 1024;
 
 		const VulkanDevice* m_Device = nullptr;
 

@@ -1,7 +1,7 @@
 #pragma once
-#include <cstdint>
-
 #include "RefCounted.h"
+
+#include <cstdint>
 
 namespace RealRHI {
 	class Window : public RefCounted {

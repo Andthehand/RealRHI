@@ -2,13 +2,15 @@
 #include "CommandList.h"
 #include "Texture.h"
 #include "TextureDesc.h"
-
 #include "VulkanDevice.h"
 #include "VulkanTextureView.h"
 
 #include <volk.h>
-#include <vector>
+
 #include <vma/vk_mem_alloc.h>
+
+#include <mutex>
+#include <vector>
 
 namespace RealRHI {
 	class VulkanTexture : public Texture {
@@ -23,13 +25,9 @@ namespace RealRHI {
 
 		Result UploadData(const void* data, uint32_t size);
 
-		TextureView* GetTextureView() override {
-			return &m_TextureView;
-		}
+		TextureView* GetTextureView() override { return &m_TextureView; }
 
-		const TextureView* GetTextureView() const override {
-			return &m_TextureView;
-		}
+		const TextureView* GetTextureView() const override { return &m_TextureView; }
 
 		uint32_t GetSampledImageDescriptorIndex() const override { return m_SampledImageDescriptorIndex; }
 		uint32_t GetStorageImageDescriptorIndex() const override { return m_StorageImageDescriptorIndex; }
@@ -42,7 +40,10 @@ namespace RealRHI {
 		VkImage GetImage() const { return m_Image; }
 		VkFormat GetFormat() const { return m_Format; }
 
-		static Result CreateFromSwapChain(const VulkanDevice* device, VkFormat format, VkImage image, Ref<VulkanTexture>& outTexture);
+		static Result CreateFromSwapChain(const VulkanDevice* device,
+			VkFormat format,
+			VkImage image,
+			Ref<VulkanTexture>& outTexture);
 		Result InitSwapChainTexture(VkFormat format, VkImage image);
 
 		VkSamplerCreateInfo GetSampler(); // TODO: Add sampler desc
@@ -68,15 +69,17 @@ namespace RealRHI {
 		VkFormat m_Format = VK_FORMAT_UNDEFINED;
 		bool m_IsExternal = false; // Whether the image is owned by us or external (e.g. swapchain)
 
-		VkExtent3D m_ImageExtent{ .width = 0, .height = 0, .depth = 1, };
+		VkExtent3D m_ImageExtent{
+			.width = 0,
+			.height = 0,
+			.depth = 1,
+		};
 		uint32_t m_MipLevels = 1;
 		uint32_t m_ArrayLayers = 1;
 		uint32_t m_SampledImageDescriptorIndex = UINT32_MAX;
 		uint32_t m_StorageImageDescriptorIndex = UINT32_MAX;
 		uint32_t m_SamplerDescriptorIndex = UINT32_MAX;
 
-		// This need to be at the end because of weird c++ rules
-		// https://stackoverflow.com/questions/6308915/member-fields-order-of-construction
 		VulkanTextureView m_TextureView;
 		VkSampler m_Sampler = VK_NULL_HANDLE;
 	};

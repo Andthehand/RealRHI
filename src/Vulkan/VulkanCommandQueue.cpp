@@ -3,22 +3,25 @@
 #include "VulkanCommandList.h"
 #include "VulkanDevice.h"
 
-#include <unordered_set>
-#include <unordered_map>
 #include <algorithm>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace RealRHI {
-	VulkanCommandQueue::VulkanCommandQueue(const VulkanDevice* device, uint32_t familyIndex, uint32_t queueIndex, VkQueue queue)
-		: m_Device(device), m_Queue(queue), m_FamilyIndex(familyIndex), m_QueueIndex(queueIndex) {}
+	VulkanCommandQueue::VulkanCommandQueue(const VulkanDevice* device,
+		uint32_t familyIndex,
+		uint32_t queueIndex,
+		VkQueue queue)
+		: m_Device(device), m_Queue(queue), m_FamilyIndex(familyIndex), m_QueueIndex(queueIndex) { }
 
-	Result VulkanCommandQueue::Create(
-		const VulkanDevice* device,
+	Result VulkanCommandQueue::Create(const VulkanDevice* device,
 		uint32_t familyIndex,
 		uint32_t queueIndex,
 		VkQueue queue,
 		std::unique_ptr<VulkanCommandQueue>& outQueue) {
-		std::unique_ptr<VulkanCommandQueue> commandQueue(new VulkanCommandQueue(device, familyIndex, queueIndex, queue));
+		std::unique_ptr<VulkanCommandQueue> commandQueue(
+			new VulkanCommandQueue(device, familyIndex, queueIndex, queue));
 		const Result result = commandQueue->Init();
 		if (result != Result::Success) {
 			return result;
@@ -41,7 +44,9 @@ namespace RealRHI {
 		};
 
 		if (vkCreateSemaphore(m_Device->GetDevice(), &createInfo, nullptr, &m_TimelineSemaphore) != VK_SUCCESS) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan timeline semaphore for command queue.");
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"Failed to create Vulkan timeline semaphore for command queue.");
 			return Result::Failed;
 		}
 
@@ -61,12 +66,12 @@ namespace RealRHI {
 	}
 
 	SubmissionToken VulkanCommandQueue::Submit(CommandList& cmd) {
-		CommandList* commandLists[] = { &cmd };
+		CommandList* commandLists[] = {&cmd};
 		return Submit(std::span<CommandList*>(commandLists, 1));
 	}
 
 	SubmissionToken VulkanCommandQueue::Submit(std::span<CommandList*> commandLists) {
-		return Submit(SubmitInfo{ .commandLists = commandLists, .waitFor = {} });
+		return Submit(SubmitInfo{.commandLists = commandLists, .waitFor = {}});
 	}
 
 	SubmissionToken VulkanCommandQueue::Submit(const SubmitInfo& submitInfo) {
@@ -86,17 +91,23 @@ namespace RealRHI {
 		for (CommandList* commandList : submitInfo.commandLists) {
 			auto* vkCommandList = static_cast<VulkanCommandList*>(commandList);
 			if (vkCommandList == nullptr || vkCommandList->GetQueueId() != GetQueueId()) {
-				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Command list was created for a different queue family or index.");
+				m_Device->SendDebugMessage(DebugSeverity::Error,
+					DebugMessageType::General,
+					"Command list was created for a different queue family or index.");
 				return {};
 			}
 
 			if (commandList->GetState() != CommandListState::Executable) {
-				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Cannot submit a command list that is not in the Executable state.");
+				m_Device->SendDebugMessage(DebugSeverity::Error,
+					DebugMessageType::General,
+					"Cannot submit a command list that is not in the Executable state.");
 				return {};
 			}
 
 			if (!duplicateListTracker.insert(commandList).second) {
-				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Duplicate command lists are not allowed in a single submission.");
+				m_Device->SendDebugMessage(DebugSeverity::Error,
+					DebugMessageType::General,
+					"Duplicate command lists are not allowed in a single submission.");
 				return {};
 			}
 
@@ -112,13 +123,16 @@ namespace RealRHI {
 		std::unordered_map<VulkanCommandQueue*, uint64_t> dependencyValues;
 		for (const SubmissionToken& waitToken : submitInfo.waitFor) {
 			if (!waitToken.IsValid()) {
-				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Invalid submission token for queue wait.");
+				m_Device->SendDebugMessage(
+					DebugSeverity::Error, DebugMessageType::General, "Invalid submission token for queue wait.");
 				return {};
 			}
 
 			VulkanCommandQueue* queuedDependency = m_Device->GetCommandQueue(waitToken.queue);
 			if (queuedDependency == nullptr || !queuedDependency->HasSubmitted(waitToken)) {
-				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Submit: Queue wait token must identify an existing submission on a known queue.");
+				m_Device->SendDebugMessage(DebugSeverity::Error,
+					DebugMessageType::General,
+					"Submit: Queue wait token must identify an existing submission on a known queue.");
 				return {};
 			}
 			dependencyValues[queuedDependency] = std::max(dependencyValues[queuedDependency], waitToken.value);
@@ -135,13 +149,11 @@ namespace RealRHI {
 		return SubmitTracked(commandBufferInfos, waitSemaphoreInfos, {}, trackedLists);
 	}
 
-	SubmissionToken VulkanCommandQueue::SubmitTracked(
-		std::span<const VkCommandBufferSubmitInfo> commandBuffers,
+	SubmissionToken VulkanCommandQueue::SubmitTracked(std::span<const VkCommandBufferSubmitInfo> commandBuffers,
 		std::span<const VkSemaphoreSubmitInfo> waitSemaphores,
 		std::span<const VkSemaphoreSubmitInfo> signalSemaphores,
 		std::span<CommandList*> trackedLists,
 		VkFence fence) {
-		// Retains references to the command lists until the submission is completed then releases them
 		std::vector<Ref<CommandList>> retainedLists;
 		retainedLists.reserve(trackedLists.size());
 
@@ -152,17 +164,23 @@ namespace RealRHI {
 		for (CommandList* commandList : trackedLists) {
 			auto* vkCommandList = static_cast<VulkanCommandList*>(commandList);
 			if (vkCommandList == nullptr || vkCommandList->GetQueueId() != GetQueueId()) {
-				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Tried to submit a command list to the wrong queue.");
+				m_Device->SendDebugMessage(DebugSeverity::Error,
+					DebugMessageType::General,
+					"Tried to submit a command list to the wrong queue.");
 				return {};
 			}
 
 			if (commandList->GetState() != CommandListState::Executable) {
-				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Tracked command list was not executable before submission.");
+				m_Device->SendDebugMessage(DebugSeverity::Error,
+					DebugMessageType::General,
+					"Tracked command list was not executable before submission.");
 				return {};
 			}
 
 			if (!duplicateListTracker.insert(commandList).second) {
-				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Duplicate command lists are not allowed in a single submission.");
+				m_Device->SendDebugMessage(DebugSeverity::Error,
+					DebugMessageType::General,
+					"Duplicate command lists are not allowed in a single submission.");
 				return {};
 			}
 
@@ -170,17 +188,18 @@ namespace RealRHI {
 		}
 
 		std::unique_lock submitLock(m_SubmissionMutex);
-        // Check the complete batch before submitting. No global state changes
-        // are published unless vkQueueSubmit2 succeeds.
-        std::scoped_lock stateLock(m_Device->GetStateTrackingMutex());
+		// Check the complete batch before submitting. No global state changes
+		// are published unless vkQueueSubmit2 succeeds.
+		std::scoped_lock stateLock(m_Device->GetStateTrackingMutex());
 		VulkanCommandList::LayoutMap predictedLayouts;
-        for (CommandList* commandList : trackedLists) {
-            if (!static_cast<VulkanCommandList*>(commandList)->ValidateSubmissionLayouts(predictedLayouts)) {
-                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
-                    "Submission rejected: texture layout differs from the recorded initial layout.");
-                return {};
-            }
-        }
+		for (CommandList* commandList : trackedLists) {
+			if (!static_cast<VulkanCommandList*>(commandList)->ValidateSubmissionLayouts(predictedLayouts)) {
+				m_Device->SendDebugMessage(DebugSeverity::Error,
+					DebugMessageType::General,
+					"Submission rejected: texture layout differs from the recorded initial layout.");
+				return {};
+			}
+		}
 		const uint64_t submissionValue = m_NextFrameValue;
 		signalInfos.push_back({
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
@@ -192,15 +211,17 @@ namespace RealRHI {
 		VkSubmitInfo2 submitInfo2{
 			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
 			.waitSemaphoreInfoCount = static_cast<uint32_t>(waitSemaphores.size()),
-			.pWaitSemaphoreInfos = waitSemaphores.empty() ? nullptr : waitSemaphores.data(),
+			.pWaitSemaphoreInfos = waitSemaphores.data(),
 			.commandBufferInfoCount = static_cast<uint32_t>(commandBuffers.size()),
-			.pCommandBufferInfos = commandBuffers.empty() ? nullptr : commandBuffers.data(),
+			.pCommandBufferInfos = commandBuffers.data(),
 			.signalSemaphoreInfoCount = static_cast<uint32_t>(signalInfos.size()),
-			.pSignalSemaphoreInfos = signalInfos.empty() ? nullptr : signalInfos.data(),
+			.pSignalSemaphoreInfos = signalInfos.data(),
 		};
 
 		if (vkQueueSubmit2(m_Queue, 1, &submitInfo2, fence) != VK_SUCCESS) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to submit Vulkan command buffers to the queue.");
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"Failed to submit Vulkan command buffers to the queue.");
 			// Caller owns recovery of a failed frame fence.
 			return {};
 		}
@@ -222,7 +243,7 @@ namespace RealRHI {
 
 		submitLock.unlock();
 
-		return SubmissionToken{ .queue = GetQueueId(), .value = submissionValue };
+		return SubmissionToken{.queue = GetQueueId(), .value = submissionValue};
 	}
 
 	bool VulkanCommandQueue::IsComplete(const SubmissionToken& token) {
@@ -253,7 +274,8 @@ namespace RealRHI {
 	void VulkanCommandQueue::ProcessCompletedSubmissions() {
 		uint64_t completed = 0;
 		if (vkGetSemaphoreCounterValue(m_Device->GetDevice(), m_TimelineSemaphore, &completed) != VK_SUCCESS) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to query queue timeline completion.");
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Failed to query queue timeline completion.");
 			return;
 		}
 
@@ -267,8 +289,7 @@ namespace RealRHI {
 
 		{
 			std::scoped_lock lock(m_SubmissionMutex);
-			// If the token value is greater than or equal to the next frame value, 
-			// it means that the submission has not yet been made, so we can return early.
+			// Only values returned by a successful submission can be waited on.
 			if (token.value >= m_NextFrameValue) {
 				return;
 			}
@@ -282,7 +303,8 @@ namespace RealRHI {
 			.pValues = &value,
 		};
 		if (vkWaitSemaphores(m_Device->GetDevice(), &waitInfo, UINT64_MAX) != VK_SUCCESS) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to wait for queue timeline completion.");
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Failed to wait for queue timeline completion.");
 			return;
 		}
 
@@ -294,7 +316,8 @@ namespace RealRHI {
 		{
 			std::scoped_lock lock(m_SubmissionMutex);
 			if (vkQueueWaitIdle(m_Queue) != VK_SUCCESS) {
-				m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "WaitIdle: Failed to wait for the Vulkan queue.");
+				m_Device->SendDebugMessage(
+					DebugSeverity::Error, DebugMessageType::General, "WaitIdle: Failed to wait for the Vulkan queue.");
 				return;
 			}
 			lastSubmitted = m_NextFrameValue - 1;

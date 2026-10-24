@@ -4,56 +4,52 @@
 #include <cstdint>
 
 namespace RealRHI {
-    enum class TextureLayout {
-        Undefined,
-        ColorAttachment,
-        ShaderRead,
-        TransferSrc,
-        TransferDst,
-        Present,
-        General,
-        DepthStencilAttachment,
-        DepthStencilReadOnly
-    };
+	enum class TextureLayout {
+		Undefined,
+		ColorAttachment,
+		ShaderRead,
+		TransferSrc,
+		TransferDst,
+		Present,
+		General,
+		DepthStencilAttachment,
+		DepthStencilReadOnly
+	};
 
-    enum class TextureUsage : uint32_t {
-        None = 0,
-        ShaderResource = 1 << 0,
-        RenderTarget = 1 << 1,
-        DepthStencil = 1 << 2,
-        Storage = 1 << 3,
-        TransferSrc = 1 << 4,
-        TransferDst = 1 << 5,
-    };
+	enum class TextureUsage : uint32_t {
+		None = 0,
+		ShaderResource = 1 << 0,
+		RenderTarget = 1 << 1,
+		DepthStencil = 1 << 2,
+		Storage = 1 << 3,
+		TransferSrc = 1 << 4,
+		TransferDst = 1 << 5,
+	};
 
-    constexpr TextureUsage operator|(TextureUsage a, TextureUsage b) {
-        return static_cast<TextureUsage>(
-            static_cast<uint32_t>(a) | static_cast<uint32_t>(b)
-        );
-    }
-    constexpr TextureUsage operator&(TextureUsage a, TextureUsage b) {
-        return static_cast<TextureUsage>(
-            static_cast<uint32_t>(a) & static_cast<uint32_t>(b)
-        );
-    }
-    constexpr TextureUsage& operator|=(TextureUsage& a, TextureUsage b) {
-        a = a | b;
-        return a;
-    }
-    constexpr bool Any(TextureUsage v) {
-        return static_cast<uint32_t>(v) != 0;
-    }
+	constexpr TextureUsage operator|(TextureUsage a, TextureUsage b) {
+		return static_cast<TextureUsage>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+	}
+	constexpr TextureUsage operator&(TextureUsage a, TextureUsage b) {
+		return static_cast<TextureUsage>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
+	}
+	constexpr TextureUsage& operator|=(TextureUsage& a, TextureUsage b) {
+		a = a | b;
+		return a;
+	}
+	constexpr bool Any(TextureUsage v) {
+		return static_cast<uint32_t>(v) != 0;
+	}
 
-    struct TextureDesc {
-        uint32_t width = 0;
-        uint32_t height = 0;
-        uint32_t depth = 1;
+	struct TextureDesc {
+		uint32_t width = 0;
+		uint32_t height = 0;
+		uint32_t depth = 1;
 
-        uint32_t mipLevels = 1;
-        uint32_t arrayLayers = 1;
+		uint32_t mipLevels = 1;
+		uint32_t arrayLayers = 1;
 
-        TextureFormat format = TextureFormat::Unknown;
+		TextureFormat format = TextureFormat::Unknown;
 
-        TextureUsage usage = TextureUsage::None;
-    };
+		TextureUsage usage = TextureUsage::None;
+	};
 }

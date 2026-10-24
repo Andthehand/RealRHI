@@ -1,14 +1,13 @@
 #pragma once
+#include "DescriptorsDesc.h"
 #include "Pipeline.h"
 #include "PipelineDesc.h"
-
-#include "DescriptorsDesc.h"
-
-#include "VulkanDevice.h"
 #include "Result.h"
+#include "VulkanDevice.h"
+
+#include <volk.h>
 
 #include <unordered_map>
-#include <volk.h>
 
 namespace RealRHI {
 	class VulkanPipeline : public Pipeline {
@@ -20,18 +19,25 @@ namespace RealRHI {
 			uint32_t descriptorCount = 1;
 		};
 
+	public:
 		VulkanPipeline(const VulkanDevice* device);
 		~VulkanPipeline();
 
-		static Result CreateGraphics(const VulkanDevice* device, const PipelineDesc& desc, Ref<VulkanPipeline>& outPipeline);
+		static Result CreateGraphics(const VulkanDevice* device,
+			const PipelineDesc& desc,
+			Ref<VulkanPipeline>& outPipeline);
 		Result InitGraphics(const PipelineDesc& desc);
-		
-		static Result CreateCompute(const VulkanDevice* device, const ComputePipelineDesc& desc, Ref<VulkanPipeline>& outPipeline);
+
+		static Result CreateCompute(const VulkanDevice* device,
+			const ComputePipelineDesc& desc,
+			Ref<VulkanPipeline>& outPipeline);
 		Result InitCompute(const ComputePipelineDesc& desc);
+
 	protected:
 		friend class VulkanCommandList;
 		VkPipeline GetPipeline() const { return m_Pipeline; }
 		VkPipelineBindPoint GetBindPoint() const { return m_BindPoint; }
+
 	private:
 		const VulkanDevice* m_Device = nullptr;
 

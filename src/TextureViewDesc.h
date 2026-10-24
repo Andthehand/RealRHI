@@ -16,7 +16,6 @@ namespace RealRHI {
 	struct TextureViewDesc {
 		TextureViewType type = TextureViewType::View2D;
 
-		// Subresource range
 		uint32_t baseMipLevel = 0;
 		uint32_t mipLevelCount = 1;
 

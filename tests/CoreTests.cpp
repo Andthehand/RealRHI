@@ -1,5 +1,5 @@
-#include "RefCounted.h"
 #include "DeferredDeletionQueue.h"
+#include "RefCounted.h"
 #include "Vulkan/VulkanConvertions.h"
 
 #include <cstdlib>
@@ -8,11 +8,13 @@
 
 namespace {
 	struct Base : RealRHI::RefCounted {
-		inline static uint32_t destroyed = 0;
-		~Base() override { ++destroyed; }
+		inline static uint32_t s_Destroyed = 0;
+
+	public:
+		~Base() override { ++s_Destroyed; }
 	};
-	struct Derived : Base {};
-	struct Unrelated : RealRHI::RefCounted {};
+	struct Derived : Base { };
+	struct Unrelated : RealRHI::RefCounted { };
 
 	void Expect(bool condition, const char* message) {
 		if (!condition) {
@@ -40,7 +42,7 @@ int main() {
 		base = std::move(base);
 		Expect(base && base->GetRefCount() == 1, "Self move preserves ownership");
 		base.Release();
-		Expect(!base && Base::destroyed == 1, "Release destroys the final owner");
+		Expect(!base && Base::s_Destroyed == 1, "Release destroys the final owner");
 	}
 	{
 		auto first = RealRHI::Ref<Derived>::Create();
@@ -52,17 +54,25 @@ int main() {
 		base.Reset(base.Raw());
 		Expect(base->GetRefCount() == 1, "Reset to the current object preserves ownership");
 	}
-	Expect(Base::destroyed == 3, "Each owned object is destroyed exactly once");
+	Expect(Base::s_Destroyed == 3, "Each owned object is destroyed exactly once");
 	{
 		RealRHI::DeferredDeletionQueue deletions;
-		const RealRHI::SubmissionToken first{ .queue = { 0, 0 }, .value = 1 };
-		const RealRHI::SubmissionToken second{ .queue = { 1, 0 }, .value = 2 };
+		const RealRHI::SubmissionToken first{.queue = {0, 0}, .value = 1};
+		const RealRHI::SubmissionToken second{.queue = {1, 0}, .value = 2};
 		uint32_t destroyed = 0;
-		deletions.Enqueue({ first, second }, [&] { ++destroyed; });
-		deletions.Process([&](const auto& token) { return token == first; });
+		deletions.Enqueue({first, second}, [&] {
+			++destroyed;
+		});
+		deletions.Process([&](const auto& token) {
+			return token == first;
+		});
 		Expect(destroyed == 0, "Deletion waits for every queue dependency");
-		deletions.Process([](const auto&) { return true; });
-		deletions.Process([](const auto&) { return true; });
+		deletions.Process([](const auto&) {
+			return true;
+		});
+		deletions.Process([](const auto&) {
+			return true;
+		});
 		Expect(destroyed == 1 && deletions.PendingCount() == 0, "Deletion runs exactly once");
 	}
 	std::cout << "CoreTests passed\n";

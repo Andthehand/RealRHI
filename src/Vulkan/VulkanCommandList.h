@@ -1,21 +1,24 @@
 #pragma once
 #include "CommandList.h"
+#include "VulkanCommandAllocator.h"
 #include "VulkanDevice.h"
 #include "VulkanPipeline.h"
-#include "VulkanCommandAllocator.h"
 
 #include <volk.h>
 
+#include <functional>
 #include <mutex>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 namespace RealRHI {
 	class VulkanCommandList : public CommandList {
 	public:
-        VulkanCommandList(const VulkanDevice* device, Ref<VulkanCommandAllocator> allocator);
+		VulkanCommandList(const VulkanDevice* device, Ref<VulkanCommandAllocator> allocator);
 		~VulkanCommandList();
-        static Result Create(const VulkanDevice* device, Ref<VulkanCommandAllocator> allocator, Ref<VulkanCommandList>& outCommandList);
+		static Result Create(const VulkanDevice* device,
+			Ref<VulkanCommandAllocator> allocator,
+			Ref<VulkanCommandList>& outCommandList);
 		Result Init();
 
 		Result Begin() override;
@@ -25,8 +28,8 @@ namespace RealRHI {
 		void BeginRendering(const RenderingInfo& renderingInfo) override;
 		void EndRendering() override;
 
-		void SetViewport(const Viewport& vp);
-		void SetScissor(const Rect& rect);
+		void SetViewport(const Viewport& vp) override;
+		void SetScissor(const Rect& rect) override;
 
 		void UseResource(Texture* texture) override;
 		void UseResource(Buffer* buffer) override;
@@ -61,47 +64,53 @@ namespace RealRHI {
 		friend class VulkanTexture;
 		friend class VulkanCommandQueue;
 		VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
+
 	private:
 		struct SubresourceKey {
 			const VulkanTexture* texture = nullptr;
 			uint32_t mipLevel = 0;
 			uint32_t arrayLayer = 0;
 
+		public:
 			bool operator==(const SubresourceKey&) const = default;
 		};
 
 		struct SubresourceKeyHash {
 			size_t operator()(const SubresourceKey& key) const {
-				return std::hash<const VulkanTexture*>{}(key.texture) ^
-					(static_cast<size_t>(key.mipLevel) << 16) ^
+				return std::hash<const VulkanTexture*>{}(key.texture) ^ (static_cast<size_t>(key.mipLevel) << 16) ^
 					static_cast<size_t>(key.arrayLayer);
 			}
 		};
 		using LayoutMap = std::unordered_map<SubresourceKey, TextureLayout, SubresourceKeyHash>;
 
-		TextureLayout GetExpectedLayout(const VulkanTexture* texture, uint32_t mip, uint32_t layer) const;
-		// Check if the recorded layouts match the expected layouts at submission time, and update the predicted layouts accordingly.
-		bool ValidateSubmissionLayouts(LayoutMap& predicted) const;
-		
-		// Only called by the command queue after submission is complete. 
-		// Updates the submitted layouts of textures based on the recorded layouts during command recording.
-		void CommitSubmissionLayouts() const;
 	private:
-		// Retain a reference to a resource to ensure it remains valid for the lifetime of this command list.
+		TextureLayout GetExpectedLayout(const VulkanTexture* texture, uint32_t mip, uint32_t layer) const;
+		// Validate the batch's predicted layouts before publishing any submission state.
+		bool ValidateSubmissionLayouts(LayoutMap& predicted) const;
+
+		// Publish layouts only after the native queue submission succeeds.
+		void CommitSubmissionLayouts() const;
+
+	private:
+		// Keep recorded resources alive until this list is reset or destroyed.
 		void RetainResource(RefCounted* resource);
 
-		// Register the expected layout of a texture subresource during command recording.
-		void RegisterRequiredLayout(const VulkanTexture* texture, uint32_t mipLevel, uint32_t baseLayer,
-			uint32_t layerCount, TextureLayout expected);
+		void RegisterRequiredLayout(const VulkanTexture* texture,
+			uint32_t mipLevel,
+			uint32_t baseLayer,
+			uint32_t layerCount,
+			TextureLayout expected);
 
-		// Check if the expected layout of a texture subresource has been recorded during command recording.
-		bool HasRecordedLayout(const VulkanTexture* texture, uint32_t mipLevel, uint32_t baseLayer,
-			uint32_t layerCount, TextureLayout expected) const;
+		bool HasRecordedLayout(const VulkanTexture* texture,
+			uint32_t mipLevel,
+			uint32_t baseLayer,
+			uint32_t layerCount,
+			TextureLayout expected) const;
 
 	private:
 		const VulkanDevice* m_Device;
-        Ref<VulkanCommandAllocator> m_Allocator;
-		
+		Ref<VulkanCommandAllocator> m_Allocator;
+
 		const QueueId m_QueueId{};
 		mutable std::mutex m_StateMutex;
 		std::vector<Ref<RefCounted>> m_ReferencedResources;

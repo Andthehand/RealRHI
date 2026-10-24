@@ -1,10 +1,10 @@
 #pragma once
 #include "Buffer.h"
 #include "BufferDesc.h"
-
 #include "VulkanDevice.h"
 
 #include <volk.h>
+
 #include <vma/vk_mem_alloc.h>
 
 namespace RealRHI {
@@ -22,6 +22,7 @@ namespace RealRHI {
 
 		void WriteData(const void* data, uint64_t size, uint64_t offset = 0) override;
 		Result ReadData(void* data, uint64_t size, uint64_t offset = 0) const override;
+
 	protected:
 		friend class VulkanCommandList;
 		friend class VulkanTexture;
@@ -30,6 +31,7 @@ namespace RealRHI {
 		VkBuffer GetBuffer() const { return m_Buffer; }
 
 		VkDeviceAddress GetBufferDeviceAddress() const;
+
 	private:
 		const VulkanDevice* m_Device = nullptr;
 

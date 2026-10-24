@@ -1,20 +1,20 @@
 #pragma once
-#include "Vulkan/VulkanDevice.h"
-#include "Vulkan/VulkanWindow.h"
 #include "Result.h"
-
 #include "Swapchain.h"
 #include "SwapchainDesc.h"
-
+#include "Vulkan/VulkanDevice.h"
+#include "Vulkan/VulkanWindow.h"
 #include "VulkanTexture.h"
 
 #include <volk.h>
 
+#include <vector>
+
 namespace RealRHI {
 	struct SwapChainSupportDetails {
-		VkSurfaceCapabilitiesKHR Capabilities;
-		std::vector<VkSurfaceFormatKHR> Formats;
-		std::vector<VkPresentModeKHR> PresentModes;
+		VkSurfaceCapabilitiesKHR capabilities;
+		std::vector<VkSurfaceFormatKHR> formats;
+		std::vector<VkPresentModeKHR> presentModes;
 	};
 
 	class VulkanSwapchain : public Swapchain {
@@ -29,7 +29,8 @@ namespace RealRHI {
 
 		FrameContext BeginFrame() override;
 		void Present(const FrameContext& frame) override;
-		uint32_t GetMaxFramesInFlight() const override { return MAX_FRAMES_IN_FLIGHT; }
+		uint32_t GetMaxFramesInFlight() const override { return s_MaxFramesInFlight; }
+
 	protected:
 		friend class VulkanDevice;
 		bool IsFrameValid(const FrameContext& frame) const;
@@ -38,10 +39,15 @@ namespace RealRHI {
 		// Internal methods used by VulkanDevice::Submit
 		VkCommandBuffer RecordPreTransitionCmd(uint32_t frameIndex, uint32_t imageIndex);
 		VkCommandBuffer RecordPostTransitionCmd(uint32_t frameIndex, uint32_t imageIndex);
-		VkSemaphore GetImageAvailableSemaphore(uint32_t frameIndex) const { return m_FrameSync[frameIndex].imageAvailableSemaphore; }
-		VkSemaphore GetRenderFinishedSemaphore(uint32_t imageIndex) const { return m_RenderFinishedSemaphores[imageIndex]; }
+		VkSemaphore GetImageAvailableSemaphore(uint32_t frameIndex) const {
+			return m_FrameSync[frameIndex].imageAvailableSemaphore;
+		}
+		VkSemaphore GetRenderFinishedSemaphore(uint32_t imageIndex) const {
+			return m_RenderFinishedSemaphores[imageIndex];
+		}
 		bool PrepareFrameSubmission(uint32_t frameIndex);
 		void FinishFrameSubmission(uint32_t frameIndex, SubmissionToken token);
+
 	private:
 		SwapChainSupportDetails QuerySwapChainSupport();
 		VkSurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
@@ -52,6 +58,7 @@ namespace RealRHI {
 		void CollectRetiredSwapchains();
 		void TransitionToColorAttachment(VkCommandBuffer cmdBuf, uint32_t imageIndex);
 		void TransitionToPresent(VkCommandBuffer cmdBuf, uint32_t imageIndex);
+
 	private:
 		struct FrameSync {
 			VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
@@ -62,21 +69,23 @@ namespace RealRHI {
 			VkCommandBuffer postCmdBuf = VK_NULL_HANDLE;
 		};
 
-		static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
+		struct RetiredSwapchain {
+			VkSwapchainKHR handle = VK_NULL_HANDLE;
+			std::vector<Ref<VulkanTexture>> images;
+		};
+
+	private:
+		static constexpr uint32_t s_MaxFramesInFlight = 2;
 		const VulkanDevice* m_Device = nullptr;
 		const VulkanWindow* m_Window = nullptr;
 		VkSurfaceKHR m_Surface = VK_NULL_HANDLE;
 		VkSwapchainKHR m_Swapchain = VK_NULL_HANDLE;
 
-		struct RetiredSwapchain {
-			VkSwapchainKHR handle = VK_NULL_HANDLE;
-			std::vector<Ref<VulkanTexture>> images;
-		};
 		std::vector<RetiredSwapchain> m_RetiredSwapchains;
 		std::vector<Ref<VulkanTexture>> m_SwapchainImages;
 		std::vector<VkImageLayout> m_ImageLayouts;
 		TextureFormat m_SwapchainImageFormat = TextureFormat::Unknown;
-		VkExtent2D m_SwapchainExtent = { .width = 0, .height = 0 };
+		VkExtent2D m_SwapchainExtent = {.width = 0, .height = 0};
 
 		std::vector<FrameSync> m_FrameSync;
 		std::vector<VkSemaphore> m_RenderFinishedSemaphores;

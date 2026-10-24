@@ -1,11 +1,12 @@
 #pragma once
+#include "DescriptorsDesc.h"
+#include "Result.h"
 #include "Shader.h"
 #include "ShaderDesc.h"
-#include "DescriptorsDesc.h"
 #include "VulkanDevice.h"
-#include "Result.h"
 
 #include <filesystem>
+#include <vector>
 
 namespace RealRHI {
 	class VulkanShader : public Shader {
@@ -26,35 +27,30 @@ namespace RealRHI {
 		uint32_t GetPushDataSize() const { return m_PushDataSize; }
 
 	private:
-		Slang::ComPtr<slang::IModule> LoadModule(
-			const ShaderDesc& desc,
+		Slang::ComPtr<slang::IModule> LoadModule(const ShaderDesc& desc, Slang::ComPtr<slang::IBlob>& diagnostics);
+
+		Slang::ComPtr<slang::IComponentType> ComposeProgram(slang::IModule* module,
 			Slang::ComPtr<slang::IBlob>& diagnostics);
 
-		Slang::ComPtr<slang::IComponentType> ComposeProgram(
-			slang::IModule* module,
-			Slang::ComPtr<slang::IBlob>& diagnostics);
-
-		BufferLayout ReflectLayout(
-			slang::IComponentType* composedProgram,
+		BufferLayout ReflectLayout(slang::IComponentType* composedProgram,
 			std::vector<EntryPoint>& outEntryPoints,
 			Slang::ComPtr<slang::IBlob>& diagnostics);
 
-		DescriptorsDesc ReflectDescriptors(
-			slang::IComponentType* composedProgram,
+		DescriptorsDesc ReflectDescriptors(slang::IComponentType* composedProgram,
 			Slang::ComPtr<slang::IBlob>& diagnostics);
 
-		Slang::ComPtr<slang::IComponentType> LinkProgram(
-			slang::IComponentType* composed,
+		Slang::ComPtr<slang::IComponentType> LinkProgram(slang::IComponentType* composed,
 			Slang::ComPtr<slang::IBlob>& diagnostics);
 
-		VkShaderModule CreateVkShaderModule(
-			slang::IComponentType* linkedProgram);
+		VkShaderModule CreateVkShaderModule(slang::IComponentType* linkedProgram);
 
-		std::vector<BufferAttribute> CalculateCumulativeOffset(slang::TypeLayoutReflection* typeReflection, uint32_t* offset);
+		std::vector<BufferAttribute> CalculateCumulativeOffset(slang::TypeLayoutReflection* typeReflection,
+			uint32_t* offset);
 
-		static bool InitializeSlang(const VulkanDevice* m_Device);
+		static bool InitializeSlang(const VulkanDevice* device);
 
 		bool CheckSlangDiagnostics(const Slang::ComPtr<slang::IBlob>& diagnostics, SlangResult result);
+
 	private:
 		const VulkanDevice* m_Device = nullptr;
 		Slang::ComPtr<slang::IModule> m_SlangModule;

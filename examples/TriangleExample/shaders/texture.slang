@@ -1,33 +1,33 @@
-struct test {
-    float4 a;
-    float4 b;
-    Sampler2D myTexture;
+struct TextureParameters {
+	float4 a;
+	float4 b;
+	Sampler2D myTexture;
 };
 
-ParameterBlock<test> tes1;
-ParameterBlock<test> tes2;
+ParameterBlock<TextureParameters> parameters1;
+ParameterBlock<TextureParameters> parameters2;
 
 struct VSInput {
-    float2 Pos;
-    float2 TexCoord;
+	float2 pos;
+	float2 texCoord;
 };
 
 struct VSOutput {
-    float4 Pos   : SV_Position;
-    float2 TexCoord;
+	float4 pos : SV_Position;
+	float2 texCoord;
 };
 
 [shader("vertex")]
 VSOutput main(VSInput input) {
-    VSOutput output;
+	VSOutput output;
 
-    output.Pos = float4(input.Pos, 0.0, 1.0);
-    output.TexCoord = input.TexCoord;
+	output.pos = float4(input.pos, 0.0, 1.0);
+	output.texCoord = input.texCoord;
 
-    return output;
+	return output;
 }
 
 [shader("fragment")]
 float4 main(VSOutput input) : SV_Target {
-    return tes1.myTexture.Sample(input.TexCoord);
+	return parameters1.myTexture.Sample(input.texCoord);
 }

@@ -1,6 +1,5 @@
 #pragma once
 #include "RefCounted.h"
-
 #include "Result.h"
 
 namespace RealRHI {

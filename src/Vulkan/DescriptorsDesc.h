@@ -1,7 +1,9 @@
 #pragma once
+#include <volk.h>
+
+#include <cstdint>
 #include <string>
 #include <vector>
-#include <volk.h>
 
 namespace RealRHI {
 	// One reflected binding entry within a Vulkan descriptor set.

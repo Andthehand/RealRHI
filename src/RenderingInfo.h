@@ -1,6 +1,7 @@
 #pragma once
 #include "TextureView.h"
 
+#include <cstdint>
 #include <vector>
 
 namespace RealRHI {

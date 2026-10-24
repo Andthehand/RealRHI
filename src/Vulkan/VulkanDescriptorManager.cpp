@@ -5,17 +5,15 @@
 #include "VulkanTextureView.h"
 
 namespace RealRHI {
-	VulkanDescriptorManager::VulkanDescriptorManager(const VulkanDevice* device) 
-		: m_Device(device) {}
+	VulkanDescriptorManager::VulkanDescriptorManager(const VulkanDevice* device)
+		: m_Device(device) { }
 
 	Result VulkanDescriptorManager::Init() {
-		// Initialize descriptor heaps
 		m_DescriptorHeaps = std::make_unique<VulkanDescriptorHeaps>(m_Device);
 		if (m_DescriptorHeaps->Init(m_Device->GetDescriptorHeapProperties()) != Result::Success) {
 			return Result::Failed;
 		}
 
-		// Get descriptor sizes from the heap properties
 		const VkPhysicalDeviceDescriptorHeapPropertiesEXT& heapProperties = m_DescriptorHeaps->GetHeapProperties();
 		m_BufferDescriptorSize = heapProperties.bufferDescriptorSize;
 		m_ImageDescriptorSize = heapProperties.imageDescriptorSize;
@@ -24,10 +22,10 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
-		// Initialize descriptor indices
 		m_NextBufferDescriptorIndex = 0;
 		// For image descriptors, we start from the end of the heap and decrement
-		m_ImageDescriptorCapacity = static_cast<uint32_t>(m_DescriptorHeaps->GetResourceHeap().usableSize / m_ImageDescriptorSize);
+		m_ImageDescriptorCapacity =
+			static_cast<uint32_t>(m_DescriptorHeaps->GetResourceHeap().usableSize / m_ImageDescriptorSize);
 		m_NextImageDescriptorIndex = m_ImageDescriptorCapacity;
 		m_NextSamplerDescriptorIndex = 0;
 
@@ -43,8 +41,7 @@ namespace RealRHI {
 	}
 
 	uint32_t VulkanDescriptorManager::AllocateBufferDescriptor(const VulkanBuffer* buffer) {
-        std::scoped_lock lock(m_DescriptorMutex);
-		// Check if there are any free buffer descriptors available
+		std::scoped_lock lock(m_DescriptorMutex);
 		uint32_t bufferDescriptorIndex;
 		if (!m_FreeBufferDescriptors.empty()) {
 			bufferDescriptorIndex = m_FreeBufferDescriptors.back();
@@ -66,9 +63,7 @@ namespace RealRHI {
 		VkResourceDescriptorInfoEXT descriptorInfo{
 			.sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT,
 			.type = Utils::BufferUsageToVkDescriptorType(buffer->GetUsage()),
-			.data = {
-				.pAddressRange = &deviceAddressRange
-			}
+			.data = {.pAddressRange = &deviceAddressRange},
 		};
 
 		std::vector<uint8_t> descriptorMemory(m_BufferDescriptorSize);
@@ -77,21 +72,16 @@ namespace RealRHI {
 			.size = m_BufferDescriptorSize,
 		};
 
-		// Write the descriptor to descriptorMemory
-		if (vkWriteResourceDescriptorsEXT(
-			m_Device->GetDevice(),
-			1,
-			&descriptorInfo,
-			&hostAddressRange
-		) != VK_SUCCESS) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to write Vulkan buffer descriptor.");
+		if (vkWriteResourceDescriptorsEXT(m_Device->GetDevice(), 1, &descriptorInfo, &hostAddressRange) != VK_SUCCESS) {
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Failed to write Vulkan buffer descriptor.");
 			m_FreeBufferDescriptors.push_back(bufferDescriptorIndex);
 
 			return UINT32_MAX;
 		}
 
-		// Upload descriptorMemory to the m_DescriptorHeaps at the correct offset
-		m_DescriptorHeaps->GetResourceHeap().buffer->WriteData(descriptorMemory.data(), m_BufferDescriptorSize, bufferDescriptorIndex * m_BufferDescriptorSize);
+		m_DescriptorHeaps->GetResourceHeap().buffer->WriteData(
+			descriptorMemory.data(), m_BufferDescriptorSize, bufferDescriptorIndex * m_BufferDescriptorSize);
 		m_AllocatedBufferDescriptors.insert(bufferDescriptorIndex);
 		return bufferDescriptorIndex;
 	}
@@ -101,19 +91,20 @@ namespace RealRHI {
 		if (index == UINT32_MAX) {
 			return;
 		}
-		
-		// Prevent double free or invalid index by checking if the index exists in the allocated set
+
 		if (!m_AllocatedBufferDescriptors.erase(index)) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Invalid or duplicate descriptor free.");
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Invalid or duplicate descriptor free.");
 			return;
 		}
 
 		m_FreeBufferDescriptors.push_back(index);
 	}
 
-	uint32_t VulkanDescriptorManager::AllocateImageDescriptor(const VulkanTextureView* textureView, VkDescriptorType descriptorType, VkImageLayout descriptorAccessLayout) {
-        std::scoped_lock lock(m_DescriptorMutex);
-		// Check if there are any free image descriptors available
+	uint32_t VulkanDescriptorManager::AllocateImageDescriptor(const VulkanTextureView* textureView,
+		VkDescriptorType descriptorType,
+		VkImageLayout descriptorAccessLayout) {
+		std::scoped_lock lock(m_DescriptorMutex);
 		uint32_t imageDescriptorIndex;
 		if (!m_FreeImageDescriptors.empty()) {
 			imageDescriptorIndex = m_FreeImageDescriptors.back();
@@ -122,7 +113,7 @@ namespace RealRHI {
 		else {
 			if (m_NextImageDescriptorIndex == 0 ||
 				static_cast<VkDeviceSize>(m_NextImageDescriptorIndex - 1) * m_ImageDescriptorSize <
-				static_cast<VkDeviceSize>(m_NextBufferDescriptorIndex) * m_BufferDescriptorSize) {
+					static_cast<VkDeviceSize>(m_NextBufferDescriptorIndex) * m_BufferDescriptorSize) {
 				return UINT32_MAX;
 			}
 			imageDescriptorIndex = --m_NextImageDescriptorIndex;
@@ -137,9 +128,10 @@ namespace RealRHI {
 		VkResourceDescriptorInfoEXT descriptorInfo{
 			.sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT,
 			.type = descriptorType,
-			.data = {
-				.pImage = &imageDescriptorInfo,
-			}
+			.data =
+				{
+					.pImage = &imageDescriptorInfo,
+				},
 		};
 
 		std::vector<uint8_t> descriptorMemory(m_ImageDescriptorSize);
@@ -148,20 +140,16 @@ namespace RealRHI {
 			.size = m_ImageDescriptorSize,
 		};
 
-		// Write the descriptor to descriptorMemory
-		if (vkWriteResourceDescriptorsEXT(
-			m_Device->GetDevice(),
-			1,
-			&descriptorInfo,
-			&hostAddressRange
-		) != VK_SUCCESS) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to write Vulkan image descriptor.");
+		if (vkWriteResourceDescriptorsEXT(m_Device->GetDevice(), 1, &descriptorInfo, &hostAddressRange) != VK_SUCCESS) {
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Failed to write Vulkan image descriptor.");
 			m_FreeImageDescriptors.push_back(imageDescriptorIndex);
 
 			return UINT32_MAX;
 		}
 
-		m_DescriptorHeaps->GetResourceHeap().buffer->WriteData(descriptorMemory.data(), m_ImageDescriptorSize, imageDescriptorIndex * m_ImageDescriptorSize);
+		m_DescriptorHeaps->GetResourceHeap().buffer->WriteData(
+			descriptorMemory.data(), m_ImageDescriptorSize, imageDescriptorIndex * m_ImageDescriptorSize);
 		m_AllocatedImageDescriptors.insert(imageDescriptorIndex);
 		return imageDescriptorIndex;
 	}
@@ -172,9 +160,9 @@ namespace RealRHI {
 			return;
 		}
 
-		// Prevent double free or invalid index by checking if the index exists in the allocated set
 		if (!m_AllocatedImageDescriptors.erase(index)) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Invalid or duplicate descriptor free.");
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Invalid or duplicate descriptor free.");
 			return;
 		}
 
@@ -182,8 +170,7 @@ namespace RealRHI {
 	}
 
 	uint32_t VulkanDescriptorManager::AllocateSamplerDescriptor(const VkSamplerCreateInfo& samplerCI) {
-        std::scoped_lock lock(m_DescriptorMutex);
-		// Check if there are any free sampler descriptors available
+		std::scoped_lock lock(m_DescriptorMutex);
 		uint32_t samplerDescriptorIndex;
 		if (!m_FreeSamplerDescriptors.empty()) {
 			samplerDescriptorIndex = m_FreeSamplerDescriptors.back();
@@ -203,19 +190,16 @@ namespace RealRHI {
 			.size = m_SamplerDescriptorSize,
 		};
 
-		if (vkWriteSamplerDescriptorsEXT(
-			m_Device->GetDevice(),
-			1,
-			&samplerCI,
-			&hostAddressRange
-		) != VK_SUCCESS) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to write Vulkan sampler descriptor.");
+		if (vkWriteSamplerDescriptorsEXT(m_Device->GetDevice(), 1, &samplerCI, &hostAddressRange) != VK_SUCCESS) {
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Failed to write Vulkan sampler descriptor.");
 			m_FreeSamplerDescriptors.push_back(samplerDescriptorIndex);
 
 			return UINT32_MAX;
 		}
 
-		m_DescriptorHeaps->GetSamplerHeap().buffer->WriteData(descriptorMemory.data(), m_SamplerDescriptorSize, samplerDescriptorIndex * m_SamplerDescriptorSize);
+		m_DescriptorHeaps->GetSamplerHeap().buffer->WriteData(
+			descriptorMemory.data(), m_SamplerDescriptorSize, samplerDescriptorIndex * m_SamplerDescriptorSize);
 		m_AllocatedSamplerDescriptors.insert(samplerDescriptorIndex);
 		return samplerDescriptorIndex;
 	}
@@ -226,9 +210,9 @@ namespace RealRHI {
 			return;
 		}
 
-		// Prevent double free or invalid index by checking if the index exists in the allocated set
 		if (!m_AllocatedSamplerDescriptors.erase(index)) {
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Invalid or duplicate descriptor free.");
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Invalid or duplicate descriptor free.");
 			return;
 		}
 

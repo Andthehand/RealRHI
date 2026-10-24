@@ -10,17 +10,24 @@
 namespace RealRHI {
 	// Callbacks must not outlive the device objects they use.
 	class DeferredDeletionQueue {
+	private:
+		struct Entry {
+			std::vector<SubmissionToken> dependencies;
+			std::function<void()> destroy;
+		};
+
 	public:
 		using CompletionQuery = std::function<bool(const SubmissionToken&)>;
 		using CompletionWait = std::function<void(const SubmissionToken&)>;
 
+	public:
 		void Enqueue(std::vector<SubmissionToken> dependencies, std::function<void()> destroy) {
 			if (!destroy) {
 				return;
 			}
 
 			std::scoped_lock lock(m_Mutex);
-			m_Entries.push_back({ std::move(dependencies), std::move(destroy) });
+			m_Entries.push_back({std::move(dependencies), std::move(destroy)});
 		}
 
 		void Process(const CompletionQuery& isComplete) {
@@ -78,11 +85,6 @@ namespace RealRHI {
 		}
 
 	private:
-		struct Entry {
-			std::vector<SubmissionToken> dependencies;
-			std::function<void()> destroy;
-		};
-
 		mutable std::mutex m_Mutex;
 		std::vector<Entry> m_Entries;
 	};

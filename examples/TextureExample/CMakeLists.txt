@@ -9,7 +9,7 @@ target_link_libraries(TextureExample
 )
 
 rhi_copy_directory_to_target_output(
-  TextureExample
-  ${CMAKE_SOURCE_DIR}/examples/TextureExample/shaders
-  shaders
+    TextureExample
+    ${CMAKE_SOURCE_DIR}/examples/TextureExample/shaders
+    shaders
 )

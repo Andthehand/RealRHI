@@ -1,9 +1,10 @@
 #pragma once
 #include "RefCounted.h"
 
-#include <slang/slang.h>
 #include <slang/slang-com-ptr.h>
+#include <slang/slang.h>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -29,7 +30,6 @@ namespace RealRHI {
 		Int16 = SLANG_SCALAR_TYPE_INT16,
 		UInt16 = SLANG_SCALAR_TYPE_UINT16,
 
-		// My Types
 		Vec2,
 		Vec3,
 		Vec4
