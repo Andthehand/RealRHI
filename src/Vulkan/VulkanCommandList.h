@@ -1,8 +1,10 @@
 #pragma once
 #include "CommandList.h"
+#include "VulkanBuffer.h"
 #include "VulkanCommandAllocator.h"
 #include "VulkanDevice.h"
 #include "VulkanPipeline.h"
+#include "VulkanResourceState.h"
 
 #include <volk.h>
 
@@ -83,13 +85,46 @@ namespace RealRHI {
 		};
 		using LayoutMap = std::unordered_map<SubresourceKey, TextureLayout, SubresourceKeyHash>;
 
+		struct ResourceOperation {
+			const char* name = nullptr;
+			VulkanBuffer* buffer = nullptr;
+			VulkanTexture* texture = nullptr;
+			uint64_t offset = 0;
+			uint64_t size = 0;
+			TextureSubresourceRange subresources{};
+			TextureLayout oldLayout = TextureLayout::Undefined;
+			TextureLayout newLayout = TextureLayout::Undefined;
+			uint32_t sourceFamily = UINT32_MAX;
+			uint32_t destinationFamily = UINT32_MAX;
+			bool barrier = false;
+		};
+
+		struct SubmissionState {
+			std::unordered_map<SubresourceKey, VulkanTextureState, SubresourceKeyHash> textures;
+			std::unordered_map<VulkanBuffer*, std::vector<VulkanBufferRangeState>> buffers;
+		};
+
 	private:
 		TextureLayout GetExpectedLayout(const VulkanTexture* texture, uint32_t mip, uint32_t layer) const;
-		// Validate the batch's predicted layouts before publishing any submission state.
-		bool ValidateSubmissionLayouts(LayoutMap& predicted) const;
-
-		// Publish layouts only after the native queue submission succeeds.
-		void CommitSubmissionLayouts() const;
+		// Replay in command order; publish the complete batch only after native submission succeeds.
+		bool ValidateSubmissionState(SubmissionState& predicted,
+			SubmissionToken submission,
+			std::span<const VkSemaphoreSubmitInfo> waits) const;
+		static void CommitSubmissionState(SubmissionState& predicted);
+		bool ValidateOwnership(VulkanQueueOwnership& ownership,
+			const ResourceOperation& operation,
+			SubmissionToken submission,
+			std::span<const VkSemaphoreSubmitInfo> waits) const;
+		void RecordBufferUse(VulkanBuffer* buffer, uint64_t offset, uint64_t size, const char* operation);
+		void RecordTextureUse(VulkanTexture* texture,
+			TextureSubresourceRange subresources,
+			TextureLayout layout,
+			const char* operation);
+		void RecordShaderResources(const char* operation);
+		bool ResolveQueueFamilies(std::optional<QueueType> source,
+			std::optional<QueueType> destination,
+			uint32_t& sourceFamily,
+			uint32_t& destinationFamily) const;
 
 	private:
 		// Keep recorded resources alive until this list is reset or destroyed.
@@ -119,9 +154,12 @@ namespace RealRHI {
 		bool m_GraphicsPipelineBound = false;
 		bool m_Rendering = false;
 
-		// Initial layout = the layout that was expected at the start of recording for a given subresource.
-		// Recorded layout = the layout that was recorded for a given subresource during command recording.
-		LayoutMap m_InitialLayouts;
+		std::vector<ResourceOperation> m_ResourceOperations;
+		std::vector<VulkanTexture*> m_ShaderTextures;
+		std::vector<VulkanBuffer*> m_ShaderBuffers;
+		VulkanBuffer* m_VertexBuffer = nullptr;
+		VulkanBuffer* m_IndexBuffer = nullptr;
+		// Local layouts check recording consistency without predicting other queues' submissions.
 		LayoutMap m_RecordedLayouts;
 
 		VkCommandBuffer m_CommandBuffer = VK_NULL_HANDLE;

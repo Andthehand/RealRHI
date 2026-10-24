@@ -3,6 +3,7 @@
 #include "Texture.h"
 #include "TextureDesc.h"
 #include "VulkanDevice.h"
+#include "VulkanResourceState.h"
 #include "VulkanTextureView.h"
 
 #include <volk.h>
@@ -39,6 +40,20 @@ namespace RealRHI {
 		friend class VulkanCommandList;
 		VkImage GetImage() const { return m_Image; }
 		VkFormat GetFormat() const { return m_Format; }
+		VkExtent3D GetExtent() const { return m_ImageExtent; }
+		TextureUsage GetUsage() const { return m_Usage; }
+		uint32_t GetMipLevelCount() const { return m_MipLevels; }
+		uint32_t GetArrayLayerCount() const { return m_ArrayLayers; }
+		bool IsExternal() const { return m_IsExternal; }
+
+		VulkanTextureState GetSubmittedState(uint32_t mip, uint32_t layer) const {
+			std::scoped_lock lock(m_Device->GetStateTrackingMutex());
+			return m_SubresourceStates[mip * m_ArrayLayers + layer];
+		}
+		void CommitSubmittedState(uint32_t mip, uint32_t layer, const VulkanTextureState& state) {
+			std::scoped_lock lock(m_Device->GetStateTrackingMutex());
+			m_SubresourceStates[mip * m_ArrayLayers + layer] = state;
+		}
 
 		static Result CreateFromSwapChain(const VulkanDevice* device,
 			VkFormat format,
@@ -46,17 +61,7 @@ namespace RealRHI {
 			Ref<VulkanTexture>& outTexture);
 		Result InitSwapChainTexture(VkFormat format, VkImage image);
 
-		VkSamplerCreateInfo GetSampler(); // TODO: Add sampler desc
-
-	private:
-		TextureLayout GetSubmittedLayout(uint32_t mip, uint32_t layer) const {
-			std::scoped_lock lock(m_Device->GetStateTrackingMutex());
-			return m_SubresourceLayouts[mip * m_ArrayLayers + layer];
-		}
-		void SetSubmittedLayout(uint32_t mip, uint32_t layer, TextureLayout layout) {
-			std::scoped_lock lock(m_Device->GetStateTrackingMutex());
-			m_SubresourceLayouts[mip * m_ArrayLayers + layer] = layout;
-		}
+		VkSamplerCreateInfo GetSampler(); // TODO: Add sampler desc?
 
 	private:
 		const VulkanDevice* m_Device = nullptr;
@@ -64,7 +69,7 @@ namespace RealRHI {
 		VmaAllocation m_Allocation = VK_NULL_HANDLE;
 
 		// Submission-ordered state; never modified during command recording.
-		std::vector<TextureLayout> m_SubresourceLayouts;
+		std::vector<VulkanTextureState> m_SubresourceStates;
 		TextureUsage m_Usage = TextureUsage::None;
 		VkFormat m_Format = VK_FORMAT_UNDEFINED;
 		bool m_IsExternal = false; // Whether the image is owned by us or external (e.g. swapchain)

@@ -64,6 +64,8 @@ namespace RealRHI {
 
 		// Explicitly declare shader-visible bindless resources for this recording.
 		// Must be called while recording, before submission. Retained through reset.
+		// Declarations apply to every subsequent draw/dispatch until Reset; those
+		// operations validate ownership of the whole buffer or default texture view.
 		virtual void UseResource(Texture* texture) = 0;
 		virtual void UseResource(Buffer* buffer) = 0;
 

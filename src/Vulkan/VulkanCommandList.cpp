@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <mutex>
+#include <sstream>
 #include <unordered_set>
 #include <utility>
 
@@ -168,7 +169,11 @@ namespace RealRHI {
 		released.swap(m_ReferencedResources);
 		m_ComputePipelineBound = false;
 		m_RecordedLayouts.clear();
-		m_InitialLayouts.clear();
+		m_ResourceOperations.clear();
+		m_ShaderTextures.clear();
+		m_ShaderBuffers.clear();
+		m_VertexBuffer = nullptr;
+		m_IndexBuffer = nullptr;
 		return Result::Success;
 	}
 
@@ -293,6 +298,24 @@ namespace RealRHI {
 			.pStencilAttachment = pStencilAttachment,
 		};
 
+		auto recordAttachment = [this](TextureView* view, TextureLayout layout) {
+			auto* textureView = static_cast<VulkanTextureView*>(view);
+			const auto& range = textureView->GetImageViewCreateInfo().subresourceRange;
+			RecordTextureUse(const_cast<VulkanTexture*>(textureView->GetTexture()),
+				{range.baseMipLevel, range.levelCount, range.baseArrayLayer, range.layerCount},
+				layout,
+				"BeginRendering");
+		};
+		for (const auto& attachment : renderingInfo.colorAttachments) {
+			recordAttachment(attachment.target, TextureLayout::ColorAttachment);
+		}
+		if (renderingInfo.hasDepth) {
+			TextureLayout layout = TextureLayout::DepthStencilAttachment;
+			if (depthAttachmentInfo.imageLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL) {
+				layout = TextureLayout::DepthStencilReadOnly;
+			}
+			recordAttachment(renderingInfo.depthAttachment.target, layout);
+		}
 		vkCmdBeginRendering(m_CommandBuffer, &renderPassInfo);
 		m_Rendering = true;
 	}
@@ -348,6 +371,10 @@ namespace RealRHI {
 		}
 
 		RetainResource(texture);
+		auto* vulkanTexture = static_cast<VulkanTexture*>(texture);
+		if (std::find(m_ShaderTextures.begin(), m_ShaderTextures.end(), vulkanTexture) == m_ShaderTextures.end()) {
+			m_ShaderTextures.push_back(vulkanTexture);
+		}
 	}
 
 	void VulkanCommandList::UseResource(Buffer* buffer) {
@@ -359,6 +386,10 @@ namespace RealRHI {
 		}
 
 		RetainResource(buffer);
+		auto* vulkanBuffer = static_cast<VulkanBuffer*>(buffer);
+		if (std::find(m_ShaderBuffers.begin(), m_ShaderBuffers.end(), vulkanBuffer) == m_ShaderBuffers.end()) {
+			m_ShaderBuffers.push_back(vulkanBuffer);
+		}
 	}
 
 	void VulkanCommandList::BindPipeline(Pipeline* pipeline) {
@@ -393,6 +424,7 @@ namespace RealRHI {
 			return;
 		}
 
+		RecordShaderResources("DispatchCompute");
 		vkCmdDispatch(m_CommandBuffer, groupCountX, groupCountY, groupCountZ);
 	}
 
@@ -429,6 +461,7 @@ namespace RealRHI {
 			return;
 		}
 		RetainResource(vertexBuffer);
+		m_VertexBuffer = buffer;
 		VkBuffer vertexBuffers[] = {static_cast<VulkanBuffer*>(vertexBuffer)->GetBuffer()};
 		VkDeviceSize offsets[] = {0};
 		vkCmdBindVertexBuffers(m_CommandBuffer, 0, 1, vertexBuffers, offsets);
@@ -444,6 +477,7 @@ namespace RealRHI {
 			return;
 		}
 		RetainResource(indexBuffer);
+		m_IndexBuffer = buffer;
 		vkCmdBindIndexBuffer(
 			m_CommandBuffer, static_cast<VulkanBuffer*>(indexBuffer)->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
 	}
@@ -483,6 +517,8 @@ namespace RealRHI {
 
 		RetainResource(sourceBuffer);
 		RetainResource(destinationBuffer);
+		RecordBufferUse(sourceBuffer, region.sourceOffset, region.size, "CopyBuffer source");
+		RecordBufferUse(destinationBuffer, region.destinationOffset, region.size, "CopyBuffer destination");
 
 		VkBufferCopy copyRegion{
 			.srcOffset = region.sourceOffset,
@@ -500,32 +536,215 @@ namespace RealRHI {
 			return it->second;
 		}
 
-		return texture->GetSubmittedLayout(mip, layer);
+		return texture->GetSubmittedState(mip, layer).layout;
 	}
 
-	bool VulkanCommandList::ValidateSubmissionLayouts(LayoutMap& predicted) const {
-		for (const auto& [key, layout] : m_InitialLayouts) {
-			const auto it = predicted.find(key);
-			TextureLayout current;
-			if (it != predicted.end()) {
-				current = it->second;
+	bool VulkanCommandList::ValidateOwnership(VulkanQueueOwnership& ownership,
+		const ResourceOperation& operation,
+		SubmissionToken submission,
+		std::span<const VkSemaphoreSubmitInfo> waits) const {
+		auto reject = [&](const char* cause) {
+			std::ostringstream message;
+			message << "Submit: " << operation.name << ": " << cause << "; family=" << m_QueueId.familyIndex
+					<< ", owner=" << ownership.family << ", pending destination=" << ownership.pendingFamily;
+			if (operation.buffer) {
+				message << ", buffer=" << operation.buffer << ", offset=" << operation.offset
+						<< ", size=" << operation.size;
 			}
 			else {
-				current = key.texture->GetSubmittedLayout(key.mipLevel, key.arrayLayer);
+				message << ", texture=" << operation.texture << ", base mip=" << operation.subresources.baseMipLevel
+						<< ", base layer=" << operation.subresources.baseArrayLayer;
 			}
-			if (layout != TextureLayout::Undefined && current != layout) {
-				return false;
+			if (ownership.release.IsValid()) {
+				message << ", release token=" << ownership.release.queue.familyIndex << ":"
+						<< ownership.release.queue.queueIndex << "/" << ownership.release.value;
 			}
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, message.str().c_str());
+			return false;
+		};
+
+		const bool transfer =
+			operation.sourceFamily != UINT32_MAX && operation.sourceFamily != operation.destinationFamily;
+		const bool acquire = transfer && m_QueueId.familyIndex == operation.destinationFamily;
+		if (acquire) {
+			if (ownership.family != operation.sourceFamily || ownership.pendingFamily != operation.destinationFamily ||
+				!ownership.release.IsValid()) {
+				return reject("acquire requires a matching release from the source family");
+			}
+			auto* sourceQueue = m_Device->GetCommandQueue(ownership.release.queue);
+			bool waited = false;
+			for (const auto& wait : waits) {
+				if (sourceQueue && wait.semaphore == sourceQueue->GetTimelineSemaphore() &&
+					wait.value >= ownership.release.value &&
+					(wait.stageMask & VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT) != 0) {
+					waited = true;
+					break;
+				}
+			}
+			if (!waited) {
+				return reject("acquire must waitFor the release submission token (or a later token on that queue)");
+			}
+			ownership.family = operation.destinationFamily;
+			ownership.pendingFamily = UINT32_MAX;
+			ownership.release = {};
+			return true;
 		}
-		for (const auto& [key, layout] : m_RecordedLayouts) {
-			predicted[key] = layout;
+
+		if (ownership.pendingFamily != UINT32_MAX) {
+			return reject("resource was released; record a matching acquire before using or releasing it again");
+		}
+		if (ownership.family != UINT32_MAX && ownership.family != m_QueueId.familyIndex) {
+			return reject("resource belongs to another family; release there and acquire on this family");
+		}
+		ownership.family = m_QueueId.familyIndex;
+		if (transfer) {
+			ownership.pendingFamily = operation.destinationFamily;
+			ownership.release = submission;
 		}
 		return true;
 	}
 
-	void VulkanCommandList::CommitSubmissionLayouts() const {
-		for (const auto& [key, layout] : m_RecordedLayouts) {
-			const_cast<VulkanTexture*>(key.texture)->SetSubmittedLayout(key.mipLevel, key.arrayLayer, layout);
+	bool VulkanCommandList::ValidateSubmissionState(SubmissionState& predicted,
+		SubmissionToken submission,
+		std::span<const VkSemaphoreSubmitInfo> waits) const {
+		for (const auto& operation : m_ResourceOperations) {
+			const bool transfer =
+				operation.sourceFamily != UINT32_MAX && operation.sourceFamily != operation.destinationFamily;
+			const bool acquire = transfer && m_QueueId.familyIndex == operation.destinationFamily;
+			if (operation.buffer) {
+				auto [entry, inserted] = predicted.buffers.try_emplace(operation.buffer);
+				if (inserted) {
+					entry->second = operation.buffer->GetSubmittedRanges();
+				}
+				auto& ranges = entry->second;
+				const uint64_t end = operation.offset + operation.size;
+				// Split at operation boundaries so disjoint buffer regions can change owners independently.
+				for (uint64_t boundary : {operation.offset, end}) {
+					for (size_t i = 0; i < ranges.size(); ++i) {
+						auto& range = ranges[i];
+						if (boundary > range.offset && boundary < range.offset + range.size) {
+							auto tail = range;
+							tail.size = range.offset + range.size - boundary;
+							tail.offset = boundary;
+							range.size = boundary - range.offset;
+							ranges.insert(ranges.begin() + i + 1, tail);
+							break;
+						}
+					}
+				}
+				for (auto& range : ranges) {
+					if (range.offset < operation.offset || range.offset >= end) {
+						continue;
+					}
+					if (!ValidateOwnership(range.ownership, operation, submission, waits)) {
+						return false;
+					}
+					if (acquire && (range.releaseOffset != operation.offset || range.releaseSize != operation.size)) {
+						m_Device->SendDebugMessage(DebugSeverity::Error,
+							DebugMessageType::General,
+							"Submit: Buffer acquire offset and size must exactly match the release barrier.");
+						return false;
+					}
+					if (transfer && !acquire) {
+						range.releaseOffset = operation.offset;
+						range.releaseSize = operation.size;
+					}
+				}
+				continue;
+			}
+
+			const auto& subresources = operation.subresources;
+			for (uint32_t mip = subresources.baseMipLevel; mip < subresources.baseMipLevel + subresources.mipLevelCount;
+				++mip) {
+				for (uint32_t layer = subresources.baseArrayLayer;
+					layer < subresources.baseArrayLayer + subresources.arrayLayerCount;
+					++layer) {
+					const SubresourceKey key{operation.texture, mip, layer};
+					auto [entry, inserted] = predicted.textures.try_emplace(key);
+					if (inserted) {
+						entry->second = operation.texture->GetSubmittedState(mip, layer);
+					}
+					auto& state = entry->second;
+					if (!ValidateOwnership(state.ownership, operation, submission, waits)) {
+						return false;
+					}
+					if (acquire) {
+						const auto& released = state.releaseRange;
+						if (state.releaseOldLayout != operation.oldLayout ||
+							state.releaseNewLayout != operation.newLayout ||
+							released.baseMipLevel != subresources.baseMipLevel ||
+							released.mipLevelCount != subresources.mipLevelCount ||
+							released.baseArrayLayer != subresources.baseArrayLayer ||
+							released.arrayLayerCount != subresources.arrayLayerCount) {
+							m_Device->SendDebugMessage(DebugSeverity::Error,
+								DebugMessageType::General,
+								"Submit: Texture acquire old/new layouts and mip/layer range must exactly match the "
+								"release barrier.");
+							return false;
+						}
+					}
+					else if (operation.oldLayout != TextureLayout::Undefined && state.layout != operation.oldLayout) {
+						std::ostringstream message;
+						message << "Submit: " << operation.name << ": texture=" << operation.texture << ", mip=" << mip
+								<< ", layer=" << layer << ": layout differs from the recorded requirement; expected="
+								<< static_cast<uint32_t>(operation.oldLayout)
+								<< ", submitted=" << static_cast<uint32_t>(state.layout);
+						m_Device->SendDebugMessage(
+							DebugSeverity::Error, DebugMessageType::General, message.str().c_str());
+						return false;
+					}
+					if (transfer && !acquire) {
+						state.releaseOldLayout = operation.oldLayout;
+						state.releaseNewLayout = operation.newLayout;
+						state.releaseRange = subresources;
+					}
+					if (operation.barrier) {
+						state.layout = operation.newLayout;
+					}
+				}
+			}
+		}
+		return true;
+	}
+
+	void VulkanCommandList::CommitSubmissionState(SubmissionState& predicted) {
+		for (auto& [buffer, ranges] : predicted.buffers) {
+			buffer->CommitSubmittedRanges(std::move(ranges));
+		}
+		for (const auto& [key, state] : predicted.textures) {
+			const_cast<VulkanTexture*>(key.texture)->CommitSubmittedState(key.mipLevel, key.arrayLayer, state);
+		}
+	}
+
+	void VulkanCommandList::RecordBufferUse(VulkanBuffer* buffer,
+		uint64_t offset,
+		uint64_t size,
+		const char* operation) {
+		m_ResourceOperations.push_back({.name = operation, .buffer = buffer, .offset = offset, .size = size});
+	}
+
+	void VulkanCommandList::RecordTextureUse(VulkanTexture* texture,
+		TextureSubresourceRange subresources,
+		TextureLayout layout,
+		const char* operation) {
+		// Swapchain pre/post transitions and presentation ownership are managed by Device::Submit.
+		if (!texture->IsExternal()) {
+			m_ResourceOperations.push_back(
+				{.name = operation, .texture = texture, .subresources = subresources, .oldLayout = layout});
+		}
+	}
+
+	void VulkanCommandList::RecordShaderResources(const char* operation) {
+		for (auto* buffer : m_ShaderBuffers) {
+			RecordBufferUse(buffer, 0, buffer->GetSize(), operation);
+		}
+		for (auto* texture : m_ShaderTextures) {
+			TextureLayout layout = TextureLayout::ShaderRead;
+			if (Any(texture->GetUsage() & TextureUsage::Storage)) {
+				layout = TextureLayout::General;
+			}
+			RecordTextureUse(
+				texture, {0, texture->GetMipLevelCount(), 0, texture->GetArrayLayerCount()}, layout, operation);
 		}
 	}
 
@@ -534,12 +753,8 @@ namespace RealRHI {
 		uint32_t baseLayer,
 		uint32_t layerCount,
 		TextureLayout expected) {
-		for (uint32_t layer = baseLayer; layer < baseLayer + layerCount; ++layer) {
-			const SubresourceKey key{texture, mipLevel, layer};
-			if (!m_RecordedLayouts.contains(key)) {
-				m_InitialLayouts.emplace(key, expected);
-			}
-		}
+		RecordTextureUse(
+			const_cast<VulkanTexture*>(texture), {mipLevel, 1, baseLayer, layerCount}, expected, "Texture copy");
 	}
 
 	bool VulkanCommandList::HasRecordedLayout(const VulkanTexture* texture,
@@ -548,7 +763,9 @@ namespace RealRHI {
 		uint32_t layerCount,
 		TextureLayout expected) const {
 		for (uint32_t layer = baseLayer; layer < baseLayer + layerCount; ++layer) {
-			if (expected != TextureLayout::Undefined && GetExpectedLayout(texture, mipLevel, layer) != expected) {
+			const auto recorded = m_RecordedLayouts.find({texture, mipLevel, layer});
+			if (expected != TextureLayout::Undefined && recorded != m_RecordedLayouts.end() &&
+				recorded->second != expected) {
 				return false;
 			}
 		}
@@ -570,11 +787,11 @@ namespace RealRHI {
 		auto* sourceBuffer = static_cast<VulkanBuffer*>(source);
 		auto* destinationTexture = static_cast<VulkanTexture*>(destination);
 		if (sourceBuffer == nullptr || destinationTexture == nullptr ||
-			region.mipLevel >= destinationTexture->m_MipLevels ||
-			region.baseArrayLayer >= destinationTexture->m_ArrayLayers ||
-			region.layerCount > destinationTexture->m_ArrayLayers - region.baseArrayLayer ||
+			region.mipLevel >= destinationTexture->GetMipLevelCount() ||
+			region.baseArrayLayer >= destinationTexture->GetArrayLayerCount() ||
+			region.layerCount > destinationTexture->GetArrayLayerCount() - region.baseArrayLayer ||
 			!Any(sourceBuffer->GetUsage() & BufferUsage::TransferSrc) ||
-			!Any(destinationTexture->m_Usage & TextureUsage::TransferDst)) {
+			!Any(destinationTexture->GetUsage() & TextureUsage::TransferDst)) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
 				"CopyBufferToTexture failed: Invalid source buffer or destination texture, or "
@@ -584,9 +801,9 @@ namespace RealRHI {
 		}
 
 		const VkExtent3D mipExtent{
-			.width = std::max(1u, destinationTexture->m_ImageExtent.width >> region.mipLevel),
-			.height = std::max(1u, destinationTexture->m_ImageExtent.height >> region.mipLevel),
-			.depth = std::max(1u, destinationTexture->m_ImageExtent.depth >> region.mipLevel),
+			.width = std::max(1u, destinationTexture->GetExtent().width >> region.mipLevel),
+			.height = std::max(1u, destinationTexture->GetExtent().height >> region.mipLevel),
+			.depth = std::max(1u, destinationTexture->GetExtent().depth >> region.mipLevel),
 		};
 		if (region.width > mipExtent.width || region.height > mipExtent.height || region.depth > mipExtent.depth ||
 			region.bufferOffset >= sourceBuffer->GetSize()) {
@@ -599,7 +816,7 @@ namespace RealRHI {
 		}
 
 		const uint32_t texelSize =
-			Utils::TextureFormatByteSize(Utils::VkFormatToTextureFormat(destinationTexture->m_Format));
+			Utils::TextureFormatByteSize(Utils::VkFormatToTextureFormat(destinationTexture->GetFormat()));
 		if (texelSize == 0 || region.bufferOffset % texelSize != 0 ||
 			region.width > UINT64_MAX / region.height / region.depth / region.layerCount / texelSize ||
 			static_cast<uint64_t>(region.width) * region.height * region.depth * region.layerCount * texelSize >
@@ -615,12 +832,16 @@ namespace RealRHI {
 			destinationTexture, region.mipLevel, region.baseArrayLayer, region.layerCount, TextureLayout::TransferDst);
 		RetainResource(sourceBuffer);
 		RetainResource(destinationTexture);
+		RecordBufferUse(sourceBuffer,
+			region.bufferOffset,
+			static_cast<uint64_t>(region.width) * region.height * region.depth * region.layerCount * texelSize,
+			"CopyBufferToTexture");
 		VkBufferImageCopy copyRegion{
 			.bufferOffset = region.bufferOffset,
 			.imageSubresource =
 				{
 					.aspectMask = Utils::TextureFormatToVkImageAspect(
-						Utils::VkFormatToTextureFormat(destinationTexture->m_Format)),
+						Utils::VkFormatToTextureFormat(destinationTexture->GetFormat())),
 					.mipLevel = region.mipLevel,
 					.baseArrayLayer = region.baseArrayLayer,
 					.layerCount = region.layerCount,
@@ -629,7 +850,7 @@ namespace RealRHI {
 		};
 		vkCmdCopyBufferToImage(m_CommandBuffer,
 			sourceBuffer->GetBuffer(),
-			destinationTexture->m_Image,
+			destinationTexture->GetImage(),
 			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 			1,
 			&copyRegion);
@@ -648,11 +869,11 @@ namespace RealRHI {
 
 		auto* texture = static_cast<VulkanTexture*>(source);
 		auto* buffer = static_cast<VulkanBuffer*>(destination);
-		if (texture == nullptr || buffer == nullptr || !Any(texture->m_Usage & TextureUsage::TransferSrc) ||
+		if (texture == nullptr || buffer == nullptr || !Any(texture->GetUsage() & TextureUsage::TransferSrc) ||
 			!Any(buffer->GetUsage() & BufferUsage::TransferDst) ||
 
-			region.mipLevel >= texture->m_MipLevels || region.baseArrayLayer >= texture->m_ArrayLayers ||
-			region.layerCount > texture->m_ArrayLayers - region.baseArrayLayer ||
+			region.mipLevel >= texture->GetMipLevelCount() || region.baseArrayLayer >= texture->GetArrayLayerCount() ||
+			region.layerCount > texture->GetArrayLayerCount() - region.baseArrayLayer ||
 			region.bufferOffset >= buffer->GetSize() ||
 			!HasRecordedLayout(
 				texture, region.mipLevel, region.baseArrayLayer, region.layerCount, TextureLayout::TransferSrc)) {
@@ -663,9 +884,9 @@ namespace RealRHI {
 		}
 
 		const VkExtent3D mipExtent{
-			.width = std::max(1u, texture->m_ImageExtent.width >> region.mipLevel),
-			.height = std::max(1u, texture->m_ImageExtent.height >> region.mipLevel),
-			.depth = std::max(1u, texture->m_ImageExtent.depth >> region.mipLevel),
+			.width = std::max(1u, texture->GetExtent().width >> region.mipLevel),
+			.height = std::max(1u, texture->GetExtent().height >> region.mipLevel),
+			.depth = std::max(1u, texture->GetExtent().depth >> region.mipLevel),
 		};
 		if (region.width > mipExtent.width || region.height > mipExtent.height || region.depth > mipExtent.depth) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
@@ -676,7 +897,7 @@ namespace RealRHI {
 
 		// Initial readback supports tightly packed RGBA8 data. Other formats
 		// need format-aware block size and row pitch handling.
-		if (texture->m_Format != VK_FORMAT_R8G8B8A8_UNORM ||
+		if (texture->GetFormat() != VK_FORMAT_R8G8B8A8_UNORM ||
 			region.width > UINT64_MAX / region.height / region.depth / region.layerCount / 4 ||
 			static_cast<uint64_t>(region.width) * region.height * region.depth * region.layerCount * 4 >
 				buffer->GetSize() - region.bufferOffset) {
@@ -690,6 +911,10 @@ namespace RealRHI {
 			texture, region.mipLevel, region.baseArrayLayer, region.layerCount, TextureLayout::TransferSrc);
 		RetainResource(texture);
 		RetainResource(buffer);
+		RecordBufferUse(buffer,
+			region.bufferOffset,
+			static_cast<uint64_t>(region.width) * region.height * region.depth * region.layerCount * 4,
+			"CopyTextureToBuffer");
 		VkBufferImageCopy copyRegion{
 			.bufferOffset = region.bufferOffset,
 			.imageSubresource =
@@ -702,7 +927,7 @@ namespace RealRHI {
 			.imageExtent = {region.width, region.height, region.depth},
 		};
 		vkCmdCopyImageToBuffer(m_CommandBuffer,
-			texture->m_Image,
+			texture->GetImage(),
 			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 			buffer->GetBuffer(),
 			1,
@@ -721,17 +946,17 @@ namespace RealRHI {
 		auto* sourceTexture = static_cast<VulkanTexture*>(source);
 		auto* destinationTexture = static_cast<VulkanTexture*>(destination);
 		if (sourceTexture == nullptr || destinationTexture == nullptr ||
-			!Any(sourceTexture->m_Usage & TextureUsage::TransferSrc) ||
-			!Any(destinationTexture->m_Usage & TextureUsage::TransferDst) ||
+			!Any(sourceTexture->GetUsage() & TextureUsage::TransferSrc) ||
+			!Any(destinationTexture->GetUsage() & TextureUsage::TransferDst) ||
 
-			sourceTexture == destinationTexture || sourceTexture->m_Format != destinationTexture->m_Format ||
-			sourceTexture->m_Format != VK_FORMAT_R8G8B8A8_UNORM ||
-			region.sourceMipLevel >= sourceTexture->m_MipLevels ||
-			region.destinationMipLevel >= destinationTexture->m_MipLevels ||
-			region.sourceBaseArrayLayer >= sourceTexture->m_ArrayLayers ||
-			region.destinationBaseArrayLayer >= destinationTexture->m_ArrayLayers ||
-			region.layerCount > sourceTexture->m_ArrayLayers - region.sourceBaseArrayLayer ||
-			region.layerCount > destinationTexture->m_ArrayLayers - region.destinationBaseArrayLayer ||
+			sourceTexture == destinationTexture || sourceTexture->GetFormat() != destinationTexture->GetFormat() ||
+			sourceTexture->GetFormat() != VK_FORMAT_R8G8B8A8_UNORM ||
+			region.sourceMipLevel >= sourceTexture->GetMipLevelCount() ||
+			region.destinationMipLevel >= destinationTexture->GetMipLevelCount() ||
+			region.sourceBaseArrayLayer >= sourceTexture->GetArrayLayerCount() ||
+			region.destinationBaseArrayLayer >= destinationTexture->GetArrayLayerCount() ||
+			region.layerCount > sourceTexture->GetArrayLayerCount() - region.sourceBaseArrayLayer ||
+			region.layerCount > destinationTexture->GetArrayLayerCount() - region.destinationBaseArrayLayer ||
 			!HasRecordedLayout(sourceTexture,
 				region.sourceMipLevel,
 				region.sourceBaseArrayLayer,
@@ -749,9 +974,9 @@ namespace RealRHI {
 		}
 
 		const auto fits = [&](const VulkanTexture* texture, uint32_t mipLevel) {
-			return region.width <= std::max(1u, texture->m_ImageExtent.width >> mipLevel) &&
-				region.height <= std::max(1u, texture->m_ImageExtent.height >> mipLevel) &&
-				region.depth <= std::max(1u, texture->m_ImageExtent.depth >> mipLevel);
+			return region.width <= std::max(1u, texture->GetExtent().width >> mipLevel) &&
+				region.height <= std::max(1u, texture->GetExtent().height >> mipLevel) &&
+				region.depth <= std::max(1u, texture->GetExtent().depth >> mipLevel);
 		};
 		if (!fits(sourceTexture, region.sourceMipLevel) || !fits(destinationTexture, region.destinationMipLevel)) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
@@ -790,35 +1015,57 @@ namespace RealRHI {
 			.extent = {region.width, region.height, region.depth},
 		};
 		vkCmdCopyImage(m_CommandBuffer,
-			sourceTexture->m_Image,
+			sourceTexture->GetImage(),
 			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-			destinationTexture->m_Image,
+			destinationTexture->GetImage(),
 			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 			1,
 			&copyRegion);
 	}
 
-	void VulkanCommandList::Barrier(const BarrierDesc& barriers) {
-		if (GetState() != CommandListState::Recording) {
+	bool VulkanCommandList::ResolveQueueFamilies(std::optional<QueueType> source,
+		std::optional<QueueType> destination,
+		uint32_t& sourceFamily,
+		uint32_t& destinationFamily) const {
+		sourceFamily = UINT32_MAX;
+		destinationFamily = UINT32_MAX;
+		if (source.has_value() != destination.has_value()) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
-				"Barrier: Call Begin() before recording resource barriers.");
+				"Barrier: Specify both sourceQueue and destinationQueue, or neither.");
+			return false;
+		}
+		if (!source) {
+			return true;
+		}
+		auto* sourceQueue = m_Device->GetCommandQueue(*source);
+		auto* destinationQueue = m_Device->GetCommandQueue(*destination);
+		if (!sourceQueue || !destinationQueue) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"Barrier: Queue endpoints must identify available graphics, compute or transfer queues.");
+			return false;
+		}
+		sourceFamily = sourceQueue->GetQueueId().familyIndex;
+		destinationFamily = destinationQueue->GetQueueId().familyIndex;
+		if (m_QueueId.familyIndex != sourceFamily && m_QueueId.familyIndex != destinationFamily) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"Barrier: Record ownership transfers on the source family (release) or destination family (acquire).");
+			return false;
+		}
+		return true;
+	}
+
+	void VulkanCommandList::Barrier(const BarrierDesc& barriers) {
+		if (GetState() != CommandListState::Recording || m_Rendering) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"Barrier: Requires recording outside a rendering scope.");
 			return;
 		}
 
-		auto getQueueFamilies = [this](std::optional<QueueType> source, std::optional<QueueType> destination) {
-			std::pair<uint32_t, uint32_t> families{VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED};
-			if (!source || !destination) {
-				return families;
-			}
-			auto* sourceQueue = static_cast<VulkanCommandQueue*>(m_Device->GetCommandQueue(*source));
-			auto* destinationQueue = static_cast<VulkanCommandQueue*>(m_Device->GetCommandQueue(*destination));
-			if (sourceQueue != nullptr && destinationQueue != nullptr &&
-				sourceQueue->GetQueueId().familyIndex != destinationQueue->GetQueueId().familyIndex) {
-				families = {sourceQueue->GetQueueId().familyIndex, destinationQueue->GetQueueId().familyIndex};
-			}
-			return families;
-		};
+		std::vector<ResourceOperation> operations;
 
 		std::vector<VkMemoryBarrier2> memoryBarriers;
 		std::vector<VkBufferMemoryBarrier2> bufferBarriers;
@@ -848,40 +1095,66 @@ namespace RealRHI {
 				return;
 			}
 
-			const auto [sourceFamily, destinationFamily] =
-				getQueueFamilies(barrier.sourceQueue, barrier.destinationQueue);
+			uint32_t sourceFamily, destinationFamily;
+			if (!ResolveQueueFamilies(barrier.sourceQueue, barrier.destinationQueue, sourceFamily, destinationFamily)) {
+				return;
+			}
+			const bool transfer = sourceFamily != UINT32_MAX && sourceFamily != destinationFamily;
+			ResourceState before = barrier.before;
+			ResourceState after = barrier.after;
+			if (transfer && m_QueueId.familyIndex == sourceFamily) {
+				after = {};
+			}
+			if (transfer && m_QueueId.familyIndex == destinationFamily) {
+				before = {};
+			}
 			bufferBarriers.push_back({
 				.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-				.srcStageMask = Utils::ToVkPipelineStages(barrier.before.stages),
-				.srcAccessMask = Utils::ToVkResourceAccess(barrier.before.access),
-				.dstStageMask = Utils::ToVkPipelineStages(barrier.after.stages),
-				.dstAccessMask = Utils::ToVkResourceAccess(barrier.after.access),
-				.srcQueueFamilyIndex = sourceFamily,
-				.dstQueueFamilyIndex = destinationFamily,
+				.srcStageMask = Utils::ToVkPipelineStages(before.stages),
+				.srcAccessMask = Utils::ToVkResourceAccess(before.access),
+				.dstStageMask = Utils::ToVkPipelineStages(after.stages),
+				.dstAccessMask = Utils::ToVkResourceAccess(after.access),
+				.srcQueueFamilyIndex = transfer ? sourceFamily : VK_QUEUE_FAMILY_IGNORED,
+				.dstQueueFamilyIndex = transfer ? destinationFamily : VK_QUEUE_FAMILY_IGNORED,
 				.buffer = buffer->GetBuffer(),
 				.offset = barrier.offset,
 				.size = barrier.size,
 			});
+			operations.push_back({.name = "Buffer barrier",
+				.buffer = buffer,
+				.offset = barrier.offset,
+				.size = barrier.size,
+				.sourceFamily = sourceFamily,
+				.destinationFamily = destinationFamily,
+				.barrier = true});
 		}
 
 		for (const TextureBarrier& barrier : barriers.textures) {
 			auto* texture = static_cast<VulkanTexture*>(barrier.texture);
-			if (texture == nullptr || barrier.subresources.mipLevelCount == 0 ||
-				barrier.subresources.arrayLayerCount == 0 ||
-				barrier.subresources.baseMipLevel >= texture->m_MipLevels ||
-				barrier.subresources.mipLevelCount > texture->m_MipLevels - barrier.subresources.baseMipLevel ||
-				barrier.subresources.baseArrayLayer >= texture->m_ArrayLayers ||
-				barrier.subresources.arrayLayerCount > texture->m_ArrayLayers - barrier.subresources.baseArrayLayer) {
+			if (texture == nullptr || barrier.newLayout == TextureLayout::Undefined ||
+				barrier.subresources.mipLevelCount == 0 || barrier.subresources.arrayLayerCount == 0 ||
+				barrier.subresources.baseMipLevel >= texture->GetMipLevelCount() ||
+				barrier.subresources.mipLevelCount > texture->GetMipLevelCount() - barrier.subresources.baseMipLevel ||
+				barrier.subresources.baseArrayLayer >= texture->GetArrayLayerCount() ||
+				barrier.subresources.arrayLayerCount >
+					texture->GetArrayLayerCount() - barrier.subresources.baseArrayLayer) {
 				m_Device->SendDebugMessage(DebugSeverity::Error,
 					DebugMessageType::General,
-					"Barrier: Texture subresource range is invalid. Check mip and array-layer bounds.");
+					"Barrier: Provide a defined newLayout and a valid texture mip/layer range.");
 				return;
 			}
 
+			uint32_t sourceFamily, destinationFamily;
+			if (!ResolveQueueFamilies(barrier.sourceQueue, barrier.destinationQueue, sourceFamily, destinationFamily)) {
+				return;
+			}
+			const bool transfer = sourceFamily != UINT32_MAX && sourceFamily != destinationFamily;
+			const bool acquire = transfer && m_QueueId.familyIndex == destinationFamily;
 			for (uint32_t mip = barrier.subresources.baseMipLevel;
 				mip < barrier.subresources.baseMipLevel + barrier.subresources.mipLevelCount;
 				++mip) {
-				if (!HasRecordedLayout(texture,
+				if (!acquire &&
+					!HasRecordedLayout(texture,
 						mip,
 						barrier.subresources.baseArrayLayer,
 						barrier.subresources.arrayLayerCount,
@@ -893,32 +1166,59 @@ namespace RealRHI {
 				}
 			}
 
-			const auto [sourceFamily, destinationFamily] =
-				getQueueFamilies(barrier.sourceQueue, barrier.destinationQueue);
+			ResourceState before = barrier.before;
+			ResourceState after = barrier.after;
+			if (transfer && !acquire) {
+				after = {};
+			}
+			if (acquire) {
+				before = {};
+			}
 			imageBarriers.push_back({
 				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-				.srcStageMask = Utils::ToVkPipelineStages(barrier.before.stages),
-				.srcAccessMask = Utils::ToVkResourceAccess(barrier.before.access),
-				.dstStageMask = Utils::ToVkPipelineStages(barrier.after.stages),
-				.dstAccessMask = Utils::ToVkResourceAccess(barrier.after.access),
+				.srcStageMask = Utils::ToVkPipelineStages(before.stages),
+				.srcAccessMask = Utils::ToVkResourceAccess(before.access),
+				.dstStageMask = Utils::ToVkPipelineStages(after.stages),
+				.dstAccessMask = Utils::ToVkResourceAccess(after.access),
 				.oldLayout = Utils::TextureLayoutToVkImageLayout(barrier.oldLayout),
 				.newLayout = Utils::TextureLayoutToVkImageLayout(barrier.newLayout),
-				.srcQueueFamilyIndex = sourceFamily,
-				.dstQueueFamilyIndex = destinationFamily,
-				.image = texture->m_Image,
+				.srcQueueFamilyIndex = transfer ? sourceFamily : VK_QUEUE_FAMILY_IGNORED,
+				.dstQueueFamilyIndex = transfer ? destinationFamily : VK_QUEUE_FAMILY_IGNORED,
+				.image = texture->GetImage(),
 				.subresourceRange =
 					{
 						.aspectMask =
-							Utils::TextureFormatToVkImageAspect(Utils::VkFormatToTextureFormat(texture->m_Format)),
+							Utils::TextureFormatToVkImageAspect(Utils::VkFormatToTextureFormat(texture->GetFormat())),
 						.baseMipLevel = barrier.subresources.baseMipLevel,
 						.levelCount = barrier.subresources.mipLevelCount,
 						.baseArrayLayer = barrier.subresources.baseArrayLayer,
 						.layerCount = barrier.subresources.arrayLayerCount,
 					},
 			});
+			operations.push_back({.name = "Texture barrier",
+				.texture = texture,
+				.subresources = barrier.subresources,
+				.oldLayout = barrier.oldLayout,
+				.newLayout = barrier.newLayout,
+				.sourceFamily = sourceFamily,
+				.destinationFamily = destinationFamily,
+				.barrier = true});
 		}
 
 		// Reject overlapping ranges: barriers within one dependency are not sequential.
+		for (size_t i = 0; i < barriers.buffers.size(); ++i) {
+			for (size_t j = 0; j < i; ++j) {
+				const auto& first = barriers.buffers[i];
+				const auto& second = barriers.buffers[j];
+				if (first.buffer == second.buffer && first.offset < second.offset + second.size &&
+					second.offset < first.offset + first.size) {
+					m_Device->SendDebugMessage(DebugSeverity::Error,
+						DebugMessageType::General,
+						"Barrier: Overlapping buffer barriers must be recorded in separate calls.");
+					return;
+				}
+			}
+		}
 		std::unordered_set<SubresourceKey, SubresourceKeyHash> touched;
 		for (const TextureBarrier& barrier : barriers.textures) {
 			auto* texture = static_cast<VulkanTexture*>(barrier.texture);
@@ -948,9 +1248,6 @@ namespace RealRHI {
 					layer < barrier.subresources.baseArrayLayer + barrier.subresources.arrayLayerCount;
 					++layer) {
 					const SubresourceKey key{texture, mip, layer};
-					if (!m_RecordedLayouts.contains(key)) {
-						m_InitialLayouts.emplace(key, barrier.oldLayout);
-					}
 					m_RecordedLayouts[key] = barrier.newLayout;
 				}
 			}
@@ -962,6 +1259,7 @@ namespace RealRHI {
 		for (const TextureBarrier& barrier : barriers.textures) {
 			RetainResource(barrier.texture);
 		}
+		m_ResourceOperations.insert(m_ResourceOperations.end(), operations.begin(), operations.end());
 
 		VkDependencyInfo dependencyInfo{
 			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
@@ -982,6 +1280,10 @@ namespace RealRHI {
 				"Draw: Requires an active rendering scope and a bound graphics pipeline.");
 			return;
 		}
+		RecordShaderResources("Draw");
+		if (m_VertexBuffer) {
+			RecordBufferUse(m_VertexBuffer, 0, m_VertexBuffer->GetSize(), "Draw vertex buffer");
+		}
 		vkCmdDraw(m_CommandBuffer, vertexCount, 1, 0, 0);
 	}
 
@@ -991,6 +1293,13 @@ namespace RealRHI {
 				DebugMessageType::General,
 				"DrawIndexed: Requires an active rendering scope and a bound graphics pipeline.");
 			return;
+		}
+		RecordShaderResources("DrawIndexed");
+		if (m_VertexBuffer) {
+			RecordBufferUse(m_VertexBuffer, 0, m_VertexBuffer->GetSize(), "DrawIndexed vertex buffer");
+		}
+		if (m_IndexBuffer) {
+			RecordBufferUse(m_IndexBuffer, 0, m_IndexBuffer->GetSize(), "DrawIndexed index buffer");
 		}
 		vkCmdDrawIndexed(m_CommandBuffer, indexCount, 1, 0, 0, 0);
 	}

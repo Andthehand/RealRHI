@@ -36,6 +36,7 @@ namespace RealRHI {
 		}
 		m_Usage = desc.usage;
 		m_Size = desc.size;
+		m_SubmittedRanges = {{.offset = 0, .size = m_Size}};
 
 		VkBufferCreateInfo bufferInfo{
 			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -107,6 +108,30 @@ namespace RealRHI {
 
 		memcpy(data, static_cast<const char*>(m_AllocInfo.pMappedData) + offset, static_cast<size_t>(size));
 		return Result::Success;
+	}
+
+	std::vector<VulkanBufferRangeState> VulkanBuffer::GetSubmittedRanges() const {
+		std::scoped_lock lock(m_Device->GetStateTrackingMutex());
+		return m_SubmittedRanges;
+	}
+
+	void VulkanBuffer::CommitSubmittedRanges(std::vector<VulkanBufferRangeState> ranges) {
+		std::scoped_lock lock(m_Device->GetStateTrackingMutex());
+		// Repeated copies must not leave an ever-growing list of equivalent byte ranges.
+		size_t count = 0;
+		for (size_t i = 0; i < ranges.size(); ++i) {
+			if (count > 0 && ranges[count - 1].ownership == ranges[i].ownership &&
+				(ranges[i].ownership.pendingFamily == UINT32_MAX ||
+					(ranges[count - 1].releaseOffset == ranges[i].releaseOffset &&
+						ranges[count - 1].releaseSize == ranges[i].releaseSize))) {
+				ranges[count - 1].size += ranges[i].size;
+			}
+			else {
+				ranges[count++] = ranges[i];
+			}
+		}
+		ranges.resize(count);
+		m_SubmittedRanges = std::move(ranges);
 	}
 
 	VkDeviceAddress VulkanBuffer::GetBufferDeviceAddress() const {

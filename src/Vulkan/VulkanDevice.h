@@ -33,7 +33,7 @@ namespace RealRHI {
 
 	class VulkanDevice : public Device {
 	public:
-		VulkanDevice() = default;
+		VulkanDevice();
 		~VulkanDevice();
 
 		Result Init(const DeviceDesc& desc);
@@ -74,7 +74,8 @@ namespace RealRHI {
 		Result Submit(CommandList* cmd,
 			Swapchain* swapchain,
 			const FrameContext& frame,
-			SubmissionToken* outToken = nullptr) override;
+			SubmissionToken* outToken = nullptr,
+			std::span<const SubmissionToken> waitFor = {}) override;
 		Result ImmediateSubmit(CommandList* cmd) const override;
 		void WaitIdle() override;
 		void DeferDeletion(std::vector<SubmissionToken> dependencies, std::function<void()> destroy) const override;

@@ -33,6 +33,8 @@ namespace RealRHI {
 
 	struct SubmitInfo {
 		std::span<CommandList*> commandLists{};
+		// Acquiring ownership from another family requires its release submission token
+		// (or a later token on that queue). A CPU Wait does not replace this dependency.
 		std::span<const SubmissionToken> waitFor{};
 	};
 

@@ -52,7 +52,8 @@ namespace RealRHI {
 		virtual Result Submit(CommandList* cmd,
 			Swapchain* swapchain,
 			const FrameContext& frame,
-			SubmissionToken* outToken = nullptr) = 0;
+			SubmissionToken* outToken = nullptr,
+			std::span<const SubmissionToken> waitFor = {}) = 0;
 		virtual Result ImmediateSubmit(CommandList* cmd) const = 0;
 		virtual void WaitIdle() = 0;
 		// Defer backend cleanup until every submission dependency completes.

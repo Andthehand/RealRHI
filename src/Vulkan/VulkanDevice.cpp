@@ -19,6 +19,8 @@
 #include <set>
 
 namespace RealRHI {
+	VulkanDevice::VulkanDevice() = default;
+
 	VulkanDevice::~VulkanDevice() {
 		if (m_Device != VK_NULL_HANDLE) {
 			// Complete submissions before callbacks destroy Vulkan resources.
@@ -242,6 +244,8 @@ namespace RealRHI {
 			case QueueType::Transfer:
 				family = m_TransferQueueFamily;
 				break;
+			default:
+				return nullptr;
 		}
 		return GetCommandQueue(QueueId{family, 0});
 	}
@@ -275,7 +279,11 @@ namespace RealRHI {
 		m_DescriptorManager->BindDescriptorHeaps(commandBuffer);
 	}
 
-	Result VulkanDevice::Submit(CommandList* cmd, Swapchain* sc, const FrameContext& frame, SubmissionToken* outToken) {
+	Result VulkanDevice::Submit(CommandList* cmd,
+		Swapchain* sc,
+		const FrameContext& frame,
+		SubmissionToken* outToken,
+		std::span<const SubmissionToken> waitFor) {
 		if (outToken) {
 			*outToken = {};
 		}
@@ -336,7 +344,7 @@ namespace RealRHI {
 		std::array<CommandList*, 1> tracked = {cmd};
 
 		const SubmissionToken token = m_GraphicsCommandQueue->SubmitTracked(
-			{cmdInfos.data(), cmdInfos.size()}, {&waitInfo, 1}, {&signalInfo, 1}, tracked);
+			{cmdInfos.data(), cmdInfos.size()}, {&waitInfo, 1}, {&signalInfo, 1}, tracked, VK_NULL_HANDLE, waitFor);
 		vkSC->FinishFrameSubmission(frame.frameIndex, token);
 		if (outToken && token.IsValid()) {
 			*outToken = token;

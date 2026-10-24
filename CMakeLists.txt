@@ -30,6 +30,7 @@ set(REALRHI_HEADERS
     "src/FrameResources.h"
     "src/Vulkan/VulkanCommandAllocator.h"
     "src/Vulkan/VulkanDevice.h"
+    "src/Vulkan/VulkanResourceState.h"
     "src/Queue.h"
     "src/Swapchain.h"
     "src/Texture.h"
@@ -116,6 +117,13 @@ if(REALRHI_BUILD_TESTS)
     target_link_libraries(QueueSubmissionTests PRIVATE RealRHI)
     target_include_directories(QueueSubmissionTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     add_test(NAME QueueSubmissionTests COMMAND QueueSubmissionTests)
+
+    add_executable(QueueOwnershipTests tests/QueueOwnershipTests.cpp)
+    target_link_libraries(QueueOwnershipTests PRIVATE RealRHI)
+    target_compile_definitions(QueueOwnershipTests PRIVATE
+        REALRHI_TEST_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/tests/shaders")
+    add_test(NAME QueueOwnershipTests COMMAND QueueOwnershipTests)
+    set_tests_properties(QueueOwnershipTests PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
 endif()
 
 if(BUILD_EXAMPLES)

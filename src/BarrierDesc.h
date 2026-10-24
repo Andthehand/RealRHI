@@ -68,6 +68,9 @@ namespace RealRHI {
 		TextureLayout oldLayout = TextureLayout::Undefined;
 		TextureLayout newLayout = TextureLayout::Undefined;
 		TextureSubresourceRange subresources{};
+		// Both endpoints or neither. Different families require matching release/acquire
+		// barriers (same range and old/new layouts) and an explicit waitFor release token.
+		// Roles sharing a family produce an ordinary barrier, with no ownership transfer.
 		std::optional<QueueType> sourceQueue;
 		std::optional<QueueType> destinationQueue;
 	};
@@ -78,6 +81,7 @@ namespace RealRHI {
 		ResourceState after{};
 		uint64_t offset = 0;
 		uint64_t size = 0;
+		// Matching release/acquire barriers must use the same byte range.
 		std::optional<QueueType> sourceQueue;
 		std::optional<QueueType> destinationQueue;
 	};

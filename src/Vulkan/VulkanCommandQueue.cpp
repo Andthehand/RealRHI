@@ -118,10 +118,18 @@ namespace RealRHI {
 			});
 		}
 
-		std::vector<VkSemaphoreSubmitInfo> waitSemaphoreInfos;
-		waitSemaphoreInfos.reserve(submitInfo.waitFor.size());
+		return SubmitTracked(commandBufferInfos, {}, {}, trackedLists, VK_NULL_HANDLE, submitInfo.waitFor);
+	}
+
+	SubmissionToken VulkanCommandQueue::SubmitTracked(std::span<const VkCommandBufferSubmitInfo> commandBuffers,
+		std::span<const VkSemaphoreSubmitInfo> waitSemaphores,
+		std::span<const VkSemaphoreSubmitInfo> signalSemaphores,
+		std::span<CommandList*> trackedLists,
+		VkFence fence,
+		std::span<const SubmissionToken> waitFor) {
+		std::vector<VkSemaphoreSubmitInfo> waitSemaphoreInfos(waitSemaphores.begin(), waitSemaphores.end());
 		std::unordered_map<VulkanCommandQueue*, uint64_t> dependencyValues;
-		for (const SubmissionToken& waitToken : submitInfo.waitFor) {
+		for (const SubmissionToken& waitToken : waitFor) {
 			if (!waitToken.IsValid()) {
 				m_Device->SendDebugMessage(
 					DebugSeverity::Error, DebugMessageType::General, "Invalid submission token for queue wait.");
@@ -146,14 +154,6 @@ namespace RealRHI {
 			});
 		}
 
-		return SubmitTracked(commandBufferInfos, waitSemaphoreInfos, {}, trackedLists);
-	}
-
-	SubmissionToken VulkanCommandQueue::SubmitTracked(std::span<const VkCommandBufferSubmitInfo> commandBuffers,
-		std::span<const VkSemaphoreSubmitInfo> waitSemaphores,
-		std::span<const VkSemaphoreSubmitInfo> signalSemaphores,
-		std::span<CommandList*> trackedLists,
-		VkFence fence) {
 		std::vector<Ref<CommandList>> retainedLists;
 		retainedLists.reserve(trackedLists.size());
 
@@ -191,16 +191,15 @@ namespace RealRHI {
 		// Check the complete batch before submitting. No global state changes
 		// are published unless vkQueueSubmit2 succeeds.
 		std::scoped_lock stateLock(m_Device->GetStateTrackingMutex());
-		VulkanCommandList::LayoutMap predictedLayouts;
+		const uint64_t submissionValue = m_NextFrameValue;
+		const SubmissionToken submission{.queue = GetQueueId(), .value = submissionValue};
+		VulkanCommandList::SubmissionState predicted;
 		for (CommandList* commandList : trackedLists) {
-			if (!static_cast<VulkanCommandList*>(commandList)->ValidateSubmissionLayouts(predictedLayouts)) {
-				m_Device->SendDebugMessage(DebugSeverity::Error,
-					DebugMessageType::General,
-					"Submission rejected: texture layout differs from the recorded initial layout.");
+			if (!static_cast<VulkanCommandList*>(commandList)
+					->ValidateSubmissionState(predicted, submission, waitSemaphoreInfos)) {
 				return {};
 			}
 		}
-		const uint64_t submissionValue = m_NextFrameValue;
 		signalInfos.push_back({
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
 			.semaphore = m_TimelineSemaphore,
@@ -210,8 +209,8 @@ namespace RealRHI {
 
 		VkSubmitInfo2 submitInfo2{
 			.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-			.waitSemaphoreInfoCount = static_cast<uint32_t>(waitSemaphores.size()),
-			.pWaitSemaphoreInfos = waitSemaphores.data(),
+			.waitSemaphoreInfoCount = static_cast<uint32_t>(waitSemaphoreInfos.size()),
+			.pWaitSemaphoreInfos = waitSemaphoreInfos.data(),
 			.commandBufferInfoCount = static_cast<uint32_t>(commandBuffers.size()),
 			.pCommandBufferInfos = commandBuffers.data(),
 			.signalSemaphoreInfoCount = static_cast<uint32_t>(signalInfos.size()),
@@ -226,9 +225,7 @@ namespace RealRHI {
 			return {};
 		}
 
-		for (CommandList* commandList : trackedLists) {
-			static_cast<VulkanCommandList*>(commandList)->CommitSubmissionLayouts();
-		}
+		VulkanCommandList::CommitSubmissionState(predicted);
 		++m_NextFrameValue;
 		m_PendingSubmissions.push_back({
 			.value = submissionValue,

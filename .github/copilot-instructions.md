@@ -41,6 +41,7 @@ This library is written to be easy for another engineer to read and reason about
 - Keep applicable null, queue-compatibility, and resource-state checks. A static cast does not validate those conditions.
 
 ### Class member organization
+- Access private member variables only within the class that declares them. Other classes, including friends, must use methods. Do not expose mutable references or pointers to private storage through getters.
 - Separate member function declarations from member variables in class headers.
 - Use distinct access-specifier sections for function declarations and member variables, even when both sections are `private:`.
 - Keep nested types and aliases before declarations that depend on them. Do not expose internal implementation types publicly solely to resolve declaration ordering.

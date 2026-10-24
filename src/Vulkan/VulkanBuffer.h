@@ -2,10 +2,13 @@
 #include "Buffer.h"
 #include "BufferDesc.h"
 #include "VulkanDevice.h"
+#include "VulkanResourceState.h"
 
 #include <volk.h>
 
 #include <vma/vk_mem_alloc.h>
+
+#include <vector>
 
 namespace RealRHI {
 	class VulkanBuffer : public Buffer {
@@ -31,12 +34,16 @@ namespace RealRHI {
 		VkBuffer GetBuffer() const { return m_Buffer; }
 
 		VkDeviceAddress GetBufferDeviceAddress() const;
+		std::vector<VulkanBufferRangeState> GetSubmittedRanges() const;
+		void CommitSubmittedRanges(std::vector<VulkanBufferRangeState> ranges);
 
 	private:
 		const VulkanDevice* m_Device = nullptr;
 
 		BufferUsage m_Usage = BufferUsage::None;
 		uint64_t m_Size = 0;
+		// Protected by the device's state-tracking mutex, like texture state.
+		std::vector<VulkanBufferRangeState> m_SubmittedRanges;
 
 		VkBuffer m_Buffer = VK_NULL_HANDLE;
 		VmaAllocation m_BufferMemory = VK_NULL_HANDLE;
