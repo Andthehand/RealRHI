@@ -29,6 +29,7 @@ This library is written to be easy for another engineer to read and reason about
 - In `.cpp` constructor definitions, always start the member initializer list on the next line, with the colon at the start of that indented line, even when the list would fit on the signature line.
 - If a constructor body is empty, keep `{ }` on the same line as the final member initializer.
 - Keep spacing consistent and readable throughout the codebase: use whitespace deliberately around operators, after commas, and add clear newlines between logical blocks so the intent remains obvious at a glance.
+- For multiline struct initializer lists, put the closing brace on its own line and use a trailing comma after the final element. Keep blank lines between logical blocks when formatting.
 - Always use braces for `if` statements, even when there is only one statement after them, to keep the control flow explicit and easy to audit.
 - Prefer explicit `if`/`else if`/`else` statements over ternary expressions. Avoid nested or chained ternaries; use a ternary only when a simple choice is clearly easier to read.
 - Keep functions and classes focused on a single concern, and avoid creating layers of indirection that hide the true behavior.

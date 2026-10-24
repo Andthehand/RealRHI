@@ -15,6 +15,7 @@ constexpr uint32_t s_WindowHeight = 600;
 constexpr uint32_t s_TextureWidth = 256;
 constexpr uint32_t s_TextureHeight = 256;
 constexpr uint32_t s_TextureCount = 2;
+constexpr uint32_t s_TextureMipCount = 9;
 
 struct Vertex {
 	float pos[2];
@@ -42,6 +43,8 @@ RealRHI::Ref<RealRHI::Swapchain> swapchain;
 RealRHI::Ref<RealRHI::Pipeline> pipeline;
 RealRHI::Ref<RealRHI::Buffer> vertexBuffer;
 std::vector<RealRHI::Ref<RealRHI::Texture>> textures;
+std::vector<RealRHI::Ref<RealRHI::TextureView>> textureViews;
+std::vector<RealRHI::Ref<RealRHI::Sampler>> samplers;
 std::unique_ptr<RealRHI::FrameResources> frameResources;
 RealRHI::UploadSubmission pendingTextureUpload;
 
@@ -145,11 +148,10 @@ void CreateGraphicsPipeline() {
 			{
 				.enable = false,
 			},
-		.renderTargetFormats =
-			{
-				.colorFormats = {swapchain->GetBackBufferFormat()},
-				.depthFormat = RealRHI::TextureFormat::Unknown,
-			},
+		.renderTargetFormats = {
+			.colorFormats = {swapchain->GetBackBufferFormat()},
+			.depthFormat = RealRHI::TextureFormat::Unknown,
+		},
 	};
 
 	result = device->CreateGraphicsPipeline(desc, pipeline);
@@ -183,8 +185,8 @@ void CreateVertexBuffer() {
 			return;
 		}
 
-		const uint32_t textureIndex = textures[i]->GetSampledImageDescriptorIndex();
-		const uint32_t samplerIndex = textures[i]->GetSamplerDescriptorIndex();
+		const uint32_t textureIndex = textureViews[i]->GetSampledImageDescriptorIndex();
+		const uint32_t samplerIndex = samplers[i]->GetDescriptorIndex();
 		if (textureIndex == std::numeric_limits<uint32_t>::max() ||
 			samplerIndex == std::numeric_limits<uint32_t>::max()) {
 			std::cerr << "Failed to create vertex buffer: invalid texture or sampler descriptor index" << std::endl;
@@ -211,6 +213,8 @@ void CreateVertexBuffer() {
 
 bool CreateTextures() {
 	textures.resize(s_TextureCount);
+	textureViews.resize(s_TextureCount);
+	samplers.resize(s_TextureCount);
 	std::unique_ptr<RealRHI::UploadContext> uploads;
 	if (device->CreateUploadContext({}, uploads) != RealRHI::Result::Success ||
 		uploads->BeginBatch() != RealRHI::Result::Success) {
@@ -228,10 +232,11 @@ bool CreateTextures() {
 				.width = s_TextureWidth,
 				.height = s_TextureHeight,
 				.depth = 1,
-				.mipLevels = 1,
+				.mipLevels = s_TextureMipCount,
 				.arrayLayers = 1,
 				.format = RealRHI::TextureFormat::RGBA8_UNorm,
-				.usage = RealRHI::TextureUsage::ShaderResource | RealRHI::TextureUsage::TransferDst,
+				.usage = RealRHI::TextureUsage::ShaderResource | RealRHI::TextureUsage::TransferSrc |
+					RealRHI::TextureUsage::TransferDst,
 			},
 			textures[i]);
 		if (result != RealRHI::Result::Success) {
@@ -240,15 +245,36 @@ bool CreateTextures() {
 		}
 
 		result = uploads->UploadTexture(
-			{.destination = textures[i].Raw(),
-				.finalState = {RealRHI::PipelineStage::FragmentShader, RealRHI::ResourceAccess::ShaderRead}},
+			{
+				.destination = textures[i].Raw(),
+				.finalLayout = RealRHI::TextureLayout::TransferDst,
+				.finalState = {RealRHI::PipelineStage::Transfer, RealRHI::ResourceAccess::TransferWrite},
+			},
 			texturePixels[i].data(),
 			texturePixels[i].size());
 		if (result != RealRHI::Result::Success) {
 			std::cerr << "Failed to upload texture data" << std::endl;
 			return false;
 		}
+
+		RealRHI::TextureViewDesc viewDesc{
+			.mipLevelCount = s_TextureMipCount,
+		};
+		RealRHI::SamplerDesc samplerDesc;
+		if (i == 1) {
+			viewDesc.baseMipLevel = 2;
+			viewDesc.mipLevelCount -= 2;
+			samplerDesc.minFilter = RealRHI::Filter::Nearest;
+			samplerDesc.magFilter = RealRHI::Filter::Nearest;
+			samplerDesc.mipFilter = RealRHI::Filter::Nearest;
+		}
+
+		if (device->CreateTextureView(textures[i].Raw(), viewDesc, textureViews[i]) != RealRHI::Result::Success ||
+			device->CreateSampler(samplerDesc, samplers[i]) != RealRHI::Result::Success) {
+			return false;
+		}
 	}
+
 	return uploads->Submit(pendingTextureUpload) == RealRHI::Result::Success;
 }
 
@@ -270,6 +296,13 @@ bool RecordCommandBuffer(RealRHI::CommandList* cmd, const RealRHI::FrameContext&
 	}
 	if (pendingTextureUpload.completion.IsValid()) {
 		cmd->Barrier(pendingTextureUpload.acquireBarriers);
+
+		for (auto& texture : textures) {
+			cmd->GenerateMipmaps(texture.Raw(),
+				{
+					.finalState = {RealRHI::PipelineStage::FragmentShader, RealRHI::ResourceAccess::ShaderRead},
+				});
+		}
 	}
 
 	RealRHI::RenderingInfo renderingInfo{
@@ -284,8 +317,9 @@ bool RecordCommandBuffer(RealRHI::CommandList* cmd, const RealRHI::FrameContext&
 
 	cmd->BeginRendering(renderingInfo);
 	cmd->BindPipeline(pipeline.Raw());
-	for (auto& texture : textures) {
-		cmd->UseResource(texture.Raw());
+	for (uint32_t i = 0; i < s_TextureCount; ++i) {
+		cmd->UseResource(textureViews[i].Raw());
+		cmd->UseResource(samplers[i].Raw());
 	}
 
 	RealRHI::Viewport viewport{
@@ -363,6 +397,8 @@ void Cleanup() {
 	for (auto& texture : textures) {
 		texture.Reset();
 	}
+	textureViews.clear();
+	samplers.clear();
 	textures.clear();
 	pipeline.Reset();
 	vertexBuffer.Reset();

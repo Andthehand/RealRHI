@@ -561,7 +561,7 @@ namespace RealRHI::Utils {
 			case TextureLayout::Undefined:
 				return 0;
 			case TextureLayout::ColorAttachment:
-				return VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+				return VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
 			case TextureLayout::ShaderRead:
 				return VK_ACCESS_2_SHADER_READ_BIT;
 			case TextureLayout::TransferSrc:

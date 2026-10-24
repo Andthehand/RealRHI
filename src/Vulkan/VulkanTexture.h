@@ -26,13 +26,23 @@ namespace RealRHI {
 
 		Result UploadData(const void* data, uint32_t size);
 
-		TextureView* GetTextureView() override { return &m_TextureView; }
+		TextureView* GetTextureView() override { return m_TextureView.Raw(); }
 
-		const TextureView* GetTextureView() const override { return &m_TextureView; }
+		const TextureView* GetTextureView() const override { return m_TextureView.Raw(); }
 
-		uint32_t GetSampledImageDescriptorIndex() const override { return m_SampledImageDescriptorIndex; }
-		uint32_t GetStorageImageDescriptorIndex() const override { return m_StorageImageDescriptorIndex; }
-		uint32_t GetSamplerDescriptorIndex() const override { return m_SamplerDescriptorIndex; }
+		uint32_t GetSampledImageDescriptorIndex() const override {
+			return m_TextureView->GetSampledImageDescriptorIndex();
+		}
+		uint32_t GetStorageImageDescriptorIndex() const override {
+			return m_TextureView->GetStorageImageDescriptorIndex();
+		}
+		uint32_t GetSamplerDescriptorIndex() const override {
+			if (m_DefaultSampler) {
+				return m_DefaultSampler->GetDescriptorIndex();
+			}
+
+			return UINT32_MAX;
+		}
 
 	protected:
 		friend class VulkanSwapchain;
@@ -63,8 +73,6 @@ namespace RealRHI {
 			Ref<VulkanTexture>& outTexture);
 		Result InitSwapChainTexture(VkFormat format, VkImage image);
 
-		VkSamplerCreateInfo GetSampler(); // TODO: Add sampler desc?
-
 	private:
 		const VulkanDevice* m_Device = nullptr;
 		VkImage m_Image = VK_NULL_HANDLE;
@@ -83,11 +91,7 @@ namespace RealRHI {
 		};
 		uint32_t m_MipLevels = 1;
 		uint32_t m_ArrayLayers = 1;
-		uint32_t m_SampledImageDescriptorIndex = UINT32_MAX;
-		uint32_t m_StorageImageDescriptorIndex = UINT32_MAX;
-		uint32_t m_SamplerDescriptorIndex = UINT32_MAX;
-
-		VulkanTextureView m_TextureView;
-		VkSampler m_Sampler = VK_NULL_HANDLE;
+		Ref<VulkanTextureView> m_TextureView;
+		Ref<Sampler> m_DefaultSampler;
 	};
 }

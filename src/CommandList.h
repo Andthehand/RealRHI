@@ -5,11 +5,25 @@
 #include "RefCounted.h"
 #include "RenderingInfo.h"
 #include "Result.h"
+#include "Sampler.h"
+#include "SamplerDesc.h"
 #include "Texture.h"
 
 #include <cstdint>
 
 namespace RealRHI {
+	struct MipGenerationDesc {
+		uint32_t baseMipLevel = 0;
+		// Zero selects all remaining mips/layers. At least two mip levels are required.
+		uint32_t mipLevelCount = 0;
+		uint32_t baseArrayLayer = 0;
+		uint32_t arrayLayerCount = 0;
+
+		Filter filter = Filter::Linear;
+		TextureLayout finalLayout = TextureLayout::ShaderRead;
+		ResourceState finalState{PipelineStage::AllCommands, ResourceAccess::ShaderRead};
+	};
+
 	struct BufferCopyRegion {
 		uint64_t sourceOffset = 0;
 		uint64_t destinationOffset = 0;
@@ -65,9 +79,12 @@ namespace RealRHI {
 		// Explicitly declare shader-visible bindless resources for this recording.
 		// Must be called while recording, before submission. Retained through reset.
 		// Declarations apply to every subsequent draw/dispatch until Reset; those
-		// operations validate ownership of the whole buffer or default texture view.
+		// operations validate ownership of the whole buffer or selected texture view.
+		// Declare independent samplers here as well to retain their descriptor slots.
 		virtual void UseResource(Texture* texture) = 0;
 		virtual void UseResource(Buffer* buffer) = 0;
+		virtual void UseResource(TextureView* view) = 0;
+		virtual void UseResource(Sampler* sampler) = 0;
 
 		virtual void BindPipeline(Pipeline* pipeline) = 0;
 		virtual void SetPushConstants(const void* data, uint32_t size, uint32_t offset = 0) = 0;
@@ -83,6 +100,8 @@ namespace RealRHI {
 			Buffer* destination,
 			const BufferTextureCopyRegion& region) = 0;
 		virtual void CopyTexture(Texture* source, Texture* destination, const TextureCopyRegion& region) = 0;
+
+		virtual void GenerateMipmaps(Texture* texture, const MipGenerationDesc& desc = {}) = 0;
 
 		virtual void Barrier(const BarrierDesc& barriers) = 0;
 

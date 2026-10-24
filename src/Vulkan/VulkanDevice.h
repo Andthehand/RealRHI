@@ -66,6 +66,8 @@ namespace RealRHI {
 		Result CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) const override;
 		Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) const override;
 		Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const override;
+		Result CreateTextureView(Texture* texture, const TextureViewDesc& desc, Ref<TextureView>& outView) const override;
+		Result CreateSampler(const SamplerDesc& desc, Ref<Sampler>& outSampler) const override;
 		Result CreateUploadContext(const UploadContextDesc& desc, std::unique_ptr<UploadContext>& outContext) const override;
 		Result CreateCommandAllocator(QueueType type, Ref<CommandAllocator>& outAllocator) const override;
 		Result CreateCommandList(CommandAllocator* allocator, Ref<CommandList>& outCommandList) const override;
@@ -129,10 +131,12 @@ namespace RealRHI {
 		DebugCallback m_DebugCallback;
 		bool m_EnableDebug;
 
-		static constexpr std::array<const char*, 5> s_DeviceExtensions{VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+		static constexpr std::array<const char*, 5> s_DeviceExtensions{
+			VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
 			VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 			VK_KHR_MAINTENANCE_5_EXTENSION_NAME,
 			VK_KHR_SHADER_UNTYPED_POINTERS_EXTENSION_NAME,
-			VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME};
+			VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME
+		};
 	};
 }

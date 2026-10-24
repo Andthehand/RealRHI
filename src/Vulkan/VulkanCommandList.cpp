@@ -170,11 +170,46 @@ namespace RealRHI {
 		m_ComputePipelineBound = false;
 		m_RecordedLayouts.clear();
 		m_ResourceOperations.clear();
-		m_ShaderTextures.clear();
+		m_ShaderViews.clear();
 		m_ShaderBuffers.clear();
 		m_VertexBuffer = nullptr;
 		m_IndexBuffer = nullptr;
 		return Result::Success;
+	}
+
+	bool VulkanCommandList::ValidateAttachmentView(const VulkanTextureView* view,
+		TextureUsage usage,
+		const Rect& renderArea) const {
+		if (!view->HasNativeImageView() || !Any(view->GetUsage() & usage)) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"BeginRendering: Attachment requires a native view with matching color or depth/stencil usage.");
+
+			return false;
+		}
+
+		const auto* texture = view->GetTexture();
+		if (texture->IsExternal()) {
+			// Swapchain textures expose their current extent through FrameContext.
+			return true;
+		}
+
+		const uint32_t mip = view->GetSubresources().baseMipLevel;
+		const auto extent = texture->GetExtent();
+		const uint32_t width = std::max(1u, extent.width >> mip);
+		const uint32_t height = std::max(1u, extent.height >> mip);
+		if (renderArea.x < 0 || renderArea.y < 0 || static_cast<uint32_t>(renderArea.x) > width ||
+			static_cast<uint32_t>(renderArea.y) > height ||
+			renderArea.width > width - static_cast<uint32_t>(renderArea.x) ||
+			renderArea.height > height - static_cast<uint32_t>(renderArea.y)) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"BeginRendering: The render area must fit within the attachment view's selected mip.");
+
+			return false;
+		}
+
+		return true;
 	}
 
 	void VulkanCommandList::BeginRendering(const RenderingInfo& renderingInfo) {
@@ -197,16 +232,16 @@ namespace RealRHI {
 			}
 
 			auto* textureView = static_cast<VulkanTextureView*>(attachment.target);
-			if (!textureView->HasNativeImageView()) {
-				m_Device->SendDebugMessage(DebugSeverity::Error,
-					DebugMessageType::General,
-					"BeginRendering: Color attachments require native Vulkan render-target views.");
+			if (!ValidateAttachmentView(textureView, TextureUsage::RenderTarget, renderingInfo.renderArea)) {
 				return;
 			}
+
+			RetainResource(textureView);
 			RetainResource(const_cast<VulkanTexture*>(textureView->GetTexture()));
 
 			VkClearValue clearColor = {
-				{{attachment.clearColor.r, attachment.clearColor.g, attachment.clearColor.b, attachment.clearColor.a}}};
+				{{attachment.clearColor.r, attachment.clearColor.g, attachment.clearColor.b, attachment.clearColor.a}}
+			};
 			colorAttachmentInfos[i] = {
 				.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
 				.imageView = textureView->GetImageView(),
@@ -234,16 +269,15 @@ namespace RealRHI {
 			}
 
 			auto* textureView = static_cast<VulkanTextureView*>(attachment.target);
-			if (!textureView->HasNativeImageView()) {
-				m_Device->SendDebugMessage(DebugSeverity::Error,
-					DebugMessageType::General,
-					"BeginRendering: Depth attachment requires a native Vulkan depth/stencil view.");
+			if (!ValidateAttachmentView(textureView, TextureUsage::DepthStencil, renderingInfo.renderArea)) {
 				return;
 			}
 
+			RetainResource(textureView);
 			RetainResource(const_cast<VulkanTexture*>(textureView->GetTexture()));
 
-			const VkImageAspectFlags aspectMask = textureView->GetImageViewCreateInfo().subresourceRange.aspectMask;
+			const auto format = Utils::VkFormatToTextureFormat(textureView->GetTexture()->GetFormat());
+			const VkImageAspectFlags aspectMask = Utils::TextureFormatToVkImageAspect(format);
 			const bool hasStencilAspect = (aspectMask & VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
 			const bool readOnly = attachment.readOnlyDepth && (!hasStencilAspect || attachment.readOnlyStencil);
 			VkImageLayout depthLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
@@ -281,11 +315,10 @@ namespace RealRHI {
 					.x = renderAreaRect.x,
 					.y = renderAreaRect.y,
 				},
-			.extent =
-				{
-					.width = renderAreaRect.width,
-					.height = renderAreaRect.height,
-				},
+			.extent = {
+				.width = renderAreaRect.width,
+				.height = renderAreaRect.height,
+			},
 		};
 
 		VkRenderingInfo renderPassInfo{
@@ -300,9 +333,8 @@ namespace RealRHI {
 
 		auto recordAttachment = [this](TextureView* view, TextureLayout layout) {
 			auto* textureView = static_cast<VulkanTextureView*>(view);
-			const auto& range = textureView->GetImageViewCreateInfo().subresourceRange;
 			RecordTextureUse(const_cast<VulkanTexture*>(textureView->GetTexture()),
-				{range.baseMipLevel, range.levelCount, range.baseArrayLayer, range.layerCount},
+				textureView->GetSubresources(),
 				layout,
 				"BeginRendering");
 		};
@@ -370,11 +402,45 @@ namespace RealRHI {
 			return;
 		}
 
-		RetainResource(texture);
-		auto* vulkanTexture = static_cast<VulkanTexture*>(texture);
-		if (std::find(m_ShaderTextures.begin(), m_ShaderTextures.end(), vulkanTexture) == m_ShaderTextures.end()) {
-			m_ShaderTextures.push_back(vulkanTexture);
+		UseResource(texture->GetTextureView());
+	}
+
+	void VulkanCommandList::UseResource(TextureView* view) {
+		if (view == nullptr || GetState() != CommandListState::Recording) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"UseResource(TextureView): Requires an active recording and a non-null view.");
+
+			return;
 		}
+
+		auto* vulkanView = static_cast<VulkanTextureView*>(view);
+		if (!Any(vulkanView->GetUsage() & (TextureUsage::ShaderResource | TextureUsage::Storage))) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"UseResource(TextureView): Declare a sampled or storage view for shader access.");
+
+			return;
+		}
+
+		RetainResource(view);
+		RetainResource(const_cast<VulkanTexture*>(vulkanView->GetTexture()));
+
+		if (std::find(m_ShaderViews.begin(), m_ShaderViews.end(), vulkanView) == m_ShaderViews.end()) {
+			m_ShaderViews.push_back(vulkanView);
+		}
+	}
+
+	void VulkanCommandList::UseResource(Sampler* sampler) {
+		if (sampler == nullptr || GetState() != CommandListState::Recording) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"UseResource(Sampler): Requires an active recording and a non-null sampler.");
+
+			return;
+		}
+
+		RetainResource(sampler);
 	}
 
 	void VulkanCommandList::UseResource(Buffer* buffer) {
@@ -442,11 +508,10 @@ namespace RealRHI {
 		const VkPushDataInfoEXT pushDataInfo{
 			.sType = VK_STRUCTURE_TYPE_PUSH_DATA_INFO_EXT,
 			.offset = offset,
-			.data =
-				{
-					.address = data,
-					.size = size,
-				},
+			.data = {
+				.address = data,
+				.size = size,
+			},
 		};
 		vkCmdPushDataEXT(m_CommandBuffer, &pushDataInfo);
 	}
@@ -738,13 +803,14 @@ namespace RealRHI {
 		for (auto* buffer : m_ShaderBuffers) {
 			RecordBufferUse(buffer, 0, buffer->GetSize(), operation);
 		}
-		for (auto* texture : m_ShaderTextures) {
+		for (auto* view : m_ShaderViews) {
 			TextureLayout layout = TextureLayout::ShaderRead;
-			if (Any(texture->GetUsage() & TextureUsage::Storage)) {
+			if (Any(view->GetUsage() & TextureUsage::Storage)) {
 				layout = TextureLayout::General;
 			}
+
 			RecordTextureUse(
-				texture, {0, texture->GetMipLevelCount(), 0, texture->GetArrayLayerCount()}, layout, operation);
+				const_cast<VulkanTexture*>(view->GetTexture()), view->GetSubresources(), layout, operation);
 		}
 	}
 
@@ -1120,13 +1186,14 @@ namespace RealRHI {
 				.offset = barrier.offset,
 				.size = barrier.size,
 			});
-			operations.push_back({.name = "Buffer barrier",
-				.buffer = buffer,
-				.offset = barrier.offset,
-				.size = barrier.size,
-				.sourceFamily = sourceFamily,
-				.destinationFamily = destinationFamily,
-				.barrier = true});
+			operations.push_back(
+				{.name = "Buffer barrier",
+					.buffer = buffer,
+					.offset = barrier.offset,
+					.size = barrier.size,
+					.sourceFamily = sourceFamily,
+					.destinationFamily = destinationFamily,
+					.barrier = true});
 		}
 
 		for (const TextureBarrier& barrier : barriers.textures) {
@@ -1185,24 +1252,24 @@ namespace RealRHI {
 				.srcQueueFamilyIndex = transfer ? sourceFamily : VK_QUEUE_FAMILY_IGNORED,
 				.dstQueueFamilyIndex = transfer ? destinationFamily : VK_QUEUE_FAMILY_IGNORED,
 				.image = texture->GetImage(),
-				.subresourceRange =
-					{
-						.aspectMask =
-							Utils::TextureFormatToVkImageAspect(Utils::VkFormatToTextureFormat(texture->GetFormat())),
-						.baseMipLevel = barrier.subresources.baseMipLevel,
-						.levelCount = barrier.subresources.mipLevelCount,
-						.baseArrayLayer = barrier.subresources.baseArrayLayer,
-						.layerCount = barrier.subresources.arrayLayerCount,
-					},
+				.subresourceRange = {
+					.aspectMask =
+						Utils::TextureFormatToVkImageAspect(Utils::VkFormatToTextureFormat(texture->GetFormat())),
+					.baseMipLevel = barrier.subresources.baseMipLevel,
+					.levelCount = barrier.subresources.mipLevelCount,
+					.baseArrayLayer = barrier.subresources.baseArrayLayer,
+					.layerCount = barrier.subresources.arrayLayerCount,
+				},
 			});
-			operations.push_back({.name = "Texture barrier",
-				.texture = texture,
-				.subresources = barrier.subresources,
-				.oldLayout = barrier.oldLayout,
-				.newLayout = barrier.newLayout,
-				.sourceFamily = sourceFamily,
-				.destinationFamily = destinationFamily,
-				.barrier = true});
+			operations.push_back(
+				{.name = "Texture barrier",
+					.texture = texture,
+					.subresources = barrier.subresources,
+					.oldLayout = barrier.oldLayout,
+					.newLayout = barrier.newLayout,
+					.sourceFamily = sourceFamily,
+					.destinationFamily = destinationFamily,
+					.barrier = true});
 		}
 
 		// Reject overlapping ranges: barriers within one dependency are not sequential.

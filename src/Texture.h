@@ -11,6 +11,9 @@ namespace RealRHI {
 	public:
 		virtual ~Texture() = default;
 
+		// Borrowed default view; keep the texture alive while using it.
+		// Sampled-only textures expose all mips; storage/attachment defaults select the base mip.
+		// CreateTextureView provides an independently owned view of a selected range.
 		virtual TextureView* GetTextureView() = 0;
 		virtual const TextureView* GetTextureView() const = 0;
 

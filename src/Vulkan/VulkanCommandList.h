@@ -5,6 +5,7 @@
 #include "VulkanDevice.h"
 #include "VulkanPipeline.h"
 #include "VulkanResourceState.h"
+#include "VulkanTextureView.h"
 
 #include <volk.h>
 
@@ -35,6 +36,9 @@ namespace RealRHI {
 
 		void UseResource(Texture* texture) override;
 		void UseResource(Buffer* buffer) override;
+		void UseResource(TextureView* view) override;
+		void UseResource(Sampler* sampler) override;
+
 		void BindPipeline(Pipeline* pipeline) override;
 		void SetPushConstants(const void* data, uint32_t size, uint32_t offset = 0) override;
 		void DispatchCompute(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
@@ -45,6 +49,7 @@ namespace RealRHI {
 		void CopyBufferToTexture(Buffer* source, Texture* destination, const BufferTextureCopyRegion& region) override;
 		void CopyTextureToBuffer(Texture* source, Buffer* destination, const BufferTextureCopyRegion& region) override;
 		void CopyTexture(Texture* source, Texture* destination, const TextureCopyRegion& region) override;
+		void GenerateMipmaps(Texture* texture, const MipGenerationDesc& desc = {}) override;
 
 		void Barrier(const BarrierDesc& barriers) override;
 
@@ -105,6 +110,7 @@ namespace RealRHI {
 		};
 
 	private:
+		bool ValidateAttachmentView(const VulkanTextureView* view, TextureUsage usage, const Rect& renderArea) const;
 		TextureLayout GetExpectedLayout(const VulkanTexture* texture, uint32_t mip, uint32_t layer) const;
 		// Replay in command order; publish the complete batch only after native submission succeeds.
 		bool ValidateSubmissionState(SubmissionState& predicted,
@@ -121,6 +127,9 @@ namespace RealRHI {
 			TextureLayout layout,
 			const char* operation);
 		void RecordShaderResources(const char* operation);
+		bool ValidateMipGeneration(VulkanTexture* texture,
+			const MipGenerationDesc& desc,
+			TextureSubresourceRange& range) const;
 		bool ResolveQueueFamilies(std::optional<QueueType> source,
 			std::optional<QueueType> destination,
 			uint32_t& sourceFamily,
@@ -155,7 +164,7 @@ namespace RealRHI {
 		bool m_Rendering = false;
 
 		std::vector<ResourceOperation> m_ResourceOperations;
-		std::vector<VulkanTexture*> m_ShaderTextures;
+		std::vector<VulkanTextureView*> m_ShaderViews;
 		std::vector<VulkanBuffer*> m_ShaderBuffers;
 		VulkanBuffer* m_VertexBuffer = nullptr;
 		VulkanBuffer* m_IndexBuffer = nullptr;

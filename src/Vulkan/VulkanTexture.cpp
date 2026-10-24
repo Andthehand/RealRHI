@@ -13,18 +13,9 @@ namespace RealRHI {
 		: m_Device(device) { }
 
 	VulkanTexture::~VulkanTexture() {
-		if (m_SampledImageDescriptorIndex != UINT32_MAX) {
-			m_Device->GetDescriptorManager()->FreeImageDescriptor(m_SampledImageDescriptorIndex);
-		}
-		if (m_StorageImageDescriptorIndex != UINT32_MAX) {
-			m_Device->GetDescriptorManager()->FreeImageDescriptor(m_StorageImageDescriptorIndex);
-		}
-		if (m_SamplerDescriptorIndex != UINT32_MAX) {
-			m_Device->GetDescriptorManager()->FreeSamplerDescriptor(m_SamplerDescriptorIndex);
-		}
-		if (m_Sampler != VK_NULL_HANDLE) {
-			vkDestroySampler(m_Device->GetDevice(), m_Sampler, nullptr);
-		}
+		// Views must be destroyed before the image they reference.
+		m_TextureView.Release();
+		m_DefaultSampler.Release();
 
 		if (!m_IsExternal) {
 			vmaDestroyImage(m_Device->GetAllocator(), m_Image, m_Allocation);
@@ -99,41 +90,29 @@ namespace RealRHI {
 			viewType = TextureViewType::View2DArray;
 		}
 
-		const bool createNativeImageView =
-			Any(m_Usage & TextureUsage::RenderTarget) || Any(m_Usage & TextureUsage::DepthStencil);
-		if (m_TextureView.Init(m_Device,
-				this,
-				TextureViewDesc{
-					.type = viewType,
-					.mipLevelCount = m_MipLevels,
-					.arrayLayerCount = m_ArrayLayers,
-				},
-				createNativeImageView) != Result::Success) {
-			return Result::Failed;
+		uint32_t viewMipCount = m_MipLevels;
+		// Storage, RenderTarget, and DepthStencil textures can only have a single mip level view
+		// because they are not allowed to be sampled in a shader, and therefore cannot use mipmapping.
+		if (Any(m_Usage & (TextureUsage::Storage | TextureUsage::RenderTarget | TextureUsage::DepthStencil))) {
+			viewMipCount = 1;
+		}
+
+		m_TextureView = Ref<VulkanTextureView>::Create();
+		const Result viewResult = m_TextureView->Init(m_Device, 
+			this,
+			TextureViewDesc{
+				.type = viewType,
+				.mipLevelCount = viewMipCount,
+				.arrayLayerCount = m_ArrayLayers,
+			});
+		if (viewResult != Result::Success) {
+			return viewResult;
 		}
 
 		if (Any(m_Usage & TextureUsage::ShaderResource)) {
-			m_SamplerDescriptorIndex = m_Device->GetDescriptorManager()->AllocateSamplerDescriptor(GetSampler());
-			if (m_SamplerDescriptorIndex == UINT32_MAX) {
-				return Result::Failed;
-			}
-
-			VkImageLayout imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			if (Any(m_Usage & TextureUsage::Storage)) {
-				imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-			}
-			m_SampledImageDescriptorIndex = m_Device->GetDescriptorManager()->AllocateImageDescriptor(
-				&m_TextureView, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, imageLayout);
-			if (m_SampledImageDescriptorIndex == UINT32_MAX) {
-				return Result::Failed;
-			}
-		}
-
-		if (Any(m_Usage & TextureUsage::Storage)) {
-			m_StorageImageDescriptorIndex = m_Device->GetDescriptorManager()->AllocateImageDescriptor(
-				&m_TextureView, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL);
-			if (m_StorageImageDescriptorIndex == UINT32_MAX) {
-				return Result::Failed;
+			const Result samplerResult = m_Device->CreateSampler({}, m_DefaultSampler);
+			if (samplerResult != Result::Success) {
+				return samplerResult;
 			}
 		}
 
@@ -279,33 +258,12 @@ namespace RealRHI {
 		m_Format = format;
 		m_Image = image;
 
-		if (m_TextureView.Init(m_Device, this, TextureViewDesc{}, true) != Result::Success) {
+		m_TextureView = Ref<VulkanTextureView>::Create();
+		if (m_TextureView->Init(m_Device, this, TextureViewDesc{}) != Result::Success) {
 			return Result::Failed;
 		}
 
 		return Result::Success;
 	}
 
-	VkSamplerCreateInfo VulkanTexture::GetSampler() {
-		VkSamplerCreateInfo samplerInfo{
-			.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-			.magFilter = VK_FILTER_LINEAR,
-			.minFilter = VK_FILTER_LINEAR,
-			.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
-			.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-			.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-			.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT,
-			.mipLodBias = 0.0f,
-			.anisotropyEnable = VK_FALSE,
-			.maxAnisotropy = 1.0f,
-			.compareEnable = VK_FALSE,
-			.compareOp = VK_COMPARE_OP_ALWAYS,
-			.minLod = 0.0f,
-			.maxLod = VK_LOD_CLAMP_NONE,
-			.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
-			.unnormalizedCoordinates = VK_FALSE,
-		};
-
-		return samplerInfo;
-	}
 }

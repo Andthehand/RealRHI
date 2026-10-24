@@ -8,6 +8,7 @@
 #include "VulkanCommandQueue.h"
 #include "VulkanDescriptorManager.h"
 #include "VulkanPipeline.h"
+#include "VulkanSampler.h"
 #include "VulkanShader.h"
 #include "VulkanSwapchain.h"
 #include "VulkanUploadContext.h"
@@ -203,6 +204,28 @@ namespace RealRHI {
 		}
 
 		return res;
+	}
+
+	Result VulkanDevice::CreateTextureView(Texture* texture,
+		const TextureViewDesc& desc,
+		Ref<TextureView>& outView) const {
+		auto view = Ref<VulkanTextureView>::Create();
+		const Result result = view->Init(this, static_cast<VulkanTexture*>(texture), desc, true);
+		if (result == Result::Success) {
+			outView = view;
+		}
+
+		return result;
+	}
+
+	Result VulkanDevice::CreateSampler(const SamplerDesc& desc, Ref<Sampler>& outSampler) const {
+		auto sampler = Ref<VulkanSampler>::Create(this);
+		const Result result = sampler->Init(desc);
+		if (result == Result::Success) {
+			outSampler = sampler;
+		}
+
+		return result;
 	}
 
 	Result VulkanDevice::CreateUploadContext(const UploadContextDesc& desc,
@@ -714,7 +737,8 @@ namespace RealRHI {
 
 		std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
 		std::set<uint32_t> uniqueQueueFamilies = {
-			m_GraphicsQueueFamily, m_PresentQueueFamily, m_ComputeQueueFamily, m_TransferQueueFamily};
+			m_GraphicsQueueFamily, m_PresentQueueFamily, m_ComputeQueueFamily, m_TransferQueueFamily
+		};
 
 		float queuePriority = 1.0f;
 		for (uint32_t queueFamily : uniqueQueueFamilies) {
@@ -762,7 +786,9 @@ namespace RealRHI {
 		vkGetPhysicalDeviceFeatures(m_PhysicalDevice, &supportedFeatures);
 		m_SupportsWireframe = supportedFeatures.fillModeNonSolid == VK_TRUE;
 
-		VkPhysicalDeviceFeatures deviceFeatures{.fillModeNonSolid = supportedFeatures.fillModeNonSolid};
+		VkPhysicalDeviceFeatures deviceFeatures{
+			.fillModeNonSolid = supportedFeatures.fillModeNonSolid,
+		};
 
 		VkDeviceCreateInfo createInfo{
 			.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
@@ -834,7 +860,8 @@ namespace RealRHI {
 		}
 
 		const uint32_t families[] = {
-			m_GraphicsQueueFamily, m_PresentQueueFamily, m_ComputeQueueFamily, m_TransferQueueFamily};
+			m_GraphicsQueueFamily, m_PresentQueueFamily, m_ComputeQueueFamily, m_TransferQueueFamily
+		};
 		for (uint32_t family : families) {
 			const QueueId id{family, 0};
 			if (m_Queues.contains(id)) {

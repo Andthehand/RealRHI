@@ -536,7 +536,8 @@ namespace RealRHI {
 			.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
 			.srcAccessMask = VK_ACCESS_2_NONE,
 			.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-			.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+			// The backbuffer may be loaded or blended, in addition to being written.
+			.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
 			.oldLayout = m_ImageLayouts[imageIndex],
 			.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,

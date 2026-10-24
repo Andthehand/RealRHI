@@ -11,7 +11,6 @@
 
 namespace RealRHI {
 	class VulkanBuffer;
-	class VulkanTextureView;
 
 	class VulkanDescriptorManager {
 	public:
@@ -26,7 +25,7 @@ namespace RealRHI {
 		uint32_t AllocateBufferDescriptor(const VulkanBuffer* buffer);
 		void FreeBufferDescriptor(uint32_t index);
 
-		uint32_t AllocateImageDescriptor(const VulkanTextureView* textureView,
+		uint32_t AllocateImageDescriptor(const VkImageViewCreateInfo& viewInfo,
 			VkDescriptorType descriptorType,
 			VkImageLayout descriptorAccessLayout);
 		void FreeImageDescriptor(uint32_t index);

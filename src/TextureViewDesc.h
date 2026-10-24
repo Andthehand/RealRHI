@@ -1,5 +1,5 @@
 #pragma once
-#include "Texture.h"
+#include "TextureDesc.h"
 
 #include <cstdint>
 
@@ -21,5 +21,9 @@ namespace RealRHI {
 
 		uint32_t baseArrayLayer = 0;
 		uint32_t arrayLayerCount = 1;
+
+		// Select descriptor/attachment usage from the texture's creation flags.
+		// None uses all view-compatible texture usages. Storage and attachment views select one mip.
+		TextureUsage usage = TextureUsage::None;
 	};
 }

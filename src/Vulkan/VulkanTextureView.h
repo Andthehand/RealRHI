@@ -1,5 +1,7 @@
 #pragma once
+#include "BarrierDesc.h"
 #include "Result.h"
+#include "Texture.h"
 #include "TextureView.h"
 #include "TextureViewDesc.h"
 #include "VulkanDevice.h"
@@ -12,32 +14,43 @@ namespace RealRHI {
 	class VulkanTextureView : public TextureView {
 	public:
 		VulkanTextureView() = default;
-		~VulkanTextureView();
+		~VulkanTextureView() override;
 
-		// The texture owns its default view and controls its lifetime.
+		// Default views borrow their parent to avoid a reference cycle; custom views retain it.
 		Result Init(const VulkanDevice* device,
-			const VulkanTexture* texture,
+			VulkanTexture* texture,
 			const TextureViewDesc& desc,
-			bool createNativeImageView);
+			bool retainTexture = false);
 
+		uint32_t GetSampledImageDescriptorIndex() const override { return m_SampledImageDescriptorIndex; }
+		uint32_t GetStorageImageDescriptorIndex() const override { return m_StorageImageDescriptorIndex; }
 	protected:
 		friend class VulkanCommandList;
-		friend class VulkanDescriptorManager;
-		VkImageView GetImageView() const { return m_ImageView; }
-		bool HasNativeImageView() const { return m_ImageView != VK_NULL_HANDLE; }
-		const VkImageViewCreateInfo& GetImageViewCreateInfo() const { return m_ImageViewCreateInfo; }
-		const VulkanTexture* GetTexture() const { return m_Texture; }
 
+		bool HasNativeImageView() const { return m_ImageView != VK_NULL_HANDLE; }
+		
+		VkImageView GetImageView() const { return m_ImageView; }
+		TextureSubresourceRange GetSubresources() const { return m_Subresources; }
+
+		const VulkanTexture* GetTexture() const { return m_Texture; }
+		TextureUsage GetUsage() const { return m_Usage; }
 	private:
-		VkImageViewCreateInfo GetImageViewCreateInfo(const TextureViewDesc& desc) const;
+		bool ValidateDescription(const TextureViewDesc& desc, TextureUsage allowedUsage) const;
+		bool IsViewTypeCompatible(const TextureViewDesc& desc) const;
+
+		VkImageViewCreateInfo BuildImageViewCreateInfo(TextureViewType type) const;
+		Result CreateDescriptors(const VkImageViewCreateInfo& viewInfo);
 
 	private:
 		const VulkanDevice* m_Device = nullptr;
 		const VulkanTexture* m_Texture = nullptr;
-		VkImage m_Image = VK_NULL_HANDLE;
-		VkFormat m_Format = VK_FORMAT_UNDEFINED;
+		Ref<Texture> m_RetainedTexture;
+		TextureUsage m_Usage = TextureUsage::None;
+		TextureSubresourceRange m_Subresources{};
 
-		VkImageViewCreateInfo m_ImageViewCreateInfo{};
 		VkImageView m_ImageView = VK_NULL_HANDLE;
+
+		uint32_t m_SampledImageDescriptorIndex = UINT32_MAX;
+		uint32_t m_StorageImageDescriptorIndex = UINT32_MAX;
 	};
 }

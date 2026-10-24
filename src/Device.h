@@ -10,12 +10,15 @@
 #include "Queue.h"
 #include "RefCounted.h"
 #include "Result.h"
+#include "Sampler.h"
+#include "SamplerDesc.h"
 #include "Shader.h"
 #include "ShaderDesc.h"
 #include "Swapchain.h"
 #include "SwapchainDesc.h"
 #include "Texture.h"
 #include "TextureDesc.h"
+#include "TextureViewDesc.h"
 #include "UploadContext.h"
 #include "Window.h"
 #include "WindowDesc.h"
@@ -44,6 +47,8 @@ namespace RealRHI {
 		virtual Result CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) const = 0;
 		virtual Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) const = 0;
 		virtual Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const = 0;
+		virtual Result CreateTextureView(Texture* texture, const TextureViewDesc& desc, Ref<TextureView>& outView) const = 0;
+		virtual Result CreateSampler(const SamplerDesc& desc, Ref<Sampler>& outSampler) const = 0;
 		virtual Result CreateUploadContext(const UploadContextDesc& desc, std::unique_ptr<UploadContext>& outContext) const = 0;
 		virtual Result CreateCommandAllocator(QueueType type, Ref<CommandAllocator>& outAllocator) const = 0;
 		// Non-owning queue access; the device retains ownership.

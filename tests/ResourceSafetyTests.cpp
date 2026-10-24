@@ -344,8 +344,9 @@ int main() {
 		});
 		barriers.textures.push_back({
 			.texture = depth.Raw(),
-			.after = {PipelineStage::EarlyFragmentTests | PipelineStage::LateFragmentTests,
-				ResourceAccess::DepthStencilWrite},
+			.after =
+				{PipelineStage::EarlyFragmentTests | PipelineStage::LateFragmentTests,
+					ResourceAccess::DepthStencilWrite},
 			.newLayout = TextureLayout::DepthStencilAttachment,
 		});
 		list->Barrier(barriers);
@@ -372,6 +373,46 @@ int main() {
 		Expect(
 			texture->UploadData(pixels.data(), pixels.size()) == Result::Success, "Upload a single-row texture array");
 	}
+	{
+		Ref<Window> window;
+		Ref<Swapchain> swapchain;
+		Expect(device->CreateWindow({.Title = "Swapchain load synchronization", .Width = 64, .Height = 64}, window) ==
+				Result::Success,
+			"Create swapchain load test window");
+		Expect(device->CreateSwapchain({.window = window.Raw()}, swapchain) == Result::Success,
+			"Create swapchain load test");
+
+		Ref<CommandAllocator> allocator;
+		Ref<CommandList> list;
+		Expect(device->CreateCommandAllocator(QueueType::Graphics, allocator) == Result::Success,
+			"Create swapchain load allocator");
+		Expect(device->CreateCommandList(allocator.Raw(), list) == Result::Success, "Create swapchain load list");
+
+		// LOAD reads the attachment after the swapchain's automatic layout transition.
+		// Clear-only examples cannot catch a transition that permits writes but omits reads.
+		for (uint32_t frameNumber = 0; frameNumber < 6; ++frameNumber) {
+			const FrameContext frame = swapchain->BeginFrame();
+			Expect(frame.backBufferView != nullptr, "Acquire backbuffer for load test");
+			Expect(list->Begin() == Result::Success, "Begin attachment load");
+			list->BeginRendering({
+				.colorAttachments = {{
+					.target = frame.backBufferView,
+					.loadOp = LoadOp::Load,
+				}},
+				.renderArea = {.width = frame.width, .height = frame.height},
+			});
+			list->EndRendering();
+			Expect(list->End() == Result::Success, "End attachment load");
+
+			SubmissionToken completion;
+			Expect(device->Submit(list.Raw(), swapchain.Raw(), frame, &completion) == Result::Success,
+				"Submit attachment load with synchronized color reads");
+			swapchain->Present(frame);
+			queue->Wait(completion);
+			Expect(list->Reset() == Result::Success, "Reset completed attachment load");
+		}
+	}
+
 	device->WaitIdle();
 	std::cout << "ResourceSafetyTests passed\n";
 }

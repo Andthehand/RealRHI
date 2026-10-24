@@ -2,7 +2,6 @@
 
 #include "VulkanBuffer.h"
 #include "VulkanConvertions.h"
-#include "VulkanTextureView.h"
 
 namespace RealRHI {
 	VulkanDescriptorManager::VulkanDescriptorManager(const VulkanDevice* device)
@@ -101,7 +100,7 @@ namespace RealRHI {
 		m_FreeBufferDescriptors.push_back(index);
 	}
 
-	uint32_t VulkanDescriptorManager::AllocateImageDescriptor(const VulkanTextureView* textureView,
+	uint32_t VulkanDescriptorManager::AllocateImageDescriptor(const VkImageViewCreateInfo& viewInfo,
 		VkDescriptorType descriptorType,
 		VkImageLayout descriptorAccessLayout) {
 		std::scoped_lock lock(m_DescriptorMutex);
@@ -114,6 +113,10 @@ namespace RealRHI {
 			if (m_NextImageDescriptorIndex == 0 ||
 				static_cast<VkDeviceSize>(m_NextImageDescriptorIndex - 1) * m_ImageDescriptorSize <
 					static_cast<VkDeviceSize>(m_NextBufferDescriptorIndex) * m_BufferDescriptorSize) {
+				m_Device->SendDebugMessage(DebugSeverity::Error,
+					DebugMessageType::General,
+					"AllocateImageDescriptor: Resource descriptor heap is full.");
+
 				return UINT32_MAX;
 			}
 			imageDescriptorIndex = --m_NextImageDescriptorIndex;
@@ -121,17 +124,16 @@ namespace RealRHI {
 
 		VkImageDescriptorInfoEXT imageDescriptorInfo{
 			.sType = VK_STRUCTURE_TYPE_IMAGE_DESCRIPTOR_INFO_EXT,
-			.pView = &textureView->GetImageViewCreateInfo(),
+			.pView = &viewInfo,
 			.layout = descriptorAccessLayout,
 		};
 
 		VkResourceDescriptorInfoEXT descriptorInfo{
 			.sType = VK_STRUCTURE_TYPE_RESOURCE_DESCRIPTOR_INFO_EXT,
 			.type = descriptorType,
-			.data =
-				{
-					.pImage = &imageDescriptorInfo,
-				},
+			.data = {
+				.pImage = &imageDescriptorInfo,
+			},
 		};
 
 		std::vector<uint8_t> descriptorMemory(m_ImageDescriptorSize);
@@ -179,6 +181,10 @@ namespace RealRHI {
 		else {
 			if ((static_cast<VkDeviceSize>(m_NextSamplerDescriptorIndex) + 1) * m_SamplerDescriptorSize >
 				m_DescriptorHeaps->GetSamplerHeap().usableSize) {
+				m_Device->SendDebugMessage(DebugSeverity::Error,
+					DebugMessageType::General,
+					"AllocateSamplerDescriptor: Sampler descriptor heap is full.");
+
 				return UINT32_MAX;
 			}
 			samplerDescriptorIndex = m_NextSamplerDescriptorIndex++;
