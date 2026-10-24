@@ -72,20 +72,26 @@ namespace RealRHI {
 	}
 
 	void VulkanBuffer::WriteData(const void* data, uint64_t size, uint64_t offset) {
+		CopyToMappedMemory(data, size, offset);
+	}
+
+	Result VulkanBuffer::CopyToMappedMemory(const void* data, uint64_t size, uint64_t offset) {
 		if (data == nullptr || m_AllocInfo.pMappedData == nullptr || offset > m_Size || size > m_Size - offset) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
 				"WriteData: Provide non-null data, a mapped buffer, and a range within GetSize().");
-			return;
+			return Result::InvalidParameter;
 		}
 		if (size == 0) {
-			return;
+			return Result::Success;
 		}
 		if (vmaCopyMemoryToAllocation(m_Device->GetAllocator(), data, m_BufferMemory, offset, size) != VK_SUCCESS) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
 				"WriteData: Failed to copy and flush mapped buffer memory.");
+			return Result::Failed;
 		}
+		return Result::Success;
 	}
 
 	Result VulkanBuffer::ReadData(void* data, uint64_t size, uint64_t offset) const {

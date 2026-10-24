@@ -29,6 +29,8 @@ BreakConstructorInitializers: BeforeColon
 PackConstructorInitializers: NextLineOnly
 AlignOperands: DontAlign
 AlignAfterOpenBracket: false
+BreakAfterOpenBracketBracedList: true
+BreakBeforeCloseBracketBracedList: true
 Cpp11BracedListStyle: FunctionCall
 InsertBraces: true
 PointerAlignment: Left

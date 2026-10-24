@@ -42,6 +42,7 @@ namespace RealRHI {
 		MemoryUsage memoryUsage = MemoryUsage::GPUOnly;
 
 		// Direct initialization requires CPUToGPU or GPUToCPU memory.
+		// Use an UploadContext batch to initialize GPUOnly buffers.
 		const void* initialData = nullptr;
 	};
 }

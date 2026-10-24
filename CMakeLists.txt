@@ -28,6 +28,8 @@ set(REALRHI_HEADERS
     "src/BarrierDesc.h"
     "src/DeferredDeletionQueue.h"
     "src/FrameResources.h"
+    "src/UploadContext.h"
+    "src/Vulkan/VulkanUploadContext.h"
     "src/Vulkan/VulkanCommandAllocator.h"
     "src/Vulkan/VulkanDevice.h"
     "src/Vulkan/VulkanResourceState.h"
@@ -69,6 +71,7 @@ set(REALRHI_HEADERS
 )
 
 set(REALRHI_SOURCES
+    "src/Vulkan/VulkanUploadContext.cpp"
     "src/Vulkan/VulkanCommandAllocator.cpp"
     "src/Vulkan/VulkanDevice.cpp"
     "src/Vulkan/VulkanCommandQueue.cpp"
@@ -124,6 +127,11 @@ if(REALRHI_BUILD_TESTS)
         REALRHI_TEST_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/tests/shaders")
     add_test(NAME QueueOwnershipTests COMMAND QueueOwnershipTests)
     set_tests_properties(QueueOwnershipTests PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
+
+    add_executable(UploadTests tests/UploadTests.cpp)
+    target_link_libraries(UploadTests PRIVATE RealRHI)
+    add_test(NAME UploadTests COMMAND UploadTests)
+    set_tests_properties(UploadTests PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
 endif()
 
 if(BUILD_EXAMPLES)

@@ -66,6 +66,7 @@ namespace RealRHI {
 		Result CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) const override;
 		Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) const override;
 		Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const override;
+		Result CreateUploadContext(const UploadContextDesc& desc, std::unique_ptr<UploadContext>& outContext) const override;
 		Result CreateCommandAllocator(QueueType type, Ref<CommandAllocator>& outAllocator) const override;
 		Result CreateCommandList(CommandAllocator* allocator, Ref<CommandList>& outCommandList) const override;
 

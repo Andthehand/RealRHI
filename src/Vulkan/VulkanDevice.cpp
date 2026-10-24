@@ -10,6 +10,7 @@
 #include "VulkanPipeline.h"
 #include "VulkanShader.h"
 #include "VulkanSwapchain.h"
+#include "VulkanUploadContext.h"
 #include "VulkanWindow.h"
 
 #include <algorithm>
@@ -202,6 +203,16 @@ namespace RealRHI {
 		}
 
 		return res;
+	}
+
+	Result VulkanDevice::CreateUploadContext(const UploadContextDesc& desc,
+		std::unique_ptr<UploadContext>& outContext) const {
+		auto context = std::make_unique<VulkanUploadContext>(this, desc);
+		const Result result = context->Init();
+		if (result == Result::Success) {
+			outContext = std::move(context);
+		}
+		return result;
 	}
 
 	Result VulkanDevice::CreateCommandAllocator(QueueType type, Ref<CommandAllocator>& outAllocator) const {

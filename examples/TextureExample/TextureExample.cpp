@@ -43,6 +43,7 @@ RealRHI::Ref<RealRHI::Pipeline> pipeline;
 RealRHI::Ref<RealRHI::Buffer> vertexBuffer;
 std::vector<RealRHI::Ref<RealRHI::Texture>> textures;
 std::unique_ptr<RealRHI::FrameResources> frameResources;
+RealRHI::UploadSubmission pendingTextureUpload;
 
 std::vector<uint8_t> BuildCheckerboardTexture() {
 	std::vector<uint8_t> pixels(s_TextureWidth * s_TextureHeight * 4);
@@ -208,8 +209,13 @@ void CreateVertexBuffer() {
 	}
 }
 
-void CreateTextures() {
+bool CreateTextures() {
 	textures.resize(s_TextureCount);
+	std::unique_ptr<RealRHI::UploadContext> uploads;
+	if (device->CreateUploadContext({}, uploads) != RealRHI::Result::Success ||
+		uploads->BeginBatch() != RealRHI::Result::Success) {
+		return false;
+	}
 
 	const std::vector<uint8_t> texturePixels[s_TextureCount] = {
 		BuildCheckerboardTexture(),
@@ -230,15 +236,20 @@ void CreateTextures() {
 			textures[i]);
 		if (result != RealRHI::Result::Success) {
 			std::cerr << "Failed to create texture" << std::endl;
-			return;
+			return false;
 		}
 
-		result = textures[i]->UploadData(texturePixels[i].data(), static_cast<uint32_t>(texturePixels[i].size()));
+		result = uploads->UploadTexture(
+			{.destination = textures[i].Raw(),
+				.finalState = {RealRHI::PipelineStage::FragmentShader, RealRHI::ResourceAccess::ShaderRead}},
+			texturePixels[i].data(),
+			texturePixels[i].size());
 		if (result != RealRHI::Result::Success) {
 			std::cerr << "Failed to upload texture data" << std::endl;
-			return;
+			return false;
 		}
 	}
+	return uploads->Submit(pendingTextureUpload) == RealRHI::Result::Success;
 }
 
 bool CreateCommandLists() {
@@ -256,6 +267,9 @@ bool RecordCommandBuffer(RealRHI::CommandList* cmd, const RealRHI::FrameContext&
 	if (cmd->Begin() != RealRHI::Result::Success) {
 		std::cerr << "Failed to begin command list" << std::endl;
 		return false;
+	}
+	if (pendingTextureUpload.completion.IsValid()) {
+		cmd->Barrier(pendingTextureUpload.acquireBarriers);
 	}
 
 	RealRHI::RenderingInfo renderingInfo{
@@ -325,10 +339,15 @@ bool DrawFrame(uint32_t& framesRendered) {
 		return false;
 	}
 	RealRHI::SubmissionToken token{};
-	if (device->Submit(cmd, swapchain.Raw(), frame, &token) != RealRHI::Result::Success) {
+	std::span<const RealRHI::SubmissionToken> waits;
+	if (pendingTextureUpload.completion.IsValid()) {
+		waits = {&pendingTextureUpload.completion, 1};
+	}
+	if (device->Submit(cmd, swapchain.Raw(), frame, &token, waits) != RealRHI::Result::Success) {
 		std::cerr << "Frame submission failed." << std::endl;
 		return false;
 	}
+	pendingTextureUpload = {};
 	if (frameResources->TrackSubmission(frame.frameIndex, token) != RealRHI::Result::Success) {
 		std::cerr << "Failed to track frame submission" << std::endl;
 		return false;
@@ -386,8 +405,7 @@ int main(int argc, char** argv) {
 		Cleanup();
 		return 1;
 	}
-	CreateTextures();
-	if (RealRHI::Examples::s_ErrorCount != 0) {
+	if (!CreateTextures() || RealRHI::Examples::s_ErrorCount != 0) {
 		Cleanup();
 		return 1;
 	}
@@ -422,8 +440,7 @@ int main(int argc, char** argv) {
 	}
 
 	Cleanup();
-	if (!succeeded || RealRHI::Examples::s_ErrorCount != 0 ||
-		(frameLimit != 0 && framesRendered != frameLimit)) {
+	if (!succeeded || RealRHI::Examples::s_ErrorCount != 0 || (frameLimit != 0 && framesRendered != frameLimit)) {
 		return 1;
 	}
 	return 0;

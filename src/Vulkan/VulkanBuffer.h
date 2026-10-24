@@ -28,12 +28,14 @@ namespace RealRHI {
 
 	protected:
 		friend class VulkanCommandList;
+		friend class VulkanUploadContext;
 		friend class VulkanTexture;
 		friend class VulkanDescriptorHeaps;
 		friend class VulkanDescriptorManager;
 		VkBuffer GetBuffer() const { return m_Buffer; }
 
 		VkDeviceAddress GetBufferDeviceAddress() const;
+		Result CopyToMappedMemory(const void* data, uint64_t size, uint64_t offset);
 		std::vector<VulkanBufferRangeState> GetSubmittedRanges() const;
 		void CommitSubmittedRanges(std::vector<VulkanBufferRangeState> ranges);
 
