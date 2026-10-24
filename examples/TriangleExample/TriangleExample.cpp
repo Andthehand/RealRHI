@@ -16,9 +16,11 @@ struct Vertex {
 	float color[3];
 };
 
-const std::vector<Vertex> vertices = {{{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+const std::vector<Vertex> vertices = {
+	{{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
 	{{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
-	{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}};
+	{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+};
 
 std::unique_ptr<RealRHI::Device> device;
 RealRHI::Ref<RealRHI::Window> window;
@@ -75,11 +77,10 @@ void CreateGraphicsPipeline() {
 			{
 				.enable = false,
 			},
-		.renderTargetFormats =
-			{
-				.colorFormats = {swapchain->GetBackBufferFormat()},
-				.depthFormat = RealRHI::TextureFormat::Unknown,
-			},
+		.renderTargetFormats = {
+			.colorFormats = {swapchain->GetBackBufferFormat()},
+			.depthFormat = RealRHI::TextureFormat::Unknown,
+		},
 	};
 
 	result = device->CreateGraphicsPipeline(desc, pipeline);
@@ -161,13 +162,17 @@ bool RecordCommandBuffer(RealRHI::CommandList* cmd, const RealRHI::FrameContext&
 }
 
 bool DrawFrame(uint32_t& framesRendered) {
-	if (window->GetWidth() == 0 || window->GetHeight() == 0) {
+	if (window->IsMinimized() || window->GetWidth() == 0 || window->GetHeight() == 0) {
 		SDL_Delay(16);
 		return true;
 	}
 
 	RealRHI::FrameContext frame = swapchain->BeginFrame();
 	if (frame.backBufferView == nullptr) {
+		if (window->IsMinimized() || window->GetWidth() == 0 || window->GetHeight() == 0) {
+			SDL_Delay(16);
+			return true;
+		}
 		std::cerr << "Frame acquisition returned no backbuffer; stopping to avoid unsafe semaphore reuse." << std::endl;
 		return false;
 	}

@@ -18,6 +18,7 @@ namespace RealRHI {
 
 		uint32_t GetWidth() const override;
 		uint32_t GetHeight() const override;
+		bool IsMinimized() const override;
 
 	protected:
 		friend class VulkanSwapchain;

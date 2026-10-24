@@ -144,6 +144,20 @@ if(REALRHI_BUILD_TESTS)
     target_link_libraries(UploadTests PRIVATE RealRHI)
     add_test(NAME UploadTests COMMAND UploadTests)
     set_tests_properties(UploadTests PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
+
+    add_executable(SceneTests tests/SceneTests.cpp examples/SceneExample/SceneRenderer.cpp)
+    target_link_libraries(SceneTests PRIVATE RealRHI)
+    target_compile_definitions(SceneTests PRIVATE
+        REALRHI_SCENE_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/examples/SceneExample/shaders")
+    add_test(NAME SceneTests COMMAND SceneTests)
+    set_tests_properties(SceneTests PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
+
+    add_executable(DrawTests tests/DrawTests.cpp)
+    target_link_libraries(DrawTests PRIVATE RealRHI)
+    target_compile_definitions(DrawTests PRIVATE
+        REALRHI_TEST_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/tests/shaders")
+    add_test(NAME DrawTests COMMAND DrawTests)
+    set_tests_properties(DrawTests PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
 endif()
 
 if(BUILD_EXAMPLES)

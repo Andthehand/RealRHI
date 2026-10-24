@@ -1340,7 +1340,10 @@ namespace RealRHI {
 		vkCmdPipelineBarrier2(m_CommandBuffer, &dependencyInfo);
 	}
 
-	void VulkanCommandList::Draw(uint32_t vertexCount) {
+	void VulkanCommandList::Draw(uint32_t vertexCount,
+		uint32_t instanceCount,
+		uint32_t firstVertex,
+		uint32_t firstInstance) {
 		if (GetState() != CommandListState::Recording || !m_Rendering || !m_GraphicsPipelineBound) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
@@ -1351,16 +1354,29 @@ namespace RealRHI {
 		if (m_VertexBuffer) {
 			RecordBufferUse(m_VertexBuffer, 0, m_VertexBuffer->GetSize(), "Draw vertex buffer");
 		}
-		vkCmdDraw(m_CommandBuffer, vertexCount, 1, 0, 0);
+		vkCmdDraw(m_CommandBuffer, vertexCount, instanceCount, firstVertex, firstInstance);
 	}
 
-	void VulkanCommandList::DrawIndexed(uint32_t indexCount) {
+	void VulkanCommandList::DrawIndexed(uint32_t indexCount,
+		uint32_t instanceCount,
+		uint32_t firstIndex,
+		int32_t vertexOffset,
+		uint32_t firstInstance) {
 		if (GetState() != CommandListState::Recording || !m_Rendering || !m_GraphicsPipelineBound) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
 				"DrawIndexed: Requires an active rendering scope and a bound graphics pipeline.");
 			return;
 		}
+		if (m_IndexBuffer == nullptr || firstIndex > m_IndexBuffer->GetSize() / sizeof(uint32_t) ||
+			indexCount > m_IndexBuffer->GetSize() / sizeof(uint32_t) - firstIndex) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"DrawIndexed: Bind an index buffer and select an in-bounds range of 32-bit indices.");
+
+			return;
+		}
+
 		RecordShaderResources("DrawIndexed");
 		if (m_VertexBuffer) {
 			RecordBufferUse(m_VertexBuffer, 0, m_VertexBuffer->GetSize(), "DrawIndexed vertex buffer");
@@ -1368,6 +1384,6 @@ namespace RealRHI {
 		if (m_IndexBuffer) {
 			RecordBufferUse(m_IndexBuffer, 0, m_IndexBuffer->GetSize(), "DrawIndexed index buffer");
 		}
-		vkCmdDrawIndexed(m_CommandBuffer, indexCount, 1, 0, 0, 0);
+		vkCmdDrawIndexed(m_CommandBuffer, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
 	}
 }

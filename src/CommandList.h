@@ -105,7 +105,14 @@ namespace RealRHI {
 
 		virtual void Barrier(const BarrierDesc& barriers) = 0;
 
-		virtual void Draw(uint32_t vertexCount) = 0;
-		virtual void DrawIndexed(uint32_t indexCount) = 0;
+		virtual void Draw(uint32_t vertexCount,
+			uint32_t instanceCount = 1,
+			uint32_t firstVertex = 0,
+			uint32_t firstInstance = 0) = 0;
+		virtual void DrawIndexed(uint32_t indexCount,
+			uint32_t instanceCount = 1,
+			uint32_t firstIndex = 0,
+			int32_t vertexOffset = 0,
+			uint32_t firstInstance = 0) = 0;
 	};
 }

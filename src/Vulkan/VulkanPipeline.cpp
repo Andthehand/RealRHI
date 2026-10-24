@@ -124,7 +124,7 @@ namespace RealRHI {
 
 		VkPipelineVertexInputStateCreateInfo vertexInputInfo{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-			.vertexBindingDescriptionCount = 1,
+			.vertexBindingDescriptionCount = vertexAttributes.empty() ? 0u : 1u,
 			.pVertexBindingDescriptions = &bindingDescription,
 			.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size()),
 			.pVertexAttributeDescriptions = attributeDescriptions.data(),
@@ -200,16 +200,23 @@ namespace RealRHI {
 			vkColorFormats[i] = Utils::TextureFormatToVkFormat(formats.colorFormats[i]);
 		}
 
+		const VkImageAspectFlags depthStencilAspects = Utils::TextureFormatToVkImageAspect(formats.depthFormat);
 		VkFormat depthFormat = VK_FORMAT_UNDEFINED;
-		if (Utils::TextureFormatToVkImageAspect(formats.depthFormat) != 0) {
+		VkFormat stencilFormat = VK_FORMAT_UNDEFINED;
+		if ((depthStencilAspects & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) {
 			depthFormat = Utils::TextureFormatToVkFormat(formats.depthFormat);
 		}
+
+		if ((depthStencilAspects & VK_IMAGE_ASPECT_STENCIL_BIT) != 0) {
+			stencilFormat = Utils::TextureFormatToVkFormat(formats.depthFormat);
+		}
+
 		VkPipelineRenderingCreateInfo pipelineRenderingInfo{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
 			.colorAttachmentCount = static_cast<uint32_t>(vkColorFormats.size()),
 			.pColorAttachmentFormats = vkColorFormats.data(),
-			.depthAttachmentFormat = Utils::TextureFormatToVkFormat(formats.depthFormat),
-			.stencilAttachmentFormat = depthFormat,
+			.depthAttachmentFormat = depthFormat,
+			.stencilAttachmentFormat = stencilFormat,
 		};
 
 		VkPipelineCreateFlags2CreateInfo pipelineCreateFlags2Info{

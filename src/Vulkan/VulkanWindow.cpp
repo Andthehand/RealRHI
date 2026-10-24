@@ -60,6 +60,10 @@ namespace RealRHI {
 		return 0;
 	}
 
+	bool VulkanWindow::IsMinimized() const {
+		return (SDL_GetWindowFlags(m_Window) & SDL_WINDOW_MINIMIZED) != 0;
+	}
+
 	bool VulkanWindow::CreateVulkanSurface(VkSurfaceKHR* surface) const {
 		return SDL_Vulkan_CreateSurface(m_Window, m_Device->GetInstance(), nullptr, surface);
 	}

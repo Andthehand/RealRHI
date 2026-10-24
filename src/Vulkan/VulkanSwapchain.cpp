@@ -307,7 +307,7 @@ namespace RealRHI {
 		if (m_FrameFailed) {
 			return FrameContext{.imageIndex = std::numeric_limits<uint32_t>::max()};
 		}
-		if (m_Window->GetWidth() == 0 || m_Window->GetHeight() == 0) {
+		if (m_Window->IsMinimized() || m_Window->GetWidth() == 0 || m_Window->GetHeight() == 0) {
 			return FrameContext{.imageIndex = std::numeric_limits<uint32_t>::max()};
 		}
 		if (m_Window->GetWidth() != m_SwapchainExtent.width || m_Window->GetHeight() != m_SwapchainExtent.height) {
@@ -491,7 +491,9 @@ namespace RealRHI {
 
 		VkResult result = vkQueuePresentKHR(m_Device->GetPresentQueue(), &presentInfo);
 		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
-			if (RecreateSwapchain() != Result::Success) {
+			// A minimized window cannot provide a drawable extent. Reacquisition retries after restore.
+			if (!m_Window->IsMinimized() && m_Window->GetWidth() != 0 && m_Window->GetHeight() != 0 &&
+				RecreateSwapchain() != Result::Success) {
 				m_FrameFailed = true;
 			}
 		}

@@ -596,9 +596,13 @@ namespace RealRHI {
 			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
 			.pNext = &vulkan13Features,
 		};
+		VkPhysicalDeviceVulkan11Features vulkan11Features{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+			.pNext = &vulkan12Features,
+		};
 		VkPhysicalDeviceFeatures2 features{
 			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-			.pNext = &vulkan12Features,
+			.pNext = &vulkan11Features,
 		};
 		vkGetPhysicalDeviceFeatures2(device, &features);
 
@@ -608,6 +612,7 @@ namespace RealRHI {
 		};
 
 		const RequiredFeature requiredFeatures[] = {
+			{vulkan11Features.shaderDrawParameters, "shaderDrawParameters"},
 			{vulkan12Features.bufferDeviceAddress, "bufferDeviceAddress"},
 			{vulkan12Features.timelineSemaphore, "timelineSemaphore"},
 			{vulkan13Features.synchronization2, "synchronization2"},
@@ -781,6 +786,12 @@ namespace RealRHI {
 			.timelineSemaphore = VK_TRUE,
 			.bufferDeviceAddress = VK_TRUE,
 		};
+		// Slang uses base-vertex/base-instance built-ins for SV_VertexID and SV_InstanceID.
+		VkPhysicalDeviceVulkan11Features enabledVk11Features{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+			.pNext = &enabledVk12Features,
+			.shaderDrawParameters = VK_TRUE,
+		};
 
 		VkPhysicalDeviceFeatures supportedFeatures{};
 		vkGetPhysicalDeviceFeatures(m_PhysicalDevice, &supportedFeatures);
@@ -792,7 +803,7 @@ namespace RealRHI {
 
 		VkDeviceCreateInfo createInfo{
 			.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-			.pNext = &enabledVk12Features,
+			.pNext = &enabledVk11Features,
 			.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size()),
 			.pQueueCreateInfos = queueCreateInfos.data(),
 			.enabledExtensionCount = static_cast<uint32_t>(s_DeviceExtensions.size()),
