@@ -131,6 +131,8 @@ namespace RealRHI {
 		VkPhysicalDeviceDescriptorHeapPropertiesEXT GetDescriptorHeapProperties() const;
 		uint32_t GetMaxPushDataSize() const { return m_MaxPushDataSize; }
 		bool SupportsWireframe() const { return m_SupportsWireframe; }
+		bool SupportsIndependentBlend() const { return m_SupportsIndependentBlend; }
+		bool SupportsDepthBiasClamp() const { return m_SupportsDepthBiasClamp; }
 
 	private:
 		Result SetDebugObjectName(VkObjectType type, uint64_t handle, const char* name) const;
@@ -171,6 +173,8 @@ namespace RealRHI {
 		VmaAllocator m_Allocator = VK_NULL_HANDLE;
 		uint32_t m_MaxPushDataSize = 0;
 		bool m_SupportsWireframe = false;
+		bool m_SupportsIndependentBlend = false;
+		bool m_SupportsDepthBiasClamp = false;
 
 		std::filesystem::path m_ShaderDirectory;
 		DebugCallback m_DebugCallback;

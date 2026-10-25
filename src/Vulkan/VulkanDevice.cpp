@@ -844,10 +844,14 @@ namespace RealRHI {
 		};
 		vkGetPhysicalDeviceFeatures2(m_PhysicalDevice, &supportedFeatures);
 		m_SupportsWireframe = supportedFeatures.features.fillModeNonSolid == VK_TRUE;
+		m_SupportsIndependentBlend = supportedFeatures.features.independentBlend == VK_TRUE;
+		m_SupportsDepthBiasClamp = supportedFeatures.features.depthBiasClamp == VK_TRUE;
 		m_SupportsHostQueryReset = supportedVk12Features.hostQueryReset == VK_TRUE;
 		enabledVk12Features.hostQueryReset = supportedVk12Features.hostQueryReset;
 
 		VkPhysicalDeviceFeatures deviceFeatures{
+			.independentBlend = supportedFeatures.features.independentBlend,
+			.depthBiasClamp = supportedFeatures.features.depthBiasClamp,
 			.fillModeNonSolid = supportedFeatures.features.fillModeNonSolid,
 		};
 

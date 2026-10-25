@@ -29,6 +29,9 @@ namespace RealRHI {
 		VkPipelineBindPoint GetBindPoint() const { return m_BindPoint; }
 
 	private:
+		Result BuildColorBlendDescriptions(const PipelineDesc& desc,
+			std::vector<VkPipelineColorBlendAttachmentState>& attachments) const;
+
 		Result BuildVertexInputDescriptions(const VertexLayout& layout,
 			const Shader& shader,
 			std::vector<VkVertexInputBindingDescription>& bindings,

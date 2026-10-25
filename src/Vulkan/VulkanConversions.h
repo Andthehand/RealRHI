@@ -467,6 +467,79 @@ namespace RealRHI::Utils {
 		}
 	}
 
+	constexpr VkPrimitiveTopology PrimitiveTopologyToVkPrimitiveTopology(PrimitiveTopology topology) {
+		switch (topology) {
+			case PrimitiveTopology::PointList:
+				return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+			case PrimitiveTopology::LineList:
+				return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+			case PrimitiveTopology::LineStrip:
+				return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+			case PrimitiveTopology::TriangleList:
+				return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+			case PrimitiveTopology::TriangleStrip:
+				return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+			case PrimitiveTopology::TriangleFan:
+				return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN;
+			default:
+				return VK_PRIMITIVE_TOPOLOGY_MAX_ENUM;
+		}
+	}
+
+	constexpr VkBlendFactor BlendFactorToVkBlendFactor(BlendFactor factor) {
+		switch (factor) {
+			case BlendFactor::Zero:
+				return VK_BLEND_FACTOR_ZERO;
+			case BlendFactor::One:
+				return VK_BLEND_FACTOR_ONE;
+			case BlendFactor::SourceColor:
+				return VK_BLEND_FACTOR_SRC_COLOR;
+			case BlendFactor::OneMinusSourceColor:
+				return VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+			case BlendFactor::DestinationColor:
+				return VK_BLEND_FACTOR_DST_COLOR;
+			case BlendFactor::OneMinusDestinationColor:
+				return VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
+			case BlendFactor::SourceAlpha:
+				return VK_BLEND_FACTOR_SRC_ALPHA;
+			case BlendFactor::OneMinusSourceAlpha:
+				return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+			case BlendFactor::DestinationAlpha:
+				return VK_BLEND_FACTOR_DST_ALPHA;
+			case BlendFactor::OneMinusDestinationAlpha:
+				return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+			case BlendFactor::ConstantColor:
+				return VK_BLEND_FACTOR_CONSTANT_COLOR;
+			case BlendFactor::OneMinusConstantColor:
+				return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR;
+			case BlendFactor::ConstantAlpha:
+				return VK_BLEND_FACTOR_CONSTANT_ALPHA;
+			case BlendFactor::OneMinusConstantAlpha:
+				return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA;
+			case BlendFactor::SourceAlphaSaturate:
+				return VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;
+			default:
+				return VK_BLEND_FACTOR_MAX_ENUM;
+		}
+	}
+
+	constexpr VkBlendOp BlendOperationToVkBlendOp(BlendOperation operation) {
+		switch (operation) {
+			case BlendOperation::Add:
+				return VK_BLEND_OP_ADD;
+			case BlendOperation::Subtract:
+				return VK_BLEND_OP_SUBTRACT;
+			case BlendOperation::ReverseSubtract:
+				return VK_BLEND_OP_REVERSE_SUBTRACT;
+			case BlendOperation::Min:
+				return VK_BLEND_OP_MIN;
+			case BlendOperation::Max:
+				return VK_BLEND_OP_MAX;
+			default:
+				return VK_BLEND_OP_MAX_ENUM;
+		}
+	}
+
 	constexpr VkCompareOp CompareOpToVkCompareOp(CompareOp op) {
 		switch (op) {
 			case CompareOp::Never:

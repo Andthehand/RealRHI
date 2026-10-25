@@ -5,6 +5,7 @@
 #include "VulkanShader.h"
 
 #include <algorithm>
+#include <cmath>
 #include <unordered_set>
 
 namespace RealRHI {
@@ -181,6 +182,80 @@ namespace RealRHI {
 		return Result::Success;
 	}
 
+	Result VulkanPipeline::BuildColorBlendDescriptions(const PipelineDesc& desc,
+		std::vector<VkPipelineColorBlendAttachmentState>& attachments) const {
+		auto reject = [&](const std::string& reason) {
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, ("CreateGraphicsPipeline: " + reason).c_str());
+			return Result::InvalidParameter;
+		};
+
+		const size_t count = desc.renderTargetFormats.colorFormats.size();
+		if (!desc.colorBlendStates.empty() && desc.colorBlendStates.size() != count) {
+			return reject(
+				"Provide exactly one colorBlendStates entry per color target, or leave it empty to use blendState.");
+		}
+
+		VkPhysicalDeviceProperties properties{};
+		vkGetPhysicalDeviceProperties(m_Device->GetPhysicalDevice(), &properties);
+		if (count > properties.limits.maxColorAttachments) {
+			return reject("Color target count exceeds maxColorAttachments.");
+		}
+
+		for (float value : desc.blendConstants) {
+			if (!std::isfinite(value)) {
+				return reject("Blend constants must be finite.");
+			}
+		}
+
+		for (size_t i = 0; i < count; ++i) {
+			const BlendState* state = &desc.blendState;
+			if (!desc.colorBlendStates.empty()) {
+				state = &desc.colorBlendStates[i];
+
+				if (!m_Device->SupportsIndependentBlend() && *state != desc.colorBlendStates[0]) {
+					return reject(
+						"Different color target blend states or write masks require independentBlend support.");
+				}
+			}
+
+			VkPipelineColorBlendAttachmentState attachment{
+				.blendEnable = state->enable,
+				.srcColorBlendFactor = Utils::BlendFactorToVkBlendFactor(state->sourceColorFactor),
+				.dstColorBlendFactor = Utils::BlendFactorToVkBlendFactor(state->destinationColorFactor),
+				.colorBlendOp = Utils::BlendOperationToVkBlendOp(state->colorOperation),
+				.srcAlphaBlendFactor = Utils::BlendFactorToVkBlendFactor(state->sourceAlphaFactor),
+				.dstAlphaBlendFactor = Utils::BlendFactorToVkBlendFactor(state->destinationAlphaFactor),
+				.alphaBlendOp = Utils::BlendOperationToVkBlendOp(state->alphaOperation),
+				.colorWriteMask = static_cast<VkColorComponentFlags>(state->writeMask),
+			};
+
+			if (attachment.srcColorBlendFactor == VK_BLEND_FACTOR_MAX_ENUM ||
+				attachment.dstColorBlendFactor == VK_BLEND_FACTOR_MAX_ENUM ||
+				attachment.srcAlphaBlendFactor == VK_BLEND_FACTOR_MAX_ENUM ||
+				attachment.dstAlphaBlendFactor == VK_BLEND_FACTOR_MAX_ENUM ||
+				attachment.colorBlendOp == VK_BLEND_OP_MAX_ENUM || attachment.alphaBlendOp == VK_BLEND_OP_MAX_ENUM ||
+				(attachment.colorWriteMask & ~static_cast<VkColorComponentFlags>(ColorWriteMask::All)) != 0) {
+				return reject("Invalid blend factor, operation, or write mask for color target " + std::to_string(i));
+			}
+
+			if (state->enable) {
+				VkFormatProperties support{};
+				vkGetPhysicalDeviceFormatProperties(m_Device->GetPhysicalDevice(),
+					Utils::TextureFormatToVkFormat(desc.renderTargetFormats.colorFormats[i]),
+					&support);
+
+				if (!(support.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT)) {
+					return reject("Blending is unsupported for color target " + std::to_string(i) + "'s format.");
+				}
+			}
+
+			attachments.push_back(attachment);
+		}
+
+		return Result::Success;
+	}
+
 	Result VulkanPipeline::InitGraphics(const PipelineDesc& desc) {
 		const VulkanCpuTimer timer(m_Device);
 		const auto* shader = static_cast<const VulkanShader*>(desc.shader);
@@ -191,6 +266,32 @@ namespace RealRHI {
 
 			return Result::InvalidParameter;
 		}
+		const VkPrimitiveTopology topology = Utils::PrimitiveTopologyToVkPrimitiveTopology(desc.topology);
+		if (topology == VK_PRIMITIVE_TOPOLOGY_MAX_ENUM) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"CreateGraphicsPipeline: Provide a supported primitive topology.");
+			return Result::InvalidParameter;
+		}
+
+		if (desc.primitiveRestartEnable && desc.topology != PrimitiveTopology::LineStrip &&
+			desc.topology != PrimitiveTopology::TriangleStrip && desc.topology != PrimitiveTopology::TriangleFan) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"CreateGraphicsPipeline: Primitive restart requires a line strip, triangle strip, or triangle fan.");
+			return Result::InvalidParameter;
+		}
+
+		const auto& bias = desc.rasterState.depthBias;
+		if (!std::isfinite(bias.constantFactor) || !std::isfinite(bias.clamp) || !std::isfinite(bias.slopeFactor) ||
+			(bias.enable && bias.clamp != 0.f && !m_Device->SupportsDepthBiasClamp())) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"CreateGraphicsPipeline: Depth bias values must be finite; nonzero enabled clamp requires "
+				"depthBiasClamp support.");
+			return Result::InvalidParameter;
+		}
+
 		VkShaderModule shaderModule = shader->GetShaderModule();
 
 		const std::vector<ShaderEntryPoint>& entryPoints = shader->GetReflection().entryPoints;
@@ -232,8 +333,8 @@ namespace RealRHI {
 
 		VkPipelineInputAssemblyStateCreateInfo inputAssembly{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-			.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-			.primitiveRestartEnable = VK_FALSE,
+			.topology = topology,
+			.primitiveRestartEnable = desc.primitiveRestartEnable,
 		};
 
 		std::array<VkDynamicState, 2> dynamicStates{VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
@@ -256,7 +357,10 @@ namespace RealRHI {
 			.polygonMode = Utils::FillModeToVkPolygonMode(desc.rasterState.fillMode),
 			.cullMode = Utils::CullModeToVkCullMode(desc.rasterState.cullMode),
 			.frontFace = Utils::FrontFaceToVkFrontFace(desc.rasterState.frontCounterClockwise),
-			.depthBiasEnable = VK_FALSE,
+			.depthBiasEnable = bias.enable,
+			.depthBiasConstantFactor = bias.constantFactor,
+			.depthBiasClamp = bias.clamp,
+			.depthBiasSlopeFactor = bias.slopeFactor,
 			.lineWidth = 1.0f,
 		};
 
@@ -273,26 +377,21 @@ namespace RealRHI {
 			.depthCompareOp = Utils::CompareOpToVkCompareOp(desc.depthState.compareOp),
 		};
 
-		VkPipelineColorBlendAttachmentState colorBlendAttachment{
-			.blendEnable = desc.blendState.enable,
-			.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
-			.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
-			.colorBlendOp = VK_BLEND_OP_ADD,
-			.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-			.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
-			.alphaBlendOp = VK_BLEND_OP_ADD,
-			.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
-				VK_COLOR_COMPONENT_A_BIT,
-		};
-
 		const RenderTargetFormats& formats = desc.renderTargetFormats;
-		std::vector<VkPipelineColorBlendAttachmentState> blendAttachments(
-			formats.colorFormats.size(), colorBlendAttachment);
+		std::vector<VkPipelineColorBlendAttachmentState> blendAttachments;
+		const Result blendResult = BuildColorBlendDescriptions(desc, blendAttachments);
+		if (blendResult != Result::Success) {
+			return blendResult;
+		}
+
 		VkPipelineColorBlendStateCreateInfo colorBlending{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
 			.logicOpEnable = VK_FALSE,
 			.attachmentCount = static_cast<uint32_t>(formats.colorFormats.size()),
 			.pAttachments = blendAttachments.data(),
+			.blendConstants = {
+				desc.blendConstants[0], desc.blendConstants[1], desc.blendConstants[2], desc.blendConstants[3]
+			},
 		};
 
 		std::vector<VkFormat> vkColorFormats(formats.colorFormats.size());
