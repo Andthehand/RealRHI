@@ -1,5 +1,7 @@
 #include "RenderGraph.h"
 
+#include "Device.h"
+
 #include <algorithm>
 #include <atomic>
 
@@ -50,7 +52,6 @@ namespace RealRHI {
 	}
 
 	void RenderGraph::Invalidate() {
-		m_Compiled = false;
 		m_Order.clear();
 		m_Plan.clear();
 		m_FinalBarriers = {};
@@ -62,6 +63,117 @@ namespace RealRHI {
 		m_Resources.clear();
 		m_Dependencies.clear();
 		m_Id = s_NextGraphId++;
+	}
+
+	bool RenderGraph::IsTexture(const Resource& resource) {
+		return resource.texture || resource.textureDesc.has_value();
+	}
+
+	bool RenderGraph::IsCreated(const Resource& resource) {
+		return resource.textureDesc.has_value() || resource.bufferDesc.has_value();
+	}
+
+	RenderGraphResource RenderGraph::CreateTexture(const TextureDesc& desc) {
+		Invalidate();
+		Resource resource;
+		resource.textureDesc = desc;
+		resource.textureDesc->debugName = nullptr;
+		if (desc.debugName) {
+			resource.debugName = desc.debugName;
+		}
+		resource.subresources = {0, desc.mipLevels, 0, desc.arrayLayers};
+		const auto index = static_cast<uint32_t>(m_Resources.size());
+		m_Resources.push_back(std::move(resource));
+		return {index, m_Id};
+	}
+
+	RenderGraphResource RenderGraph::CreateBuffer(const BufferDesc& desc) {
+		Invalidate();
+		Resource resource;
+		resource.bufferDesc = desc;
+		resource.bufferDesc->debugName = nullptr;
+		if (desc.debugName) {
+			resource.debugName = desc.debugName;
+		}
+		resource.size = desc.size;
+		const auto index = static_cast<uint32_t>(m_Resources.size());
+		m_Resources.push_back(std::move(resource));
+		return {index, m_Id};
+	}
+
+	void RenderGraph::ReleaseCreatedResources() {
+		for (auto& resource : m_Resources) {
+			if (IsCreated(resource)) {
+				resource.texture.Reset();
+				resource.buffer.Reset();
+			}
+		}
+	}
+
+	Result RenderGraph::AllocateResources(Device& device) {
+		Invalidate();
+		ReleaseCreatedResources();
+		std::string error;
+		if (!Compile(error)) {
+			Report(error);
+			return Result::InvalidParameter;
+		}
+
+		// Commit only after the entire allocation batch succeeds. In-flight executions
+		// retain their old resources through CommandList, independently of this graph.
+		std::vector<Ref<Texture>> textures(m_Resources.size());
+		std::vector<Ref<Buffer>> buffers(m_Resources.size());
+		for (size_t i = 0; i < m_Resources.size(); ++i) {
+			const auto& resource = m_Resources[i];
+			Result result = Result::Success;
+			if (resource.textureDesc) {
+				auto desc = *resource.textureDesc;
+				desc.debugName = resource.debugName.c_str();
+				result = device.CreateTexture(desc, textures[i]);
+			}
+			else if (resource.bufferDesc) {
+				auto desc = *resource.bufferDesc;
+				desc.debugName = resource.debugName.c_str();
+				result = device.CreateBuffer(desc, buffers[i]);
+			}
+			if (result != Result::Success) {
+				Invalidate();
+				return result;
+			}
+		}
+		for (size_t i = 0; i < m_Resources.size(); ++i) {
+			if (IsCreated(m_Resources[i])) {
+				m_Resources[i].texture = std::move(textures[i]);
+				m_Resources[i].buffer = std::move(buffers[i]);
+			}
+		}
+		m_Plan.clear();
+		m_FinalBarriers = {};
+		if (!BuildBarriers(error)) {
+			Invalidate();
+			ReleaseCreatedResources();
+			Report(error);
+			return Result::InvalidParameter;
+		}
+		return Result::Success;
+	}
+
+	Texture* RenderGraph::GetTexture(RenderGraphResource handle) {
+		if (!IsValid(handle) || !IsTexture(m_Resources[handle.index]) || !m_Resources[handle.index].texture) {
+			Report("GetTexture requires a valid texture handle; Execute must allocate created resources before "
+				   "resolution.");
+			return nullptr;
+		}
+		return m_Resources[handle.index].texture.Raw();
+	}
+
+	Buffer* RenderGraph::GetBuffer(RenderGraphResource handle) {
+		if (!IsValid(handle) || IsTexture(m_Resources[handle.index]) || !m_Resources[handle.index].buffer) {
+			Report(
+				"GetBuffer requires a valid buffer handle; Execute must allocate created resources before resolution.");
+			return nullptr;
+		}
+		return m_Resources[handle.index].buffer.Raw();
 	}
 
 	RenderGraphResource RenderGraph::ImportTexture(Texture* texture,
@@ -99,7 +211,7 @@ namespace RealRHI {
 	void RenderGraph::SetFinalState(RenderGraphResource resource, ResourceState state, TextureLayout layout) {
 		Invalidate();
 		if (!IsValid(resource)) {
-			Report("SetFinalState requires a resource imported into this graph.");
+			Report("SetFinalState requires a resource declared in this graph.");
 			return;
 		}
 		auto& value = m_Resources[resource.index];
@@ -124,8 +236,23 @@ namespace RealRHI {
 		for (size_t i = 0; i < m_Resources.size(); ++i) {
 			const auto& resource = m_Resources[i];
 			const std::string context = "Resource " + std::to_string(i) + ": ";
-			if (!resource.texture && !resource.buffer) {
+			if (!IsCreated(resource) && !resource.texture && !resource.buffer) {
 				error = context + "import a non-null texture or buffer.";
+				return false;
+			}
+			if (resource.bufferDesc &&
+				(resource.bufferDesc->size == 0 || resource.bufferDesc->usage == BufferUsage::None ||
+					resource.bufferDesc->initialData)) {
+				error = context +
+					"created buffers require nonzero size/usage and no initialData; initialize in a Write pass.";
+				return false;
+			}
+			if (resource.textureDesc &&
+				(resource.textureDesc->width == 0 || resource.textureDesc->height == 0 ||
+					resource.textureDesc->depth == 0 || resource.textureDesc->mipLevels == 0 ||
+					resource.textureDesc->arrayLayers == 0 || resource.textureDesc->usage == TextureUsage::None ||
+					resource.textureDesc->format == TextureFormat::Unknown)) {
+				error = context + "created textures require nonzero dimensions, mip/layer counts, usage, and a format.";
 				return false;
 			}
 			if (resource.buffer &&
@@ -135,7 +262,7 @@ namespace RealRHI {
 				return false;
 			}
 			const auto& range = resource.subresources;
-			if (resource.texture &&
+			if (IsTexture(resource) &&
 				(range.mipLevelCount == 0 || range.arrayLayerCount == 0 ||
 					uint64_t(range.baseMipLevel) + range.mipLevelCount > UINT32_MAX ||
 					uint64_t(range.baseArrayLayer) + range.arrayLayerCount > UINT32_MAX ||
@@ -144,8 +271,8 @@ namespace RealRHI {
 				return false;
 			}
 			if (resource.hasFinalState &&
-				(!ValidState(resource.finalState) || (resource.texture && !ValidLayout(resource.finalLayout)) ||
-					(resource.buffer && resource.finalLayout != TextureLayout::Undefined))) {
+				(!ValidState(resource.finalState) || (IsTexture(resource) && !ValidLayout(resource.finalLayout)) ||
+					(!IsTexture(resource) && resource.finalLayout != TextureLayout::Undefined))) {
 				error = context + "final state requires stages/access and a valid texture layout.";
 				return false;
 			}
@@ -204,13 +331,13 @@ namespace RealRHI {
 					(use.access == RenderGraphAccess::Read && (!reads || writes)) ||
 					(use.access == RenderGraphAccess::Write && !writes) ||
 					(use.access == RenderGraphAccess::ReadWrite && (!reads || !writes)) ||
-					(resource.texture &&
+					(IsTexture(resource) &&
 						(!ValidLayout(use.layout) ||
 							(writes &&
 								(use.layout == TextureLayout::ShaderRead ||
 									use.layout == TextureLayout::DepthStencilReadOnly ||
 									use.layout == TextureLayout::Present)))) ||
-					(resource.buffer && use.layout != TextureLayout::Undefined)) {
+					(!IsTexture(resource) && use.layout != TextureLayout::Undefined)) {
 					error =
 						context + "access mode, stage/access masks, and texture layout must describe the operation.";
 					return false;
@@ -294,7 +421,7 @@ namespace RealRHI {
 		auto& resource = m_Resources[index];
 		if (!before.used || HasAccess(before.state.access, s_WriteAccess) || HasAccess(after.access, s_WriteAccess) ||
 			before.layout != layout) {
-			if (resource.texture) {
+			if (IsTexture(resource)) {
 				barriers.textures.push_back(
 					{.texture = resource.texture.Raw(),
 						.before = before.state,
@@ -329,28 +456,32 @@ namespace RealRHI {
 	bool RenderGraph::BuildBarriers(std::string& error) {
 		std::vector<TrackedState> states;
 		for (const auto& resource : m_Resources) {
-			states.push_back({resource.initialState, resource.initialLayout});
+			bool initialized = !IsCreated(resource);
+			if (IsTexture(resource) && resource.initialLayout == TextureLayout::Undefined) {
+				initialized = false;
+			}
+			states.push_back({resource.initialState, resource.initialLayout, false, initialized});
 		}
 		for (uint32_t index : m_Order) {
 			const auto& pass = m_Passes[index];
 			RenderGraphStep step{.name = pass.desc.name};
 			for (const auto& use : pass.desc.resources) {
 				auto& before = states[use.resource.index];
-				const auto& resource = m_Resources[use.resource.index];
-				if (resource.texture && before.layout == TextureLayout::Undefined &&
-					use.access != RenderGraphAccess::Write) {
-					error = "Pass '" + pass.desc.name + "': undefined texture contents must be written before reading.";
+				if (!before.initialized && use.access != RenderGraphAccess::Write) {
+					error =
+						"Pass '" + pass.desc.name + "': undefined resource contents must be written before reading.";
 					return false;
 				}
 				Transition(use.resource.index, use.state, use.layout, before, step.barriers);
+				before.initialized = true;
 			}
 			m_Plan.push_back(std::move(step));
 		}
 		for (uint32_t i = 0; i < m_Resources.size(); ++i) {
 			const auto& resource = m_Resources[i];
 			if (resource.hasFinalState) {
-				if (resource.texture && states[i].layout == TextureLayout::Undefined) {
-					error = "Cannot export an undefined texture without a producing pass.";
+				if (!states[i].initialized) {
+					error = "Cannot export an undefined resource without a producing pass.";
 					return false;
 				}
 				Transition(i, resource.finalState, resource.finalLayout, states[i], m_FinalBarriers);
@@ -366,7 +497,6 @@ namespace RealRHI {
 			Invalidate();
 			return false;
 		}
-		m_Compiled = true;
 		return true;
 	}
 
@@ -375,15 +505,14 @@ namespace RealRHI {
 		m_Callback({DebugSeverity::Error, DebugMessageType::General, message.c_str()});
 	}
 
-	void RenderGraph::Record(CommandList& commands) {
+	Result RenderGraph::Execute(Device& device, CommandList& commands) {
 		if (commands.GetState() != CommandListState::Recording) {
-			Report("Record requires an active command list recording outside rendering.");
-			return;
+			Report("Execute requires an active command list recording outside rendering.");
+			return Result::InvalidParameter;
 		}
-		std::string error;
-		if (!m_Compiled && !Compile(error)) {
-			Report(error);
-			return;
+		const Result result = AllocateResources(device);
+		if (result != Result::Success) {
+			return result;
 		}
 		for (size_t i = 0; i < m_Plan.size(); ++i) {
 			const auto& step = m_Plan[i];
@@ -395,5 +524,6 @@ namespace RealRHI {
 		}
 		commands.ClearResourceDeclarations();
 		commands.Barrier(m_FinalBarriers);
+		return Result::Success;
 	}
 }

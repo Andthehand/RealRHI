@@ -350,56 +350,7 @@ namespace RealRHI::Examples {
 		if (frameIndex >= m_Frames.size() || width == 0 || height == 0) {
 			return Result::InvalidParameter;
 		}
-
-		auto& current = m_Frames[frameIndex];
-		if (current.width == width && current.height == height) {
-			return Result::Success;
-		}
-
-		FrameTargets targets;
-		const std::string colorName = "Scene color slot " + std::to_string(frameIndex);
-		const std::string depthName = "Scene depth slot " + std::to_string(frameIndex);
-		Result result = m_Device->CreateTexture(
-			{
-				.width = width,
-				.height = height,
-				.format = TextureFormat::RGBA8_UNorm,
-				.usage = TextureUsage::RenderTarget | TextureUsage::ShaderResource,
-				.debugName = colorName.c_str(),
-			},
-			targets.color);
-		if (result != Result::Success) {
-			return result;
-		}
-
-		result = m_Device->CreateTexture(
-			{
-				.width = width,
-				.height = height,
-				.format = m_DepthFormat,
-				.usage = TextureUsage::DepthStencil,
-				.debugName = depthName.c_str(),
-			},
-			targets.depth);
-		if (result != Result::Success) {
-			return result;
-		}
-
-		const std::string shadowName = "Scene shadow map slot " + std::to_string(frameIndex);
-		result = m_Device->CreateTexture({.width = m_ShadowResolution,
-											 .height = m_ShadowResolution,
-											 .format = m_DepthFormat,
-											 .usage = TextureUsage::DepthStencil | TextureUsage::ShaderResource,
-											 .debugName = shadowName.c_str()},
-			targets.shadow);
-		if (result != Result::Success) {
-			return result;
-		}
-
-		targets.width = width;
-		targets.height = height;
-		current = std::move(targets);
-
+		m_Frames[frameIndex] = {width, height};
 		return Result::Success;
 	}
 
@@ -459,7 +410,10 @@ namespace RealRHI::Examples {
 		}
 	}
 
-	void SceneRenderer::DrawShadowMap(CommandList& commands, FrameTargets& targets, float rotation) {
+	void SceneRenderer::DrawShadowMap(CommandList& commands,
+		FrameTargets& targets,
+		float rotation,
+		bool shadowsEnabled) {
 		commands.SetViewport(
 			{.width = static_cast<float>(m_ShadowResolution), .height = static_cast<float>(m_ShadowResolution)});
 		commands.SetScissor({.width = m_ShadowResolution, .height = m_ShadowResolution});
@@ -467,8 +421,10 @@ namespace RealRHI::Examples {
 			{.hasDepth = true,
 				.depthAttachment = {.target = targets.shadow->GetTextureView()},
 				.renderArea = {.width = m_ShadowResolution, .height = m_ShadowResolution}});
-		commands.BindPipeline(m_ShadowPipeline.Raw());
-		DrawGeometry(commands, targets, rotation, GeometryPass::Shadow, false);
+		if (shadowsEnabled) {
+			commands.BindPipeline(m_ShadowPipeline.Raw());
+			DrawGeometry(commands, targets, rotation, GeometryPass::Shadow, false);
+		}
 		commands.EndRendering();
 	}
 
@@ -476,7 +432,7 @@ namespace RealRHI::Examples {
 		commands.BindPipeline(m_OpaquePipeline.Raw());
 		commands.UseResource(m_Pattern.Raw());
 		commands.UseResource(m_Sampler.Raw());
-		commands.UseResource(targets.shadow.Raw());
+		commands.UseResource(targets.shadow);
 		commands.UseResource(m_ShadowSampler.Raw());
 
 		DrawGeometry(commands, targets, rotation, GeometryPass::Lighting, shadowsEnabled);
@@ -489,7 +445,7 @@ namespace RealRHI::Examples {
 			.renderArea = {.width = targets.width, .height = targets.height},
 		});
 		commands.BindPipeline(m_PostprocessPipeline.Raw());
-		commands.UseResource(targets.color.Raw());
+		commands.UseResource(targets.color);
 		commands.UseResource(m_Sampler.Raw());
 
 		const uint32_t parameters[] = {
@@ -501,20 +457,16 @@ namespace RealRHI::Examples {
 		commands.EndRendering();
 	}
 
-	void SceneRenderer::Record(CommandList& commands,
+	Result SceneRenderer::Record(CommandList& commands,
 		uint32_t frameIndex,
 		TextureView* output,
 		float rotation,
 		const UploadSubmission& pendingUpload,
 		bool shadowsEnabled) {
-		commands.BeginDebugLabel("Scene frame");
-		commands.WriteTimestamp("Frame setup");
-		auto& targets = m_Frames[frameIndex];
-		if (pendingUpload.completion.IsValid()) {
-			commands.Barrier(pendingUpload.acquireBarriers);
-			commands.GenerateMipmaps(
-				m_Pattern.Raw(), {.finalState = {PipelineStage::FragmentShader, ResourceAccess::ShaderRead}});
+		if (frameIndex >= m_Frames.size() || m_Frames[frameIndex].width == 0 || m_Frames[frameIndex].height == 0) {
+			return Result::InvalidParameter;
 		}
+		const auto& size = m_Frames[frameIndex];
 
 		const ResourceState sampled{PipelineStage::FragmentShader, ResourceAccess::ShaderRead};
 		const ResourceState colorAttachment{
@@ -525,48 +477,63 @@ namespace RealRHI::Examples {
 			PipelineStage::EarlyFragmentTests | PipelineStage::LateFragmentTests,
 			ResourceAccess::DepthStencilRead | ResourceAccess::DepthStencilWrite
 		};
-		TextureLayout colorLayout = TextureLayout::Undefined;
-		TextureLayout depthLayout = TextureLayout::Undefined;
-		TextureLayout shadowLayout = TextureLayout::Undefined;
-		ResourceState beforeColor;
-		ResourceState beforeDepth;
-		ResourceState beforeShadow;
-		if (targets.initialized) {
-			colorLayout = TextureLayout::ShaderRead;
-			depthLayout = TextureLayout::DepthStencilAttachment;
-			beforeColor = sampled;
-			beforeDepth = depthAttachment;
-		}
-		if (targets.shadowInitialized) {
-			shadowLayout = TextureLayout::ShaderRead;
-			beforeShadow = sampled;
-		}
-
 		RenderGraph graph;
-		const auto color = graph.ImportTexture(targets.color.Raw(), colorLayout, beforeColor);
-		const auto depth = graph.ImportTexture(targets.depth.Raw(), depthLayout, beforeDepth);
-		const auto shadow = graph.ImportTexture(targets.shadow.Raw(), shadowLayout, beforeShadow);
+		const auto color = graph.CreateTexture(
+			{.width = size.width,
+				.height = size.height,
+				.format = TextureFormat::RGBA8_UNorm,
+				.usage = TextureUsage::RenderTarget | TextureUsage::ShaderResource,
+				.debugName = "Scene color"});
+		const auto depth = graph.CreateTexture(
+			{.width = size.width,
+				.height = size.height,
+				.format = m_DepthFormat,
+				.usage = TextureUsage::DepthStencil,
+				.debugName = "Scene depth"});
+		const auto shadow = graph.CreateTexture(
+			{.width = m_ShadowResolution,
+				.height = m_ShadowResolution,
+				.format = m_DepthFormat,
+				.usage = TextureUsage::DepthStencil | TextureUsage::ShaderResource,
+				.debugName = "Scene shadow map"});
+		auto resolveTargets = [&] {
+			return FrameTargets{
+				.color = graph.GetTexture(color),
+				.depth = graph.GetTexture(depth),
+				.shadow = graph.GetTexture(shadow),
+				.width = size.width,
+				.height = size.height
+			};
+		};
 		const auto pattern = graph.ImportTexture(m_Pattern.Raw(), TextureLayout::ShaderRead, sampled, {0, 6, 0, 1});
 		const ResourceState vertexState{PipelineStage::VertexInput, ResourceAccess::VertexAttributeRead};
 		const ResourceState indexState{PipelineStage::VertexInput, ResourceAccess::IndexRead};
 		const auto vertices = graph.ImportBuffer(m_VertexBuffer.Raw(), vertexState);
 		const auto indices = graph.ImportBuffer(m_IndexBuffer.Raw(), indexState);
 
-		// Initialize the sampled map even when shadows are disabled on the first frame.
-		if (shadowsEnabled || !targets.shadowInitialized) {
-			graph.AddPass(
-				{.name = "Shadows",
-					.resources =
-						{
-							{shadow, depthAttachment, TextureLayout::DepthStencilAttachment, RenderGraphAccess::Write},
-							{vertices, vertexState},
-							{indices, indexState},
-						}},
-				[&](CommandList& list) {
-					list.WriteTimestamp("Shadows");
-					DrawShadowMap(list, targets, rotation);
-				});
-		}
+		const auto setup = graph.AddPass({.name = "Frame setup"}, [&](CommandList& list) {
+			list.WriteTimestamp("Frame setup");
+			if (pendingUpload.completion.IsValid()) {
+				list.Barrier(pendingUpload.acquireBarriers);
+				list.GenerateMipmaps(m_Pattern.Raw(), {.finalState = sampled});
+			}
+		});
+
+		// Initialize the sampled map for every execution, including disabled shadows.
+		graph.AddPass(
+			{.name = "Shadows",
+				.resources =
+					{
+						{shadow, depthAttachment, TextureLayout::DepthStencilAttachment, RenderGraphAccess::Write},
+						{vertices, vertexState},
+						{indices, indexState},
+					},
+				.dependsOn = {setup}},
+			[&](CommandList& list) {
+				auto targets = resolveTargets();
+				list.WriteTimestamp("Shadows");
+				DrawShadowMap(list, targets, rotation, shadowsEnabled);
+			});
 
 		graph.AddPass(
 			{.name = "Scene",
@@ -580,10 +547,10 @@ namespace RealRHI::Examples {
 						{indices, indexState},
 					}},
 			[&](CommandList& list) {
+				auto targets = resolveTargets();
 				list.WriteTimestamp("Scene");
-				list.SetViewport(
-					{.width = static_cast<float>(targets.width), .height = static_cast<float>(targets.height)});
-				list.SetScissor({.width = targets.width, .height = targets.height});
+				list.SetViewport({.width = static_cast<float>(size.width), .height = static_cast<float>(size.height)});
+				list.SetScissor({.width = size.width, .height = size.height});
 				BeginScene(list, targets);
 				DrawScene(list, targets, rotation, shadowsEnabled);
 			});
@@ -595,13 +562,16 @@ namespace RealRHI::Examples {
 								  {color, sampled, TextureLayout::ShaderRead},
 							  }},
 			[&](CommandList& list) {
+				auto targets = resolveTargets();
 				list.WriteTimestamp("Postprocess");
 				DrawPostprocess(list, targets, output);
 			});
-		graph.Record(commands);
-		commands.WriteTimestamp("Frame end");
+		commands.BeginDebugLabel("Scene frame");
+		const Result result = graph.Execute(*m_Device, commands);
+		if (result == Result::Success) {
+			commands.WriteTimestamp("Frame end");
+		}
 		commands.EndDebugLabel();
-		targets.initialized = true;
-		targets.shadowInitialized = true;
+		return result;
 	}
 }

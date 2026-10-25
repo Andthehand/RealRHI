@@ -133,9 +133,10 @@ namespace {
 				return false;
 			}
 
-			m_Renderer.Record(
-				*commands, frame.frameIndex, frame.backBufferView, rotation, m_PendingUpload, m_ShadowsEnabled);
-			if (commands->End() != Result::Success) {
+			if (m_Renderer.Record(
+					*commands, frame.frameIndex, frame.backBufferView, rotation, m_PendingUpload, m_ShadowsEnabled) !=
+					Result::Success ||
+				commands->End() != Result::Success) {
 				return false;
 			}
 

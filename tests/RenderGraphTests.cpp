@@ -10,6 +10,7 @@ namespace {
 	using namespace RealRHI;
 	uint32_t s_ExpectedErrors = 0;
 	uint32_t s_Errors = 0;
+	bool s_AllocationErrorExpected = false;
 	constexpr ResourceState s_TransferRead{PipelineStage::Transfer, ResourceAccess::TransferRead};
 	constexpr ResourceState s_TransferWrite{PipelineStage::Transfer, ResourceAccess::TransferWrite};
 	constexpr ResourceState s_ComputeRead{PipelineStage::ComputeShader, ResourceAccess::ShaderRead};
@@ -26,7 +27,8 @@ namespace {
 		if (message.severity == DebugSeverity::Error) {
 			++s_Errors;
 			Expect(message.type == DebugMessageType::General &&
-					std::string_view(message.message).starts_with("RenderGraph:"),
+					(std::string_view(message.message).starts_with("RenderGraph:") ||
+						(s_AllocationErrorExpected && std::string_view(message.message).starts_with("CreateTexture:"))),
 				"Only intentional graph recording errors are reported");
 		}
 		DefaultDebugCallback(message);
@@ -174,6 +176,131 @@ namespace {
 		ExpectInvalid(graph, "invalid pass");
 	}
 
+	void TestCreatedValidation(Device& device) {
+		Ref<CommandAllocator> allocator;
+		Ref<CommandList> commands;
+		Expect(device.CreateCommandAllocator(QueueType::Graphics, allocator) == Result::Success &&
+				device.CreateCommandList(allocator.Raw(), commands) == Result::Success &&
+				commands->Begin() == Result::Success,
+			"Begin execution validation commands");
+		RenderGraph graph(Capture);
+		auto data = graph.CreateBuffer({.size = 16, .usage = BufferUsage::Storage});
+		graph.AddPass({.name = "Uninitialized buffer", .resources = {{data, s_ComputeRead}}}, EmptyPass);
+		ExpectInvalid(graph, "written before reading");
+		graph.Reset();
+		uint32_t initial = 1;
+		graph.CreateBuffer(
+			{.size = 4,
+				.usage = BufferUsage::TransferSrc,
+				.memoryUsage = MemoryUsage::CPUToGPU,
+				.initialData = &initial});
+		ExpectInvalid(graph, "initialData");
+		graph.Reset();
+		graph.CreateTexture(
+			{.width = 0, .height = 8, .format = TextureFormat::RGBA8_UNorm, .usage = TextureUsage::RenderTarget});
+		ExpectInvalid(graph, "nonzero dimensions");
+		graph.Reset();
+		const auto baseline = device.GetStatistics();
+		data = graph.CreateBuffer({.size = 16, .usage = BufferUsage::TransferDst});
+		graph.CreateTexture(
+			{.width = device.GetCapabilities().limits.maxTextureDimension2D + 1,
+				.height = 1,
+				.format = TextureFormat::RGBA8_UNorm,
+				.usage = TextureUsage::RenderTarget});
+		uint32_t callbacks = 0;
+		graph.AddPass({.name = "No partial execution",
+						  .resources = {{data, s_TransferWrite, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+			[&](CommandList&) {
+				++callbacks;
+			});
+		++s_ExpectedErrors;
+		s_AllocationErrorExpected = true;
+		Expect(graph.Execute(device, *commands) == Result::InvalidParameter,
+			"Device allocation validation propagates to the caller");
+		s_AllocationErrorExpected = false;
+		Expect(device.GetStatistics().buffers.liveCount == baseline.buffers.liveCount &&
+				device.GetStatistics().textures.liveCount == baseline.textures.liveCount && callbacks == 0,
+			"A failed allocation batch releases prior allocations and records no callbacks");
+		++s_ExpectedErrors;
+		Expect(graph.GetBuffer(data) == nullptr, "Allocation failure publishes no partial resources");
+		graph.Reset();
+		data = graph.CreateBuffer({.size = 16, .usage = BufferUsage::TransferDst});
+		graph.AddPass({.name = "Recovered",
+						  .resources = {{data, s_TransferWrite, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+			EmptyPass);
+		Expect(graph.Execute(device, *commands) == Result::Success,
+			"Graph can execute after a previous failure and reset");
+		++s_ExpectedErrors;
+		Expect(graph.GetTexture(data) == nullptr, "Resource resolution validates buffer versus texture kind");
+		graph.Reset();
+		Expect(commands->End() == Result::Success && commands->Reset() == Result::Success,
+			"Release recorded resources without submitting");
+		Expect(device.GetStatistics().buffers.liveCount == baseline.buffers.liveCount,
+			"Reset releases allocations after the recording is reset");
+	}
+
+	void TestExecutionsInFlight(Device& device) {
+		const auto baseline = device.GetStatistics();
+		const std::array<uint32_t, 4> initial{3, 5, 7, 11};
+		Ref<Buffer> upload;
+		Expect(device.CreateBuffer({.size = sizeof(initial),
+									   .usage = BufferUsage::TransferSrc,
+									   .memoryUsage = MemoryUsage::CPUToGPU,
+									   .initialData = initial.data()},
+				   upload) == Result::Success,
+			"Create in-flight graph upload");
+		RenderGraph graph(Capture);
+		const auto source = graph.ImportBuffer(upload.Raw(), s_TransferRead);
+		const auto data =
+			graph.CreateBuffer({.size = sizeof(initial), .usage = BufferUsage::TransferDst | BufferUsage::TransferSrc});
+		const auto output = graph.CreateBuffer(
+			{.size = sizeof(initial), .usage = BufferUsage::TransferDst, .memoryUsage = MemoryUsage::GPUToCPU});
+		graph.AddPass({.name = "Initialize",
+						  .resources =
+							  {{source, s_TransferRead},
+								  {data, s_TransferWrite, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+			[&](CommandList& list) {
+				list.CopyBuffer(graph.GetBuffer(source), graph.GetBuffer(data), {.size = sizeof(initial)});
+			});
+		graph.AddPass({.name = "Readback",
+						  .resources =
+							  {{data, s_TransferRead},
+								  {output, s_TransferWrite, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+			[&](CommandList& list) {
+				list.CopyBuffer(graph.GetBuffer(data), graph.GetBuffer(output), {.size = sizeof(initial)});
+			});
+		std::array<Ref<CommandAllocator>, 2> allocators;
+		std::array<Ref<CommandList>, 2> commands;
+		std::array<Ref<Buffer>, 2> readbacks;
+		std::array<SubmissionToken, 2> tokens;
+		Buffer* previous = nullptr;
+		for (size_t i = 0; i < commands.size(); ++i) {
+			Expect(device.CreateCommandAllocator(QueueType::Graphics, allocators[i]) == Result::Success &&
+					device.CreateCommandList(allocators[i].Raw(), commands[i]) == Result::Success &&
+					commands[i]->Begin() == Result::Success,
+				"Begin independent graph execution");
+			Expect(graph.Execute(device, *commands[i]) == Result::Success, "Execute with a fresh allocation batch");
+			Expect(graph.GetBuffer(data) != previous, "An in-flight allocation is never reused by another execution");
+			previous = graph.GetBuffer(data);
+			readbacks[i] = Ref<Buffer>(graph.GetBuffer(output));
+			Expect(commands[i]->End() == Result::Success, "End independent graph execution");
+			tokens[i] = device.GetGraphicsCommandQueue()->Submit(*commands[i]);
+			Expect(tokens[i].IsValid(), "Submit graph execution without waiting for the preceding one");
+		}
+		graph.Reset();
+		upload.Reset();
+		for (size_t i = 0; i < commands.size(); ++i) {
+			device.GetGraphicsCommandQueue()->Wait(tokens[i]);
+			std::array<uint32_t, 4> values{};
+			Expect(readbacks[i]->ReadData(values.data(), sizeof(values)) == Result::Success && values == initial,
+				"Both in-flight executions retain their own complete output after graph reset");
+			Expect(commands[i]->Reset() == Result::Success, "Release completed execution resources");
+			readbacks[i].Reset();
+		}
+		Expect(device.GetStatistics().buffers.liveCount == baseline.buffers.liveCount,
+			"Graph-owned allocations are released after completed lists and retained outputs are reset");
+	}
+
 	void TestTexturePasses(Device& device) {
 		Ref<Shader> shader;
 		Ref<Pipeline> pipeline;
@@ -185,17 +312,6 @@ namespace {
 						.renderTargetFormats = {.colorFormats = {TextureFormat::RGBA8_UNorm}}},
 					pipeline) == Result::Success,
 			"Create render graph texture pipeline");
-		Ref<Texture> a;
-		Ref<Texture> b;
-		for (auto* target : {&a, &b}) {
-			Expect(device.CreateTexture({.width = 8,
-											.height = 8,
-											.format = TextureFormat::RGBA8_UNorm,
-											.usage = TextureUsage::RenderTarget | TextureUsage::ShaderResource |
-												TextureUsage::TransferSrc},
-					   *target) == Result::Success,
-				"Create graph texture");
-		}
 		Ref<Buffer> readback;
 		Expect(device.CreateBuffer(
 				   {.size = 8 * 8 * 8, .usage = BufferUsage::TransferDst, .memoryUsage = MemoryUsage::GPUToCPU},
@@ -231,27 +347,36 @@ namespace {
 		};
 		{
 			RenderGraph graph(Capture);
-			const auto first = graph.ImportTexture(a.Raw(), TextureLayout::Undefined);
-			const auto second = graph.ImportTexture(b.Raw(), TextureLayout::Undefined);
+			std::string debugName = "Graph-owned image";
+			const TextureDesc textureDesc{
+				.width = 8,
+				.height = 8,
+				.format = TextureFormat::RGBA8_UNorm,
+				.usage = TextureUsage::RenderTarget | TextureUsage::ShaderResource | TextureUsage::TransferSrc,
+				.debugName = debugName.c_str()
+			};
+			const auto first = graph.CreateTexture(textureDesc);
+			const auto second = graph.CreateTexture(textureDesc);
+			debugName.assign(1024, 'x');
 			const auto output = graph.ImportBuffer(readback.Raw());
 			graph.AddPass(
 				{.name = "Green source",
 					.resources = {{first, attachment, TextureLayout::ColorAttachment, RenderGraphAccess::Write}}},
 				[&](CommandList& list) {
-					draw(list, a.Raw(), nullptr, {0, 1, 0, 1});
+					draw(list, graph.GetTexture(first), nullptr, {0, 1, 0, 1});
 				});
 			graph.AddPass({.name = "Sample source",
 							  .resources =
 								  {{first, sampled, TextureLayout::ShaderRead},
 									  {second, attachment, TextureLayout::ColorAttachment, RenderGraphAccess::Write}}},
 				[&](CommandList& list) {
-					draw(list, b.Raw(), a.Raw(), {});
+					draw(list, graph.GetTexture(second), graph.GetTexture(first), {});
 				});
 			graph.AddPass(
 				{.name = "Overwrite sampled texture",
 					.resources = {{first, attachment, TextureLayout::ColorAttachment, RenderGraphAccess::Write}}},
 				[&](CommandList& list) {
-					draw(list, a.Raw(), nullptr, {0, 0, 1, 1});
+					draw(list, graph.GetTexture(first), nullptr, {0, 0, 1, 1});
 				});
 			graph.AddPass({.name = "Read textures",
 							  .resources =
@@ -259,14 +384,22 @@ namespace {
 									  {second, s_TransferRead, TextureLayout::TransferSrc},
 									  {output, s_TransferWrite, TextureLayout::Undefined, RenderGraphAccess::Write}}},
 				[&](CommandList& list) {
-					list.CopyTextureToBuffer(a.Raw(), readback.Raw(), {.width = 8, .height = 8});
+					list.CopyTextureToBuffer(graph.GetTexture(first), readback.Raw(), {.width = 8, .height = 8});
 					list.CopyTextureToBuffer(
-						b.Raw(), readback.Raw(), {.width = 8, .height = 8, .bufferOffset = 8 * 8 * 4});
+						graph.GetTexture(second), readback.Raw(), {.width = 8, .height = 8, .bufferOffset = 8 * 8 * 4});
 				});
-			graph.Record(*commands);
+			const auto before = device.GetStatistics();
+			std::string error;
+			Expect(graph.Compile(error), "Compile graph-created textures before allocation");
+			Expect(device.GetStatistics().textures.liveCount == before.textures.liveCount,
+				"Compile allocates no textures");
+			++s_ExpectedErrors;
+			Expect(graph.GetTexture(first) == nullptr, "Created textures do not resolve before Execute");
+			Expect(graph.Execute(device, *commands) == Result::Success, "Allocate and record graph-created textures");
+			Expect(device.GetStatistics().textures.liveCount == before.textures.liveCount + 2,
+				"Execute allocates the two declared textures");
+			graph.Reset();
 		}
-		a.Reset();
-		b.Reset();
 		pipeline.Reset();
 		shader.Reset();
 		device.ClearShaderAndPipelineCaches();
@@ -289,7 +422,6 @@ namespace {
 			initial[i] = i;
 		}
 		Ref<Buffer> upload;
-		Ref<Buffer> data;
 		Ref<Buffer> snapshot;
 		Ref<Buffer> readback;
 		Expect(device.CreateBuffer({.size = sizeof(initial),
@@ -298,11 +430,6 @@ namespace {
 									   .initialData = initial.data()},
 				   upload) == Result::Success,
 			"Create graph upload");
-		Expect(device.CreateBuffer(
-				   {.size = sizeof(initial),
-					   .usage = BufferUsage::Storage | BufferUsage::TransferDst | BufferUsage::TransferSrc},
-				   data) == Result::Success,
-			"Create graph data");
 		for (auto* target : {&snapshot, &readback}) {
 			Expect(
 				device.CreateBuffer(
@@ -328,17 +455,21 @@ namespace {
 			++skipped;
 		});
 		++s_ExpectedErrors;
-		invalid.Record(*commands);
+		Expect(
+			invalid.Execute(device, *commands) == Result::InvalidParameter, "Invalid graph execution returns failure");
 		Expect(commands->Begin() == Result::Success, "Begin graph recording");
 		++s_ExpectedErrors;
-		invalid.Record(*commands);
+		Expect(
+			invalid.Execute(device, *commands) == Result::InvalidParameter, "Invalid graph execution returns failure");
 		Expect(skipped == 0, "Invalid graphs record no partial callbacks");
 
 		std::vector<std::string> order;
 		{
 			RenderGraph graph(Capture);
 			const auto source = graph.ImportBuffer(upload.Raw());
-			const auto working = graph.ImportBuffer(data.Raw());
+			const auto working = graph.CreateBuffer(
+				{.size = sizeof(initial),
+					.usage = BufferUsage::Storage | BufferUsage::TransferDst | BufferUsage::TransferSrc});
 			const auto original = graph.ImportBuffer(snapshot.Raw());
 			const auto result = graph.ImportBuffer(readback.Raw());
 			graph.AddPass({.name = "Upload",
@@ -347,7 +478,7 @@ namespace {
 									  {working, s_TransferWrite, TextureLayout::Undefined, RenderGraphAccess::Write}}},
 				[&](CommandList& list) {
 					order.push_back("Upload");
-					list.CopyBuffer(upload.Raw(), data.Raw(), {.size = sizeof(initial)});
+					list.CopyBuffer(upload.Raw(), graph.GetBuffer(working), {.size = sizeof(initial)});
 				});
 			graph.AddPass({.name = "Snapshot",
 							  .resources =
@@ -355,7 +486,7 @@ namespace {
 									  {original, s_TransferWrite, TextureLayout::Undefined, RenderGraphAccess::Write}}},
 				[&](CommandList& list) {
 					order.push_back("Snapshot");
-					list.CopyBuffer(data.Raw(), snapshot.Raw(), {.size = sizeof(initial)});
+					list.CopyBuffer(graph.GetBuffer(working), snapshot.Raw(), {.size = sizeof(initial)});
 				});
 			for (uint32_t i = 0; i < 2; ++i) {
 				graph.AddPass({.name = "Compute",
@@ -368,8 +499,8 @@ namespace {
 					[&](CommandList& list) {
 						order.push_back("Compute");
 						list.BindPipeline(pipeline.Raw());
-						list.UseResource(data.Raw());
-						const uint32_t parameters[] = {data->GetDescriptorIndex(), 64};
+						list.UseResource(graph.GetBuffer(working));
+						const uint32_t parameters[] = {graph.GetBuffer(working)->GetDescriptorIndex(), 64};
 						list.SetPushConstants(parameters, sizeof(parameters));
 						list.DispatchCompute(1, 1, 1);
 					});
@@ -380,14 +511,13 @@ namespace {
 									  {result, s_TransferWrite, TextureLayout::Undefined, RenderGraphAccess::Write}}},
 				[&](CommandList& list) {
 					order.push_back("Readback");
-					list.CopyBuffer(data.Raw(), readback.Raw(), {.size = sizeof(initial)});
+					list.CopyBuffer(graph.GetBuffer(working), readback.Raw(), {.size = sizeof(initial)});
 				});
-			graph.Record(*commands);
+			Expect(graph.Execute(device, *commands) == Result::Success, "Allocate and record graph working buffer");
 			Expect(order == std::vector<std::string>{"Upload", "Snapshot", "Compute", "Compute", "Readback"},
 				"Read/write hazards preserve callback ordering");
 		}
 		upload.Reset();
-		data.Reset();
 		pipeline.Reset();
 		shader.Reset();
 		device.ClearShaderAndPipelineCaches();
@@ -434,6 +564,8 @@ int main() {
 		TestInvalidGraphs(buffer.Raw(), texture.Raw());
 		TestExecution(*device);
 		TestTexturePasses(*device);
+		TestCreatedValidation(*device);
+		TestExecutionsInFlight(*device);
 	}
 	device->WaitIdle();
 	device.reset();

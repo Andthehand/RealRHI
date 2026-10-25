@@ -1,12 +1,15 @@
 #pragma once
+#include "BufferDesc.h"
 #include "CommandList.h"
 #include "DeviceDesc.h"
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace RealRHI {
+	class Device;
 	struct RenderGraphResource {
 		uint32_t index = UINT32_MAX;
 		uint64_t graph = 0;
@@ -52,6 +55,15 @@ namespace RealRHI {
 		RenderGraph(const RenderGraph&) = delete;
 		RenderGraph& operator=(const RenderGraph&) = delete;
 
+		// Deferred, uninitialized resources covering the complete buffer/image. Names
+		// are copied; initialize data in a Write pass rather than BufferDesc::initialData.
+		RenderGraphResource CreateTexture(const TextureDesc& desc);
+		RenderGraphResource CreateBuffer(const BufferDesc& desc);
+		// Borrowed until the next Execute/Reset/destruction; retain a Ref to keep an
+		// output externally. Created resources resolve inside callbacks and after Execute.
+		Texture* GetTexture(RenderGraphResource resource);
+		Buffer* GetBuffer(RenderGraphResource resource);
+
 		// Import non-overlapping ranges with their actual state at graph entry.
 		// Undefined textures need a Write pass before reading. Imported buffer contents
 		// are supplied by the caller. A zero buffer size selects the remaining bytes.
@@ -72,22 +84,27 @@ namespace RealRHI {
 		// Imported ranges must enter and leave the callback in the declared state/layout.
 		// Declare every graph-managed resource here. Callbacks may also access resources
 		// whose states/dependencies are managed externally. UseResource belongs in each
-		// callback: Record clears prior declarations at pass boundaries and on exit,
+		// callback: Execute clears prior declarations at pass boundaries and on exit,
 		// retaining their lifetimes through CommandList reset as usual.
 		RenderGraphPass AddPass(RenderGraphPassDesc desc, std::function<void(CommandList&)> record);
 		void AddDependency(RenderGraphPass pass, RenderGraphPass prerequisite);
 
 		// Compile validates the entire graph without recording anything. Plans remain
 		// valid until the graph changes; rebuild if external resource states change.
+		// Created-resource barrier pointers resolve during Execute. Compile allocates nothing.
 		bool Compile(std::string& error);
 		const std::vector<RenderGraphStep>& GetExecutionPlan() const { return m_Plan; }
 		const BarrierDesc& GetFinalBarriers() const { return m_FinalBarriers; }
-		// Requires recording outside rendering. Invalid graphs log and record no passes.
-		void Record(CommandList& commands);
+		// Compile, allocate fresh resources, and record into an active list outside
+		// rendering. Validation/allocation failures return before recording any passes.
+		Result Execute(Device& device, CommandList& commands);
 		void Reset();
 
 	private:
 		struct Resource {
+			std::optional<TextureDesc> textureDesc;
+			std::optional<BufferDesc> bufferDesc;
+			std::string debugName;
 			Ref<Texture> texture;
 			Ref<Buffer> buffer;
 			TextureSubresourceRange subresources;
@@ -111,9 +128,14 @@ namespace RealRHI {
 			ResourceState state;
 			TextureLayout layout = TextureLayout::Undefined;
 			bool used = false;
+			bool initialized = false;
 		};
 
 	private:
+		static bool IsTexture(const Resource& resource);
+		static bool IsCreated(const Resource& resource);
+		void ReleaseCreatedResources();
+		Result AllocateResources(Device& device);
 		bool IsValid(RenderGraphResource resource) const;
 		bool IsValid(RenderGraphPass pass) const;
 		bool ValidateResources(std::string& error) const;
@@ -131,7 +153,6 @@ namespace RealRHI {
 	private:
 		DebugCallback m_Callback;
 		uint64_t m_Id = 0;
-		bool m_Compiled = false;
 		std::vector<Resource> m_Resources;
 		std::vector<Pass> m_Passes;
 		std::vector<Dependency> m_Dependencies;

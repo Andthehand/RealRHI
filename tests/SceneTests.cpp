@@ -181,7 +181,10 @@ namespace {
 					rotation = 0.8f;
 				}
 				const bool shadowsEnabled = round >= 2 && round != 4 && round != 6;
-				renderer.Record(*commands, slot, output.color->GetTextureView(), rotation, upload, shadowsEnabled);
+				Expect(renderer.Record(
+						   *commands, slot, output.color->GetTextureView(), rotation, upload, shadowsEnabled) ==
+						Result::Success,
+					"Allocate graph targets and record scene");
 				Transition(*commands, output.color.Raw(), TextureLayout::ColorAttachment, TextureLayout::TransferSrc);
 				commands->CopyTextureToBuffer(
 					output.color.Raw(), output.readback.Raw(), {.width = width, .height = height});
@@ -332,7 +335,9 @@ namespace {
 			Expect(renderer.ResizeTargets(frame.frameIndex, frame.width, frame.height) == Result::Success,
 				"Match scene targets to resized backbuffer");
 			Expect(commands->Begin() == Result::Success, "Begin lifecycle frame");
-			renderer.Record(*commands, frame.frameIndex, frame.backBufferView, frameNumber * 0.03f, upload);
+			Expect(renderer.Record(*commands, frame.frameIndex, frame.backBufferView, frameNumber * 0.03f, upload) ==
+					Result::Success,
+				"Allocate graph targets and record lifecycle frame");
 			Expect(commands->End() == Result::Success, "End lifecycle frame");
 
 			std::span<const SubmissionToken> waits;

@@ -12,21 +12,24 @@ namespace RealRHI::Examples {
 		};
 
 		struct FrameTargets {
-			Ref<Texture> color;
-			Ref<Texture> depth;
-			Ref<Texture> shadow;
+			Texture* color = nullptr;
+			Texture* depth = nullptr;
+			Texture* shadow = nullptr;
 			uint32_t width = 0;
 			uint32_t height = 0;
-			bool initialized = false;
-			bool shadowInitialized = false;
+		};
+
+		struct FrameSize {
+			uint32_t width = 0;
+			uint32_t height = 0;
 		};
 
 	public:
 		Result Init(Device& device, TextureFormat outputFormat, uint32_t frameCount, UploadSubmission& outUpload);
 
-		// Call after the frame slot's previous submission has completed and its list has been reset.
+		// Set dimensions for the next frame recording; allocation happens inside Record.
 		Result ResizeTargets(uint32_t frameIndex, uint32_t width, uint32_t height);
-		void Record(CommandList& commands,
+		Result Record(CommandList& commands,
 			uint32_t frameIndex,
 			TextureView* output,
 			float rotation,
@@ -40,7 +43,7 @@ namespace RealRHI::Examples {
 		Result CreateGeometry(UploadContext& uploads);
 		Result CreatePattern(UploadContext& uploads);
 
-		void DrawShadowMap(CommandList& commands, FrameTargets& targets, float rotation);
+		void DrawShadowMap(CommandList& commands, FrameTargets& targets, float rotation, bool shadowsEnabled);
 		void DrawGeometry(CommandList& commands,
 			const FrameTargets& targets,
 			float rotation,
@@ -67,6 +70,6 @@ namespace RealRHI::Examples {
 		TextureFormat m_DepthFormat = TextureFormat::Unknown;
 		uint32_t m_ShadowResolution = 1024;
 
-		std::vector<FrameTargets> m_Frames;
+		std::vector<FrameSize> m_Frames;
 	};
 }
