@@ -9,6 +9,8 @@ namespace RealRHI {
 	// Features enabled on this device and available through the RHI.
 	struct DeviceFeatures {
 		bool wireframe = false;
+		bool multiDrawIndirect = false;
+		bool drawIndirectFirstInstance = false;
 		bool independentBlend = false;
 		bool depthBiasClamp = false;
 		bool debugLabels = false;
@@ -25,6 +27,7 @@ namespace RealRHI {
 		uint32_t maxVertexInputBindingStride = 0;
 		uint32_t maxVertexInputAttributeOffset = 0;
 		uint32_t maxPushDataSize = 0;
+		uint32_t maxDrawIndirectCount = 0;
 
 		std::array<uint32_t, 3> maxComputeWorkGroupCount{};
 		std::array<uint32_t, 3> maxComputeWorkGroupSize{};

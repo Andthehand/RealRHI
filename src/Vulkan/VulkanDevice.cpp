@@ -156,6 +156,7 @@ namespace RealRHI {
 		limits.maxTextureArrayLayers = source.maxImageArrayLayers;
 		limits.maxColorAttachments = source.maxColorAttachments;
 
+		limits.maxDrawIndirectCount = source.maxDrawIndirectCount;
 		limits.maxVertexInputBindings = source.maxVertexInputBindings;
 		limits.maxVertexInputAttributes = source.maxVertexInputAttributes;
 		limits.maxVertexInputBindingStride = source.maxVertexInputBindingStride;
@@ -980,6 +981,9 @@ namespace RealRHI {
 			.pNext = &supportedVk12Features,
 		};
 		vkGetPhysicalDeviceFeatures2(m_PhysicalDevice, &supportedFeatures);
+		m_Capabilities.features.multiDrawIndirect = supportedFeatures.features.multiDrawIndirect == VK_TRUE;
+		m_Capabilities.features.drawIndirectFirstInstance =
+			supportedFeatures.features.drawIndirectFirstInstance == VK_TRUE;
 		m_Capabilities.features.wireframe = supportedFeatures.features.fillModeNonSolid == VK_TRUE;
 		m_Capabilities.features.independentBlend = supportedFeatures.features.independentBlend == VK_TRUE;
 		m_Capabilities.features.depthBiasClamp = supportedFeatures.features.depthBiasClamp == VK_TRUE;
@@ -988,6 +992,8 @@ namespace RealRHI {
 
 		VkPhysicalDeviceFeatures deviceFeatures{
 			.independentBlend = supportedFeatures.features.independentBlend,
+			.multiDrawIndirect = supportedFeatures.features.multiDrawIndirect,
+			.drawIndirectFirstInstance = supportedFeatures.features.drawIndirectFirstInstance,
 			.depthBiasClamp = supportedFeatures.features.depthBiasClamp,
 			.fillModeNonSolid = supportedFeatures.features.fillModeNonSolid,
 		};

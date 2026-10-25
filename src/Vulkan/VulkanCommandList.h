@@ -49,6 +49,15 @@ namespace RealRHI {
 		void BindPipeline(Pipeline* pipeline) override;
 		void SetPushConstants(const void* data, uint32_t size, uint32_t offset = 0) override;
 		void DispatchCompute(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
+		void DispatchComputeIndirect(Buffer* arguments, uint64_t offset = 0) override;
+		void DrawIndirect(Buffer* arguments,
+			uint64_t offset = 0,
+			uint32_t drawCount = 1,
+			uint32_t stride = sizeof(DrawIndirectArguments)) override;
+		void DrawIndexedIndirect(Buffer* arguments,
+			uint64_t offset = 0,
+			uint32_t drawCount = 1,
+			uint32_t stride = sizeof(DrawIndexedIndirectArguments)) override;
 		void BindVertexBuffer(Buffer* vertexBuffer, uint32_t binding = 0, uint64_t offset = 0) override;
 		void BindIndexBuffer(Buffer* indexBuffer) override;
 
@@ -137,6 +146,12 @@ namespace RealRHI {
 			const ResourceOperation& operation,
 			SubmissionToken submission,
 			std::span<const VkSemaphoreSubmitInfo> waits) const;
+		bool ValidateIndirectArguments(const VulkanBuffer* buffer,
+			uint64_t offset,
+			uint32_t count,
+			uint32_t stride,
+			uint32_t argumentSize,
+			const char* operation) const;
 		bool RecordVertexBuffers(const char* operation);
 
 		void RecordBufferUse(VulkanBuffer* buffer, uint64_t offset, uint64_t size, const char* operation);

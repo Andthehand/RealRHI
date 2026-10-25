@@ -653,6 +653,116 @@ namespace RealRHI {
 		vkCmdDrawIndexed(m_CommandBuffer, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
 	}
 
+	bool VulkanCommandList::ValidateIndirectArguments(const VulkanBuffer* buffer,
+		uint64_t offset,
+		uint32_t count,
+		uint32_t stride,
+		uint32_t argumentSize,
+		const char* operation) const {
+		auto reject = [&](const char* reason) {
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, (std::string(operation) + ": " + reason).c_str());
+			return false;
+		};
+
+		if (buffer == nullptr || !Any(buffer->GetUsage() & BufferUsage::Indirect)) {
+			return reject("Provide a buffer with Indirect usage.");
+		}
+		if (offset % 4 != 0 || (count > 1 && (stride % 4 != 0 || stride < argumentSize))) {
+			return reject(
+				"Offset must be 4-byte aligned; multiple draws require an aligned stride at least the argument size.");
+		}
+
+		uint64_t size = 0;
+		if (count != 0) {
+			size = uint64_t(count - 1) * stride + argumentSize;
+		}
+		if (offset > buffer->GetSize() || size > buffer->GetSize() - offset) {
+			return reject("Argument range exceeds the buffer size.");
+		}
+		if (count > m_Device->GetCapabilities().limits.maxDrawIndirectCount ||
+			(count > 1 && !m_Device->GetCapabilities().features.multiDrawIndirect)) {
+			return reject("Draw count exceeds maxDrawIndirectCount or requires multiDrawIndirect support.");
+		}
+		return true;
+	}
+
+	void VulkanCommandList::DispatchComputeIndirect(Buffer* arguments, uint64_t offset) {
+		static_assert(sizeof(DispatchIndirectArguments) == sizeof(VkDispatchIndirectCommand));
+		if (GetState() != CommandListState::Recording || m_Rendering || !m_ComputePipelineBound) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"DispatchComputeIndirect: Requires recording outside rendering and a bound compute pipeline.");
+			return;
+		}
+
+		auto* buffer = static_cast<VulkanBuffer*>(arguments);
+		if (!ValidateIndirectArguments(
+				buffer, offset, 1, 0, sizeof(DispatchIndirectArguments), "DispatchComputeIndirect")) {
+			return;
+		}
+		RetainResource(buffer);
+		RecordBufferUse(buffer, offset, sizeof(DispatchIndirectArguments), "DispatchComputeIndirect");
+		RecordShaderResources("DispatchComputeIndirect");
+		vkCmdDispatchIndirect(m_CommandBuffer, buffer->GetBuffer(), offset);
+	}
+
+	void VulkanCommandList::DrawIndirect(Buffer* arguments, uint64_t offset, uint32_t drawCount, uint32_t stride) {
+		static_assert(sizeof(DrawIndirectArguments) == sizeof(VkDrawIndirectCommand));
+		if (GetState() != CommandListState::Recording || !m_Rendering || !m_GraphicsPipelineBound) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"DrawIndirect: Requires an active rendering scope and a bound graphics pipeline.");
+			return;
+		}
+
+		auto* buffer = static_cast<VulkanBuffer*>(arguments);
+		if (!ValidateIndirectArguments(
+				buffer, offset, drawCount, stride, sizeof(DrawIndirectArguments), "DrawIndirect") ||
+			drawCount == 0 || !RecordVertexBuffers("DrawIndirect vertex buffer")) {
+			return;
+		}
+		RetainResource(buffer);
+		RecordBufferUse(
+			buffer, offset, uint64_t(drawCount - 1) * stride + sizeof(DrawIndirectArguments), "DrawIndirect");
+		RecordShaderResources("DrawIndirect");
+		vkCmdDrawIndirect(m_CommandBuffer, buffer->GetBuffer(), offset, drawCount, stride);
+	}
+
+	void VulkanCommandList::DrawIndexedIndirect(Buffer* arguments,
+		uint64_t offset,
+		uint32_t drawCount,
+		uint32_t stride) {
+		static_assert(sizeof(DrawIndexedIndirectArguments) == sizeof(VkDrawIndexedIndirectCommand));
+		if (GetState() != CommandListState::Recording || !m_Rendering || !m_GraphicsPipelineBound) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"DrawIndexedIndirect: Requires an active rendering scope and a bound graphics pipeline.");
+			return;
+		}
+		if (m_IndexBuffer == nullptr) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"DrawIndexedIndirect: Bind an index buffer before drawing.");
+			return;
+		}
+
+		auto* buffer = static_cast<VulkanBuffer*>(arguments);
+		if (!ValidateIndirectArguments(
+				buffer, offset, drawCount, stride, sizeof(DrawIndexedIndirectArguments), "DrawIndexedIndirect") ||
+			drawCount == 0 || !RecordVertexBuffers("DrawIndexedIndirect vertex buffer")) {
+			return;
+		}
+		RetainResource(buffer);
+		RecordBufferUse(buffer,
+			offset,
+			uint64_t(drawCount - 1) * stride + sizeof(DrawIndexedIndirectArguments),
+			"DrawIndexedIndirect");
+		RecordBufferUse(m_IndexBuffer, 0, m_IndexBuffer->GetSize(), "DrawIndexedIndirect index buffer");
+		RecordShaderResources("DrawIndexedIndirect");
+		vkCmdDrawIndexedIndirect(m_CommandBuffer, buffer->GetBuffer(), offset, drawCount, stride);
+	}
+
 	void VulkanCommandList::CopyBuffer(Buffer* source, Buffer* destination, const BufferCopyRegion& region) {
 		if (GetState() != CommandListState::Recording || region.size == 0) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,

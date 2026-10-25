@@ -13,6 +13,28 @@
 #include <cstdint>
 
 namespace RealRHI {
+	// Binary layouts consumed directly by indirect commands and writable by compute shaders.
+	struct DrawIndirectArguments {
+		uint32_t vertexCount = 0;
+		uint32_t instanceCount = 1;
+		uint32_t firstVertex = 0;
+		uint32_t firstInstance = 0;
+	};
+
+	struct DrawIndexedIndirectArguments {
+		uint32_t indexCount = 0;
+		uint32_t instanceCount = 1;
+		uint32_t firstIndex = 0;
+		int32_t vertexOffset = 0;
+		uint32_t firstInstance = 0;
+	};
+
+	struct DispatchIndirectArguments {
+		uint32_t groupCountX = 1;
+		uint32_t groupCountY = 1;
+		uint32_t groupCountZ = 1;
+	};
+
 	struct MipGenerationDesc {
 		uint32_t baseMipLevel = 0;
 		// Zero selects all remaining mips/layers. At least two mip levels are required.
@@ -101,6 +123,22 @@ namespace RealRHI {
 		virtual void BindPipeline(Pipeline* pipeline) = 0;
 		virtual void SetPushConstants(const void* data, uint32_t size, uint32_t offset = 0) = 0;
 		virtual void DispatchCompute(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) = 0;
+		// Argument buffers require Indirect usage and a 4-byte-aligned offset.
+		// Multiple draws require multiDrawIndirect and drawCount <= maxDrawIndirectCount.
+		// Synchronize GPU writes with DrawIndirect / IndirectCommandRead before execution.
+		// GPU-written counts must respect device limits. firstInstance must be zero
+		// unless features.drawIndirectFirstInstance is enabled. Indexed arguments must
+		// address valid indices/vertices; their contents cannot be checked while recording.
+		virtual void DispatchComputeIndirect(Buffer* arguments, uint64_t offset = 0) = 0;
+		virtual void DrawIndirect(Buffer* arguments,
+			uint64_t offset = 0,
+			uint32_t drawCount = 1,
+			uint32_t stride = sizeof(DrawIndirectArguments)) = 0;
+		virtual void DrawIndexedIndirect(Buffer* arguments,
+			uint64_t offset = 0,
+			uint32_t drawCount = 1,
+			uint32_t stride = sizeof(DrawIndexedIndirectArguments)) = 0;
+
 		virtual void BindVertexBuffer(Buffer* vertexBuffer, uint32_t binding = 0, uint64_t offset = 0) = 0;
 		virtual void BindIndexBuffer(Buffer* indexBuffer) = 0;
 
