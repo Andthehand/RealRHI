@@ -33,7 +33,8 @@ namespace {
 				return false;
 			}
 
-			if (m_Device->CreateWindow({.Title = "RealRHI Scene Example", .Width = 960, .Height = 640}, m_Window) !=
+			if (m_Device->CreateWindow(
+					{.Title = "RealRHI Scene Example - S: toggle shadows", .Width = 960, .Height = 640}, m_Window) !=
 					Result::Success ||
 				m_Device->CreateSwapchain({.window = m_Window.Raw()}, m_Swapchain) != Result::Success) {
 				return false;
@@ -53,6 +54,9 @@ namespace {
 				while (SDL_PollEvent(&event)) {
 					if (event.type == SDL_EVENT_QUIT) {
 						running = false;
+					}
+					if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_S && !event.key.repeat) {
+						m_ShadowsEnabled = !m_ShadowsEnabled;
 					}
 				}
 				if (!running) {
@@ -129,7 +133,8 @@ namespace {
 				return false;
 			}
 
-			m_Renderer.Record(*commands, frame.frameIndex, frame.backBufferView, rotation, m_PendingUpload);
+			m_Renderer.Record(
+				*commands, frame.frameIndex, frame.backBufferView, rotation, m_PendingUpload, m_ShadowsEnabled);
 			if (commands->End() != Result::Success) {
 				return false;
 			}
@@ -157,6 +162,7 @@ namespace {
 		FrameResources m_Frames;
 		Examples::SceneRenderer m_Renderer;
 		UploadSubmission m_PendingUpload;
+		bool m_ShadowsEnabled = true;
 	};
 }
 

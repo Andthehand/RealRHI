@@ -67,6 +67,7 @@ namespace {
 		const auto color = device.GetTextureFormatSupport(TextureFormat::RGBA8_UNorm);
 		Expect(Any(color.usages & TextureUsage::ShaderResource) && Any(color.usages & TextureUsage::RenderTarget),
 			"RGBA8 supports sampling and color rendering");
+		Expect(!color.depthComparison, "Color formats cannot be used for depth comparison");
 		Expect(color.linearFiltering && color.colorBlending, "Report filtering and blending for RGBA8");
 		Expect(!device.GetTextureFormatSupport(TextureFormat::R32_UInt).colorBlending,
 			"Integer formats do not advertise blending");

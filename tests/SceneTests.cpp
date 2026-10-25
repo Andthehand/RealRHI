@@ -81,6 +81,43 @@ namespace {
 		}
 	}
 
+	bool IsFloorPixel(const std::vector<uint8_t>& pixels, size_t offset) {
+		const int red = pixels[offset];
+		const int green = pixels[offset + 1];
+		const int blue = pixels[offset + 2];
+		return red > 15 && green >= red - 2 && blue >= green && blue < red * 1.5f;
+	}
+
+	std::vector<bool> CheckShadows(const std::vector<uint8_t>& shadowed,
+		const std::vector<uint8_t>& unshadowed,
+		uint32_t width,
+		uint32_t height) {
+		std::vector<bool> floorShadows(width * height);
+		uint32_t shadowPixels = 0;
+		uint32_t litFloorPixels = 0;
+
+		for (size_t offset = 0; offset < shadowed.size(); offset += 4) {
+			int reduction = 0;
+			for (uint32_t channel = 0; channel < 3; ++channel) {
+				Expect(shadowed[offset + channel] <= unshadowed[offset + channel] + 1,
+					"Shadows reduce direct light without brightening pixels or changing geometry");
+				reduction += unshadowed[offset + channel] - shadowed[offset + channel];
+			}
+
+			// The floor is neutral blue-gray; exclude the saturated cubes, transparent panel, and clear color.
+			const bool floor = IsFloorPixel(unshadowed, offset);
+			litFloorPixels += floor && reduction <= 3;
+			if (floor && reduction > 15) {
+				floorShadows[offset / 4] = true;
+				++shadowPixels;
+			}
+		}
+
+		Expect(shadowPixels > width * height / 2000, "Opaque cubes cast visible shadows onto the floor");
+		Expect(litFloorPixels > shadowPixels, "Unoccluded floor remains lit outside the cast shadows");
+		return floorShadows;
+	}
+
 	void TestOffscreenScene(Device& device) {
 		constexpr uint32_t slotCount = 3;
 		FrameResources frames;
@@ -94,9 +131,13 @@ namespace {
 
 		std::array<Output, slotCount> outputs;
 		std::vector<uint8_t> previous;
+		std::vector<uint8_t> staticShadowed;
+		std::vector<uint8_t> animatedShadowed;
+		std::vector<uint8_t> animatedUnshadowed;
+		std::vector<bool> animatedShadowMask;
 		uint32_t width = 160;
 		uint32_t height = 120;
-		for (uint32_t round = 0; round < 4; ++round) {
+		for (uint32_t round = 0; round < 8; ++round) {
 			if (round == 2) {
 				width = 192;
 				height = 128;
@@ -136,10 +177,11 @@ namespace {
 				}
 				Transition(*commands, output.color.Raw(), oldLayout, TextureLayout::ColorAttachment);
 				float rotation = 0;
-				if (round == 3) {
+				if (round >= 3 && round <= 5) {
 					rotation = 0.8f;
 				}
-				renderer.Record(*commands, slot, output.color->GetTextureView(), rotation, upload);
+				const bool shadowsEnabled = round >= 2 && round != 4 && round != 6;
+				renderer.Record(*commands, slot, output.color->GetTextureView(), rotation, upload, shadowsEnabled);
 				Transition(*commands, output.color.Raw(), TextureLayout::ColorAttachment, TextureLayout::TransferSrc);
 				commands->CopyTextureToBuffer(
 					output.color.Raw(), output.readback.Raw(), {.width = width, .height = height});
@@ -170,6 +212,35 @@ namespace {
 			if (round == 3) {
 				Expect(pixels != previous, "Animation changes the rendered geometry");
 			}
+			if (round == 2) {
+				staticShadowed = pixels;
+			}
+			if (round == 3) {
+				animatedShadowed = pixels;
+			}
+			if (round == 4) {
+				animatedShadowMask = CheckShadows(animatedShadowed, pixels, width, height);
+				animatedUnshadowed = pixels;
+			}
+			if (round == 5) {
+				Expect(pixels == animatedShadowed,
+					"Re-enabling shadows refreshes each frame slot's shadow map deterministically");
+			}
+			if (round == 6) {
+				const auto staticShadowMask = CheckShadows(staticShadowed, pixels, width, height);
+				uint32_t movedShadowPixels = 0;
+				for (size_t pixel = 0; pixel < staticShadowMask.size(); ++pixel) {
+					if (IsFloorPixel(pixels, pixel * 4) && IsFloorPixel(animatedUnshadowed, pixel * 4)) {
+						movedShadowPixels += staticShadowMask[pixel] != animatedShadowMask[pixel];
+					}
+				}
+				Expect(movedShadowPixels > 5, "Rotating the cubes moves their floor shadows");
+			}
+			if (round == 7) {
+				Expect(
+					pixels == staticShadowed, "Shadow maps are regenerated after animation while shadows are disabled");
+			}
+
 			previous = pixels;
 		}
 	}

@@ -1,7 +1,9 @@
 #include "SceneRenderer.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <iostream>
 #include <string>
 #include <utility>
 
@@ -33,8 +35,14 @@ namespace RealRHI::Examples {
 			float padding = 0;
 			uint32_t textureIndex;
 			uint32_t samplerIndex;
-			float descriptorPadding[2]{};
+			uint32_t shadowTextureIndex;
+			uint32_t shadowSamplerIndex;
+			float shadowTexelSize;
+			uint32_t shadowsEnabled;
+			float shadowPadding[2]{};
 		};
+
+		static_assert(sizeof(SceneParameters) == 80);
 
 		Geometry BuildGeometry() {
 			Geometry geometry;
@@ -102,6 +110,11 @@ namespace RealRHI::Examples {
 		m_Device = &device;
 		m_Frames.resize(frameCount);
 
+		const Result depthResult = SelectDepthFormat();
+		if (depthResult != Result::Success) {
+			return depthResult;
+		}
+
 		const Result pipelineResult = CreatePipelines(outputFormat);
 		if (pipelineResult != Result::Success) {
 			return pipelineResult;
@@ -110,12 +123,52 @@ namespace RealRHI::Examples {
 		return UploadAssets(outUpload);
 	}
 
-	Result SceneRenderer::CreatePipelines(TextureFormat outputFormat) {
-		Ref<Shader> sceneShader;
-		Result result = m_Device->CreateShader({.moduleName = "scene",
+	Result SceneRenderer::SelectDepthFormat() {
+		m_ShadowResolution = std::min(1024u, m_Device->GetCapabilities().limits.maxTextureDimension2D);
 
-												   .debugName = "Scene geometry shader"},
-			sceneShader);
+		for (auto format : {TextureFormat::D32_Float, TextureFormat::D16_UNorm, TextureFormat::D24_UNorm_S8_UInt}) {
+			const TextureDesc desc{
+				.width = m_ShadowResolution,
+				.height = m_ShadowResolution,
+				.format = format,
+				.usage = TextureUsage::DepthStencil | TextureUsage::ShaderResource
+			};
+
+			if (m_Device->GetTextureFormatSupport(format).depthComparison && m_Device->SupportsTexture(desc)) {
+				m_DepthFormat = format;
+				return Result::Success;
+			}
+		}
+
+		std::cerr << "Scene: No sampled depth format supports shadow comparisons.\n";
+		return Result::Failed;
+	}
+
+	Result SceneRenderer::CreatePipelines(TextureFormat outputFormat) {
+		Ref<Shader> shadowShader;
+		Result result =
+			m_Device->CreateShader({.moduleName = "shadow", .debugName = "Scene shadow shader"}, shadowShader);
+		if (result != Result::Success) {
+			return result;
+		}
+
+		// Only position is consumed, but the shadow pass shares the full scene vertex stream.
+		result = m_Device->CreateGraphicsPipeline(
+			{.shader = shadowShader.Raw(),
+				.vertexLayout =
+					{.bindings = {{.stride = sizeof(Vertex)}}, .attributes = {{.format = VertexFormat::Float3}}},
+				.rasterState =
+					{.cullMode = CullMode::None,
+						.depthBias = {.enable = true, .constantFactor = 1.25f, .slopeFactor = 1.75f}},
+				.renderTargetFormats = {.depthFormat = m_DepthFormat},
+				.debugName = "Scene shadow depth pipeline"},
+			m_ShadowPipeline);
+		if (result != Result::Success) {
+			return result;
+		}
+
+		Ref<Shader> sceneShader;
+		result = m_Device->CreateShader({.moduleName = "scene", .debugName = "Scene geometry shader"}, sceneShader);
 		if (result != Result::Success) {
 			return result;
 		}
@@ -127,7 +180,7 @@ namespace RealRHI::Examples {
 			.renderTargetFormats =
 				{
 					.colorFormats = {TextureFormat::RGBA8_UNorm},
-					.depthFormat = TextureFormat::D32_Float,
+					.depthFormat = m_DepthFormat,
 				},
 			.debugName = "Scene opaque pipeline",
 		};
@@ -273,6 +326,21 @@ namespace RealRHI::Examples {
 			return result;
 		}
 
+		result = m_Device->CreateSampler({.minFilter = Filter::Nearest,
+											 .magFilter = Filter::Nearest,
+											 .mipFilter = Filter::Nearest,
+											 .addressU = SamplerAddressMode::ClampToBorder,
+											 .addressV = SamplerAddressMode::ClampToBorder,
+											 .addressW = SamplerAddressMode::ClampToBorder,
+											 .compareEnable = true,
+											 .compareOp = CompareOp::LessEqual,
+											 .borderColor = SamplerBorderColor::OpaqueWhite,
+											 .debugName = "Scene shadow comparison sampler"},
+			m_ShadowSampler);
+		if (result != Result::Success) {
+			return result;
+		}
+
 		return uploads->Submit(outUpload);
 	}
 
@@ -306,11 +374,22 @@ namespace RealRHI::Examples {
 			{
 				.width = width,
 				.height = height,
-				.format = TextureFormat::D32_Float,
+				.format = m_DepthFormat,
 				.usage = TextureUsage::DepthStencil,
 				.debugName = depthName.c_str(),
 			},
 			targets.depth);
+		if (result != Result::Success) {
+			return result;
+		}
+
+		const std::string shadowName = "Scene shadow map slot " + std::to_string(frameIndex);
+		result = m_Device->CreateTexture({.width = m_ShadowResolution,
+											 .height = m_ShadowResolution,
+											 .format = m_DepthFormat,
+											 .usage = TextureUsage::DepthStencil | TextureUsage::ShaderResource,
+											 .debugName = shadowName.c_str()},
+			targets.shadow);
 		if (result != Result::Success) {
 			return result;
 		}
@@ -370,12 +449,13 @@ namespace RealRHI::Examples {
 		});
 	}
 
-	void SceneRenderer::DrawScene(CommandList& commands, const FrameTargets& targets, float rotation) {
-		commands.BindPipeline(m_OpaquePipeline.Raw());
+	void SceneRenderer::DrawGeometry(CommandList& commands,
+		const FrameTargets& targets,
+		float rotation,
+		GeometryPass pass,
+		bool shadowsEnabled) {
 		commands.BindVertexBuffer(m_VertexBuffer.Raw());
 		commands.BindIndexBuffer(m_IndexBuffer.Raw());
-		commands.UseResource(m_Pattern.Raw());
-		commands.UseResource(m_Sampler.Raw());
 
 		SceneParameters parameters{
 			.translationAndScale = {-0.4f, 0, 0.6f, 1},
@@ -385,6 +465,10 @@ namespace RealRHI::Examples {
 			.rotationCosine = std::cos(rotation + 0.35f),
 			.textureIndex = m_Pattern->GetSampledImageDescriptorIndex(),
 			.samplerIndex = m_Sampler->GetDescriptorIndex(),
+			.shadowTextureIndex = targets.shadow->GetSampledImageDescriptorIndex(),
+			.shadowSamplerIndex = m_ShadowSampler->GetDescriptorIndex(),
+			.shadowTexelSize = 1.f / m_ShadowResolution,
+			.shadowsEnabled = static_cast<uint32_t>(shadowsEnabled),
 		};
 		commands.SetPushConstants(&parameters, sizeof(parameters));
 		commands.DrawIndexed(36, 1, 6, 4);
@@ -403,11 +487,68 @@ namespace RealRHI::Examples {
 		commands.SetPushConstants(&parameters, sizeof(parameters));
 		commands.DrawIndexed(6);
 
-		commands.BindPipeline(m_TransparentPipeline.Raw());
-		parameters.translationAndScale = {-0.9f, 0.1f, 1.7f, 1.1f};
-		parameters.tint = {0.1f, 0.9f, 0.65f, 0.35f};
-		commands.SetPushConstants(&parameters, sizeof(parameters));
-		commands.DrawIndexed(6, 1, 42, 28);
+		if (pass == GeometryPass::Lighting) {
+			commands.BindPipeline(m_TransparentPipeline.Raw());
+			parameters.translationAndScale = {-0.9f, 0.1f, 1.7f, 1.1f};
+			parameters.tint = {0.1f, 0.9f, 0.65f, 0.35f};
+			commands.SetPushConstants(&parameters, sizeof(parameters));
+			commands.DrawIndexed(6, 1, 42, 28);
+		}
+	}
+
+	void SceneRenderer::DrawShadowMap(CommandList& commands, FrameTargets& targets, float rotation) {
+		TextureLayout oldLayout = TextureLayout::Undefined;
+		ResourceState before;
+		if (targets.shadowInitialized) {
+			oldLayout = TextureLayout::ShaderRead;
+			before = {PipelineStage::FragmentShader, ResourceAccess::ShaderRead};
+		}
+
+		BarrierDesc barriers;
+		barriers.textures.push_back({
+			.texture = targets.shadow.Raw(),
+			.before = before,
+			.after =
+				{PipelineStage::EarlyFragmentTests | PipelineStage::LateFragmentTests,
+					ResourceAccess::DepthStencilRead | ResourceAccess::DepthStencilWrite},
+			.oldLayout = oldLayout,
+			.newLayout = TextureLayout::DepthStencilAttachment,
+		});
+		commands.Barrier(barriers);
+
+		commands.SetViewport(
+			{.width = static_cast<float>(m_ShadowResolution), .height = static_cast<float>(m_ShadowResolution)});
+		commands.SetScissor({.width = m_ShadowResolution, .height = m_ShadowResolution});
+		commands.BeginRendering(
+			{.hasDepth = true,
+				.depthAttachment = {.target = targets.shadow->GetTextureView()},
+				.renderArea = {.width = m_ShadowResolution, .height = m_ShadowResolution}});
+		commands.BindPipeline(m_ShadowPipeline.Raw());
+		DrawGeometry(commands, targets, rotation, GeometryPass::Shadow, false);
+		commands.EndRendering();
+
+		barriers.textures.clear();
+		barriers.textures.push_back({
+			.texture = targets.shadow.Raw(),
+			.before =
+				{PipelineStage::EarlyFragmentTests | PipelineStage::LateFragmentTests,
+					ResourceAccess::DepthStencilWrite},
+			.after = {PipelineStage::FragmentShader, ResourceAccess::ShaderRead},
+			.oldLayout = TextureLayout::DepthStencilAttachment,
+			.newLayout = TextureLayout::ShaderRead,
+		});
+		commands.Barrier(barriers);
+		targets.shadowInitialized = true;
+	}
+
+	void SceneRenderer::DrawScene(CommandList& commands, FrameTargets& targets, float rotation, bool shadowsEnabled) {
+		commands.BindPipeline(m_OpaquePipeline.Raw());
+		commands.UseResource(m_Pattern.Raw());
+		commands.UseResource(m_Sampler.Raw());
+		commands.UseResource(targets.shadow.Raw());
+		commands.UseResource(m_ShadowSampler.Raw());
+
+		DrawGeometry(commands, targets, rotation, GeometryPass::Lighting, shadowsEnabled);
 		commands.EndRendering();
 	}
 
@@ -442,7 +583,8 @@ namespace RealRHI::Examples {
 		uint32_t frameIndex,
 		TextureView* output,
 		float rotation,
-		const UploadSubmission& pendingUpload) {
+		const UploadSubmission& pendingUpload,
+		bool shadowsEnabled) {
 		commands.BeginDebugLabel("Scene frame");
 		commands.WriteTimestamp("Frame setup");
 		auto& targets = m_Frames[frameIndex];
@@ -452,6 +594,14 @@ namespace RealRHI::Examples {
 				m_Pattern.Raw(), {.finalState = {PipelineStage::FragmentShader, ResourceAccess::ShaderRead}});
 		}
 
+		// Declared sampled resources need a valid layout even when the first frame has shadows disabled.
+		if (shadowsEnabled || !targets.shadowInitialized) {
+			commands.WriteTimestamp("Shadows");
+			commands.BeginDebugLabel("Shadow depth pass");
+			DrawShadowMap(commands, targets, rotation);
+			commands.EndDebugLabel();
+		}
+
 		commands.SetViewport(
 			{.width = static_cast<float>(targets.width), .height = static_cast<float>(targets.height)});
 		commands.SetScissor({.width = targets.width, .height = targets.height});
@@ -459,7 +609,7 @@ namespace RealRHI::Examples {
 		commands.WriteTimestamp("Scene");
 		commands.BeginDebugLabel("Opaque and transparent geometry");
 		BeginScene(commands, targets);
-		DrawScene(commands, targets, rotation);
+		DrawScene(commands, targets, rotation, shadowsEnabled);
 		commands.EndDebugLabel();
 		commands.WriteTimestamp("Postprocess");
 		commands.BeginDebugLabel("Fullscreen postprocess");

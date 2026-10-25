@@ -182,9 +182,10 @@ namespace RealRHI {
 			return {};
 		}
 
-		VkFormatProperties properties{};
-		vkGetPhysicalDeviceFormatProperties(m_PhysicalDevice, nativeFormat, &properties);
-		const auto flags = properties.optimalTilingFeatures;
+		VkFormatProperties3 features{.sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3};
+		VkFormatProperties2 properties{.sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2, .pNext = &features};
+		vkGetPhysicalDeviceFormatProperties2(m_PhysicalDevice, nativeFormat, &properties);
+		const auto flags = features.optimalTilingFeatures;
 		TextureFormatSupport support;
 
 		if (flags & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) {
@@ -207,6 +208,7 @@ namespace RealRHI {
 		}
 
 		support.linearFiltering = (flags & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0;
+		support.depthComparison = (flags & VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_DEPTH_COMPARISON_BIT) != 0;
 		support.colorBlending = (flags & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT) != 0;
 		support.blitSource = (flags & VK_FORMAT_FEATURE_BLIT_SRC_BIT) != 0;
 		support.blitDestination = (flags & VK_FORMAT_FEATURE_BLIT_DST_BIT) != 0;

@@ -6,12 +6,19 @@
 namespace RealRHI::Examples {
 	class SceneRenderer {
 	private:
+		enum class GeometryPass {
+			Shadow,
+			Lighting
+		};
+
 		struct FrameTargets {
 			Ref<Texture> color;
 			Ref<Texture> depth;
+			Ref<Texture> shadow;
 			uint32_t width = 0;
 			uint32_t height = 0;
 			bool initialized = false;
+			bool shadowInitialized = false;
 		};
 
 	public:
@@ -23,20 +30,30 @@ namespace RealRHI::Examples {
 			uint32_t frameIndex,
 			TextureView* output,
 			float rotation,
-			const UploadSubmission& pendingUpload);
+			const UploadSubmission& pendingUpload,
+			bool shadowsEnabled = true);
 
 	private:
+		Result SelectDepthFormat();
 		Result CreatePipelines(TextureFormat outputFormat);
 		Result UploadAssets(UploadSubmission& outUpload);
 		Result CreateGeometry(UploadContext& uploads);
 		Result CreatePattern(UploadContext& uploads);
 
+		void DrawShadowMap(CommandList& commands, FrameTargets& targets, float rotation);
+		void DrawGeometry(CommandList& commands,
+			const FrameTargets& targets,
+			float rotation,
+			GeometryPass pass,
+			bool shadowsEnabled);
+
 		void BeginScene(CommandList& commands, FrameTargets& targets);
-		void DrawScene(CommandList& commands, const FrameTargets& targets, float rotation);
+		void DrawScene(CommandList& commands, FrameTargets& targets, float rotation, bool shadowsEnabled);
 		void DrawPostprocess(CommandList& commands, FrameTargets& targets, TextureView* output);
 
 	private:
 		Device* m_Device = nullptr;
+		Ref<Pipeline> m_ShadowPipeline;
 		Ref<Pipeline> m_OpaquePipeline;
 		Ref<Pipeline> m_TransparentPipeline;
 		Ref<Pipeline> m_PostprocessPipeline;
@@ -45,6 +62,10 @@ namespace RealRHI::Examples {
 		Ref<Buffer> m_IndexBuffer;
 		Ref<Texture> m_Pattern;
 		Ref<Sampler> m_Sampler;
+		Ref<Sampler> m_ShadowSampler;
+
+		TextureFormat m_DepthFormat = TextureFormat::Unknown;
+		uint32_t m_ShadowResolution = 1024;
 
 		std::vector<FrameTargets> m_Frames;
 	};

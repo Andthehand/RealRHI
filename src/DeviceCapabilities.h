@@ -51,6 +51,7 @@ namespace RealRHI {
 		// Optimal-tiled image usages, supported individually. Use SupportsTexture for combinations.
 		TextureUsage usages = TextureUsage::None;
 		bool linearFiltering = false;
+		bool depthComparison = false;
 		bool colorBlending = false;
 		bool blitSource = false;
 		bool blitDestination = false;
