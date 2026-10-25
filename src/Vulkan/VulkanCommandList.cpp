@@ -465,6 +465,17 @@ namespace RealRHI {
 		}
 	}
 
+	void VulkanCommandList::ClearResourceDeclarations() {
+		if (GetState() != CommandListState::Recording) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"ClearResourceDeclarations: Requires an active recording.");
+			return;
+		}
+		m_ShaderBuffers.clear();
+		m_ShaderViews.clear();
+	}
+
 	void VulkanCommandList::BindPipeline(Pipeline* pipeline) {
 		auto* vulkanPipeline = static_cast<VulkanPipeline*>(pipeline);
 		if (GetState() != CommandListState::Recording || vulkanPipeline == nullptr) {

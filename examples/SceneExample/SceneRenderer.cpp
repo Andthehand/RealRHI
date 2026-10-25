@@ -1,5 +1,7 @@
 #include "SceneRenderer.h"
 
+#include "RenderGraph/RenderGraph.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -402,45 +404,6 @@ namespace RealRHI::Examples {
 	}
 
 	void SceneRenderer::BeginScene(CommandList& commands, FrameTargets& targets) {
-		TextureLayout oldColorLayout = TextureLayout::Undefined;
-		TextureLayout oldDepthLayout = TextureLayout::Undefined;
-		ResourceState beforeColor;
-		ResourceState beforeDepth;
-		if (targets.initialized) {
-			oldColorLayout = TextureLayout::ShaderRead;
-			oldDepthLayout = TextureLayout::DepthStencilAttachment;
-			beforeColor = {PipelineStage::FragmentShader, ResourceAccess::ShaderRead};
-			beforeDepth = {
-				PipelineStage::EarlyFragmentTests | PipelineStage::LateFragmentTests,
-				ResourceAccess::DepthStencilRead | ResourceAccess::DepthStencilWrite,
-			};
-		}
-
-		BarrierDesc barriers;
-		barriers.textures.push_back({
-			.texture = targets.color.Raw(),
-			.before = beforeColor,
-			.after =
-				{
-					PipelineStage::ColorAttachmentOutput,
-					ResourceAccess::ColorAttachmentRead | ResourceAccess::ColorAttachmentWrite,
-				},
-			.oldLayout = oldColorLayout,
-			.newLayout = TextureLayout::ColorAttachment,
-		});
-		barriers.textures.push_back({
-			.texture = targets.depth.Raw(),
-			.before = beforeDepth,
-			.after =
-				{
-					PipelineStage::EarlyFragmentTests | PipelineStage::LateFragmentTests,
-					ResourceAccess::DepthStencilRead | ResourceAccess::DepthStencilWrite,
-				},
-			.oldLayout = oldDepthLayout,
-			.newLayout = TextureLayout::DepthStencilAttachment,
-		});
-		commands.Barrier(barriers);
-
 		commands.BeginRendering({
 			.colorAttachments = {{.target = targets.color->GetTextureView(), .clearColor = {0.02f, 0.03f, 0.05f, 1}}},
 			.hasDepth = true,
@@ -497,25 +460,6 @@ namespace RealRHI::Examples {
 	}
 
 	void SceneRenderer::DrawShadowMap(CommandList& commands, FrameTargets& targets, float rotation) {
-		TextureLayout oldLayout = TextureLayout::Undefined;
-		ResourceState before;
-		if (targets.shadowInitialized) {
-			oldLayout = TextureLayout::ShaderRead;
-			before = {PipelineStage::FragmentShader, ResourceAccess::ShaderRead};
-		}
-
-		BarrierDesc barriers;
-		barriers.textures.push_back({
-			.texture = targets.shadow.Raw(),
-			.before = before,
-			.after =
-				{PipelineStage::EarlyFragmentTests | PipelineStage::LateFragmentTests,
-					ResourceAccess::DepthStencilRead | ResourceAccess::DepthStencilWrite},
-			.oldLayout = oldLayout,
-			.newLayout = TextureLayout::DepthStencilAttachment,
-		});
-		commands.Barrier(barriers);
-
 		commands.SetViewport(
 			{.width = static_cast<float>(m_ShadowResolution), .height = static_cast<float>(m_ShadowResolution)});
 		commands.SetScissor({.width = m_ShadowResolution, .height = m_ShadowResolution});
@@ -526,19 +470,6 @@ namespace RealRHI::Examples {
 		commands.BindPipeline(m_ShadowPipeline.Raw());
 		DrawGeometry(commands, targets, rotation, GeometryPass::Shadow, false);
 		commands.EndRendering();
-
-		barriers.textures.clear();
-		barriers.textures.push_back({
-			.texture = targets.shadow.Raw(),
-			.before =
-				{PipelineStage::EarlyFragmentTests | PipelineStage::LateFragmentTests,
-					ResourceAccess::DepthStencilWrite},
-			.after = {PipelineStage::FragmentShader, ResourceAccess::ShaderRead},
-			.oldLayout = TextureLayout::DepthStencilAttachment,
-			.newLayout = TextureLayout::ShaderRead,
-		});
-		commands.Barrier(barriers);
-		targets.shadowInitialized = true;
 	}
 
 	void SceneRenderer::DrawScene(CommandList& commands, FrameTargets& targets, float rotation, bool shadowsEnabled) {
@@ -553,22 +484,13 @@ namespace RealRHI::Examples {
 	}
 
 	void SceneRenderer::DrawPostprocess(CommandList& commands, FrameTargets& targets, TextureView* output) {
-		BarrierDesc barriers;
-		barriers.textures.push_back({
-			.texture = targets.color.Raw(),
-			.before = {PipelineStage::ColorAttachmentOutput, ResourceAccess::ColorAttachmentWrite},
-			.after = {PipelineStage::FragmentShader, ResourceAccess::ShaderRead},
-			.oldLayout = TextureLayout::ColorAttachment,
-			.newLayout = TextureLayout::ShaderRead,
-		});
-		commands.Barrier(barriers);
-
 		commands.BeginRendering({
 			.colorAttachments = {{.target = output}},
 			.renderArea = {.width = targets.width, .height = targets.height},
 		});
 		commands.BindPipeline(m_PostprocessPipeline.Raw());
 		commands.UseResource(targets.color.Raw());
+		commands.UseResource(m_Sampler.Raw());
 
 		const uint32_t parameters[] = {
 			targets.color->GetSampledImageDescriptorIndex(),
@@ -594,29 +516,92 @@ namespace RealRHI::Examples {
 				m_Pattern.Raw(), {.finalState = {PipelineStage::FragmentShader, ResourceAccess::ShaderRead}});
 		}
 
-		// Declared sampled resources need a valid layout even when the first frame has shadows disabled.
-		if (shadowsEnabled || !targets.shadowInitialized) {
-			commands.WriteTimestamp("Shadows");
-			commands.BeginDebugLabel("Shadow depth pass");
-			DrawShadowMap(commands, targets, rotation);
-			commands.EndDebugLabel();
+		const ResourceState sampled{PipelineStage::FragmentShader, ResourceAccess::ShaderRead};
+		const ResourceState colorAttachment{
+			PipelineStage::ColorAttachmentOutput,
+			ResourceAccess::ColorAttachmentRead | ResourceAccess::ColorAttachmentWrite
+		};
+		const ResourceState depthAttachment{
+			PipelineStage::EarlyFragmentTests | PipelineStage::LateFragmentTests,
+			ResourceAccess::DepthStencilRead | ResourceAccess::DepthStencilWrite
+		};
+		TextureLayout colorLayout = TextureLayout::Undefined;
+		TextureLayout depthLayout = TextureLayout::Undefined;
+		TextureLayout shadowLayout = TextureLayout::Undefined;
+		ResourceState beforeColor;
+		ResourceState beforeDepth;
+		ResourceState beforeShadow;
+		if (targets.initialized) {
+			colorLayout = TextureLayout::ShaderRead;
+			depthLayout = TextureLayout::DepthStencilAttachment;
+			beforeColor = sampled;
+			beforeDepth = depthAttachment;
+		}
+		if (targets.shadowInitialized) {
+			shadowLayout = TextureLayout::ShaderRead;
+			beforeShadow = sampled;
 		}
 
-		commands.SetViewport(
-			{.width = static_cast<float>(targets.width), .height = static_cast<float>(targets.height)});
-		commands.SetScissor({.width = targets.width, .height = targets.height});
+		RenderGraph graph;
+		const auto color = graph.ImportTexture(targets.color.Raw(), colorLayout, beforeColor);
+		const auto depth = graph.ImportTexture(targets.depth.Raw(), depthLayout, beforeDepth);
+		const auto shadow = graph.ImportTexture(targets.shadow.Raw(), shadowLayout, beforeShadow);
+		const auto pattern = graph.ImportTexture(m_Pattern.Raw(), TextureLayout::ShaderRead, sampled, {0, 6, 0, 1});
+		const ResourceState vertexState{PipelineStage::VertexInput, ResourceAccess::VertexAttributeRead};
+		const ResourceState indexState{PipelineStage::VertexInput, ResourceAccess::IndexRead};
+		const auto vertices = graph.ImportBuffer(m_VertexBuffer.Raw(), vertexState);
+		const auto indices = graph.ImportBuffer(m_IndexBuffer.Raw(), indexState);
 
-		commands.WriteTimestamp("Scene");
-		commands.BeginDebugLabel("Opaque and transparent geometry");
-		BeginScene(commands, targets);
-		DrawScene(commands, targets, rotation, shadowsEnabled);
-		commands.EndDebugLabel();
-		commands.WriteTimestamp("Postprocess");
-		commands.BeginDebugLabel("Fullscreen postprocess");
-		DrawPostprocess(commands, targets, output);
-		commands.EndDebugLabel();
+		// Initialize the sampled map even when shadows are disabled on the first frame.
+		if (shadowsEnabled || !targets.shadowInitialized) {
+			graph.AddPass(
+				{.name = "Shadows",
+					.resources =
+						{
+							{shadow, depthAttachment, TextureLayout::DepthStencilAttachment, RenderGraphAccess::Write},
+							{vertices, vertexState},
+							{indices, indexState},
+						}},
+				[&](CommandList& list) {
+					list.WriteTimestamp("Shadows");
+					DrawShadowMap(list, targets, rotation);
+				});
+		}
+
+		graph.AddPass(
+			{.name = "Scene",
+				.resources =
+					{
+						{color, colorAttachment, TextureLayout::ColorAttachment, RenderGraphAccess::Write},
+						{depth, depthAttachment, TextureLayout::DepthStencilAttachment, RenderGraphAccess::Write},
+						{shadow, sampled, TextureLayout::ShaderRead},
+						{pattern, sampled, TextureLayout::ShaderRead},
+						{vertices, vertexState},
+						{indices, indexState},
+					}},
+			[&](CommandList& list) {
+				list.WriteTimestamp("Scene");
+				list.SetViewport(
+					{.width = static_cast<float>(targets.width), .height = static_cast<float>(targets.height)});
+				list.SetScissor({.width = targets.width, .height = targets.height});
+				BeginScene(list, targets);
+				DrawScene(list, targets, rotation, shadowsEnabled);
+			});
+
+		// The caller/Device::Submit manages the output view's attachment and presentation state.
+		graph.AddPass({.name = "Postprocess",
+						  .resources =
+							  {
+								  {color, sampled, TextureLayout::ShaderRead},
+							  }},
+			[&](CommandList& list) {
+				list.WriteTimestamp("Postprocess");
+				DrawPostprocess(list, targets, output);
+			});
+		graph.Record(commands);
 		commands.WriteTimestamp("Frame end");
 		commands.EndDebugLabel();
 		targets.initialized = true;
+		targets.shadowInitialized = true;
 	}
 }

@@ -45,6 +45,7 @@ namespace RealRHI {
 		void UseResource(Buffer* buffer) override;
 		void UseResource(TextureView* view) override;
 		void UseResource(Sampler* sampler) override;
+		void ClearResourceDeclarations() override;
 
 		void BindPipeline(Pipeline* pipeline) override;
 		void SetPushConstants(const void* data, uint32_t size, uint32_t offset = 0) override;

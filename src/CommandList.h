@@ -112,13 +112,16 @@ namespace RealRHI {
 
 		// Explicitly declare shader-visible bindless resources for this recording.
 		// Must be called while recording, before submission. Retained through reset.
-		// Declarations apply to every subsequent draw/dispatch until Reset; those
+		// Declarations apply until ClearResourceDeclarations or Reset; those
 		// operations validate ownership of the whole buffer or selected texture view.
 		// Declare independent samplers here as well to retain their descriptor slots.
 		virtual void UseResource(Texture* texture) = 0;
 		virtual void UseResource(Buffer* buffer) = 0;
 		virtual void UseResource(TextureView* view) = 0;
 		virtual void UseResource(Sampler* sampler) = 0;
+		// Clear shader-visible buffer/view declarations for subsequent draws/dispatches.
+		// Previously recorded operations and retained resource lifetimes remain intact.
+		virtual void ClearResourceDeclarations() = 0;
 
 		virtual void BindPipeline(Pipeline* pipeline) = 0;
 		virtual void SetPushConstants(const void* data, uint32_t size, uint32_t offset = 0) = 0;
