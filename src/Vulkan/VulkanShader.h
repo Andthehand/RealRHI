@@ -1,5 +1,4 @@
 #pragma once
-#include "DescriptorsDesc.h"
 #include "Result.h"
 #include "Shader.h"
 #include "ShaderDesc.h"
@@ -23,8 +22,6 @@ namespace RealRHI {
 		VkShaderModule GetShaderModule() const { return m_ShaderModule; }
 		const std::vector<EntryPoint>& GetEntryPoints() const { return m_EntryPoints; }
 		const BufferLayout& GetBufferLayout() const { return m_BufferLayout; }
-		const DescriptorsDesc& GetDescriptorsDesc() const { return m_DescriptorsDesc; }
-		uint32_t GetPushDataSize() const { return m_PushDataSize; }
 
 	private:
 		Slang::ComPtr<slang::IModule> LoadModule(const ShaderDesc& desc, Slang::ComPtr<slang::IBlob>& diagnostics);
@@ -36,7 +33,7 @@ namespace RealRHI {
 			std::vector<EntryPoint>& outEntryPoints,
 			Slang::ComPtr<slang::IBlob>& diagnostics);
 
-		DescriptorsDesc ReflectDescriptors(slang::IComponentType* composedProgram,
+		uint32_t ReflectPushDataSize(slang::IComponentType* composedProgram,
 			Slang::ComPtr<slang::IBlob>& diagnostics);
 
 		Slang::ComPtr<slang::IComponentType> LinkProgram(slang::IComponentType* composed,
@@ -58,8 +55,6 @@ namespace RealRHI {
 
 		std::vector<EntryPoint> m_EntryPoints;
 		BufferLayout m_BufferLayout;
-		DescriptorsDesc m_DescriptorsDesc;
-		uint32_t m_PushDataSize = 0;
 
 		inline static Slang::ComPtr<slang::IGlobalSession> s_SlangGlobalSession;
 		inline static Slang::ComPtr<slang::ISession> s_SlangSession;

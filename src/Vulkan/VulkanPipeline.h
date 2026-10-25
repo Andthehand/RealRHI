@@ -1,5 +1,4 @@
 #pragma once
-#include "DescriptorsDesc.h"
 #include "Pipeline.h"
 #include "PipelineDesc.h"
 #include "Result.h"
@@ -7,18 +6,8 @@
 
 #include <volk.h>
 
-#include <unordered_map>
-
 namespace RealRHI {
 	class VulkanPipeline : public Pipeline {
-	public:
-		struct ReflectedBindingInfo {
-			uint32_t setIndex = 0;
-			uint32_t binding = 0;
-			VkDescriptorType vkType = VK_DESCRIPTOR_TYPE_MAX_ENUM;
-			uint32_t descriptorCount = 1;
-		};
-
 	public:
 		VulkanPipeline(const VulkanDevice* device);
 		~VulkanPipeline();

@@ -70,12 +70,12 @@ set(REALRHI_HEADERS
     "src/TextureViewDesc.h"
     "src/FrameContext.h"
     "src/RefCounted.h"
-    "src/Vulkan/DescriptorsDesc.h"
     "src/Vulkan/VulkanDescriptorHeaps.h"
     "src/Vulkan/VulkanDescriptorManager.h"
 )
 
 set(REALRHI_SOURCES
+    "src/Vulkan/VulkanCommandCopy.cpp"
     "src/Vulkan/VulkanCommandProfiling.cpp"
     "src/Vulkan/VulkanStatistics.cpp"
     "src/Vulkan/VulkanSampler.cpp"
@@ -115,60 +115,34 @@ target_link_libraries(RealRHI
 target_compile_features(RealRHI PUBLIC cxx_std_20)
 
 if(REALRHI_BUILD_TESTS)
-    add_executable(ProfilingTests tests/ProfilingTests.cpp)
-    target_link_libraries(ProfilingTests PRIVATE RealRHI)
-    target_compile_definitions(ProfilingTests PRIVATE
-        REALRHI_TEST_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/tests/shaders")
-    add_test(NAME ProfilingTests COMMAND ProfilingTests)
-    set_tests_properties(ProfilingTests PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
+    function(realrhi_add_test name)
+        add_executable(${name} ${ARGN})
+        target_link_libraries(${name} PRIVATE RealRHI)
+        add_test(NAME ${name} COMMAND ${name})
+    endfunction()
 
-    add_executable(TextureTests tests/TextureTests.cpp)
-    target_link_libraries(TextureTests PRIVATE RealRHI)
-    target_compile_definitions(TextureTests PRIVATE
-        REALRHI_TEST_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/tests/shaders")
-    add_test(NAME TextureTests COMMAND TextureTests)
-    set_tests_properties(TextureTests PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
+    realrhi_add_test(ProfilingTests tests/ProfilingTests.cpp)
+    realrhi_add_test(TextureTests tests/TextureTests.cpp)
+    realrhi_add_test(CoreTests tests/CoreTests.cpp)
+    realrhi_add_test(ResourceSafetyTests tests/ResourceSafetyTests.cpp)
+    realrhi_add_test(QueueSubmissionTests tests/QueueSubmissionTests.cpp)
+    realrhi_add_test(QueueOwnershipTests tests/QueueOwnershipTests.cpp)
+    realrhi_add_test(UploadTests tests/UploadTests.cpp)
+    realrhi_add_test(SceneTests tests/SceneTests.cpp examples/SceneExample/SceneRenderer.cpp)
+    realrhi_add_test(DrawTests tests/DrawTests.cpp)
 
-    add_executable(CoreTests tests/CoreTests.cpp)
-    target_link_libraries(CoreTests PRIVATE RealRHI)
-    add_test(NAME CoreTests COMMAND CoreTests)
-
-    add_executable(ResourceSafetyTests tests/ResourceSafetyTests.cpp)
-    target_link_libraries(ResourceSafetyTests PRIVATE RealRHI)
+    foreach(name IN ITEMS ProfilingTests TextureTests QueueOwnershipTests DrawTests)
+        target_compile_definitions(${name} PRIVATE
+            REALRHI_TEST_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/tests/shaders")
+    endforeach()
     target_compile_definitions(ResourceSafetyTests PRIVATE
         REALRHI_TEST_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/examples/TriangleExample/shaders")
-    add_test(NAME ResourceSafetyTests COMMAND ResourceSafetyTests)
-
-    add_executable(QueueSubmissionTests tests/QueueSubmissionTests.cpp)
-    target_link_libraries(QueueSubmissionTests PRIVATE RealRHI)
-    target_include_directories(QueueSubmissionTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    add_test(NAME QueueSubmissionTests COMMAND QueueSubmissionTests)
-
-    add_executable(QueueOwnershipTests tests/QueueOwnershipTests.cpp)
-    target_link_libraries(QueueOwnershipTests PRIVATE RealRHI)
-    target_compile_definitions(QueueOwnershipTests PRIVATE
-        REALRHI_TEST_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/tests/shaders")
-    add_test(NAME QueueOwnershipTests COMMAND QueueOwnershipTests)
-    set_tests_properties(QueueOwnershipTests PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
-
-    add_executable(UploadTests tests/UploadTests.cpp)
-    target_link_libraries(UploadTests PRIVATE RealRHI)
-    add_test(NAME UploadTests COMMAND UploadTests)
-    set_tests_properties(UploadTests PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
-
-    add_executable(SceneTests tests/SceneTests.cpp examples/SceneExample/SceneRenderer.cpp)
-    target_link_libraries(SceneTests PRIVATE RealRHI)
     target_compile_definitions(SceneTests PRIVATE
         REALRHI_SCENE_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/examples/SceneExample/shaders")
-    add_test(NAME SceneTests COMMAND SceneTests)
-    set_tests_properties(SceneTests PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
 
-    add_executable(DrawTests tests/DrawTests.cpp)
-    target_link_libraries(DrawTests PRIVATE RealRHI)
-    target_compile_definitions(DrawTests PRIVATE
-        REALRHI_TEST_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/tests/shaders")
-    add_test(NAME DrawTests COMMAND DrawTests)
-    set_tests_properties(DrawTests PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
+    foreach(name IN ITEMS ProfilingTests TextureTests QueueOwnershipTests UploadTests SceneTests DrawTests)
+        set_tests_properties(${name} PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
+    endforeach()
 endif()
 
 if(BUILD_EXAMPLES)

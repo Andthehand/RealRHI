@@ -52,6 +52,7 @@ namespace RealRHI {
 		void BindVertexBuffer(Buffer* vertexBuffer) override;
 		void BindIndexBuffer(Buffer* indexBuffer) override;
 
+		// Located in VulkanCommandCopy.cpp
 		void CopyBuffer(Buffer* source, Buffer* destination, const BufferCopyRegion& region) override;
 		void CopyBufferToTexture(Buffer* source, Texture* destination, const BufferTextureCopyRegion& region) override;
 		void CopyTextureToBuffer(Texture* source, Buffer* destination, const BufferTextureCopyRegion& region) override;
@@ -154,12 +155,6 @@ namespace RealRHI {
 	private:
 		// Keep recorded resources alive until this list is reset or destroyed.
 		void RetainResource(RefCounted* resource);
-
-		void RegisterRequiredLayout(const VulkanTexture* texture,
-			uint32_t mipLevel,
-			uint32_t baseLayer,
-			uint32_t layerCount,
-			TextureLayout expected);
 
 		bool HasRecordedLayout(const VulkanTexture* texture,
 			uint32_t mipLevel,

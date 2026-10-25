@@ -4,211 +4,36 @@
 
 #include <algorithm>
 #include <array>
-#include <utility>
 
 namespace RealRHI {
 	namespace {
-		struct DescriptorSetBuilderContext {
-			DescriptorsDesc& descriptors;
-			const VulkanDevice* device = nullptr;
-			uint32_t& pushDataSize;
-		};
-
-		DescriptorSetLayoutDesc& GetSet(DescriptorSetBuilderContext& context, uint32_t setIndex) {
-			return context.descriptors.sets[setIndex];
-		}
-
-		uint32_t GetNextBindingIndex(DescriptorSetBuilderContext& context, uint32_t setIndex) {
-			return static_cast<uint32_t>(GetSet(context, setIndex).bindings.size());
-		}
-
-		std::string JoinBindingName(const std::string& prefix, const char* name) {
-			if (!name || !name[0]) {
-				return prefix;
-			}
-			if (prefix.empty()) {
-				return name;
-			}
-			return prefix + "." + name;
-		}
-
-		void CollectDescriptorBindingNames(slang::TypeLayoutReflection* typeLayout,
-			const std::string& prefix,
-			std::vector<std::string>& outNames) {
+		void CollectPushDataSize(slang::TypeLayoutReflection* typeLayout, uint32_t& pushDataSize) {
 			const uint32_t fieldCount = static_cast<uint32_t>(typeLayout->getFieldCount());
 			for (uint32_t fieldIndex = 0; fieldIndex < fieldCount; ++fieldIndex) {
-				auto* fieldLayout = typeLayout->getFieldByIndex(fieldIndex);
-				auto* fieldTypeLayout = fieldLayout->getTypeLayout();
-				const std::string fieldName = JoinBindingName(prefix, fieldLayout->getName());
-
-				const int rangeCount = fieldTypeLayout->getDescriptorSetDescriptorRangeCount(0);
-				for (int rangeIndex = 0; rangeIndex < rangeCount; ++rangeIndex) {
-					const slang::BindingType bindingType =
-						fieldTypeLayout->getDescriptorSetDescriptorRangeType(0, rangeIndex);
-					if (bindingType == slang::BindingType::PushConstant) {
-						continue;
-					}
-					outNames.push_back(fieldName);
-				}
-			}
-		}
-
-		void AddDescriptorRanges(slang::TypeLayoutReflection* typeLayout,
-			uint32_t setIndex,
-			DescriptorSetBuilderContext& context,
-			const std::string& prefix) {
-			constexpr int relativeSetIndex = 0;
-			const int rangeCount = typeLayout->getDescriptorSetDescriptorRangeCount(relativeSetIndex);
-			std::vector<std::string> descriptorNames;
-			CollectDescriptorBindingNames(typeLayout, prefix, descriptorNames);
-			size_t descriptorNameIndex = 0;
-
-			for (int rangeIndex = 0; rangeIndex < rangeCount; ++rangeIndex) {
-				const slang::BindingType bindingType =
-					typeLayout->getDescriptorSetDescriptorRangeType(relativeSetIndex, rangeIndex);
-				if (bindingType == slang::BindingType::PushConstant) {
-					continue;
-				}
-
-				std::string descriptorName;
-				if (descriptorNameIndex < descriptorNames.size()) {
-					descriptorName = descriptorNames[descriptorNameIndex++];
-				}
-
-				GetSet(context, setIndex)
-					.bindings.push_back(DescriptorBinding{
-						.name = std::move(descriptorName),
-						.binding = GetNextBindingIndex(context, setIndex),
-						.vkType = Utils::SlangBindingTypeToVkDescriptorType(bindingType),
-						.descriptorCount = static_cast<uint32_t>(
-							typeLayout->getDescriptorSetDescriptorRangeDescriptorCount(relativeSetIndex, rangeIndex)),
-					});
-			}
-		}
-
-		void AddRangesForParameterBlockElement(slang::TypeLayoutReflection* elementTypeLayout,
-			uint32_t setIndex,
-			DescriptorSetBuilderContext& context,
-			const std::string& prefix);
-
-		void CompactDescriptorSets(DescriptorsDesc& descriptors) {
-			std::vector<DescriptorSetLayoutDesc> compactedSets;
-			compactedSets.reserve(descriptors.sets.size());
-
-			for (const auto& set : descriptors.sets) {
-				if (set.bindings.empty()) {
-					continue;
-				}
-
-				DescriptorSetLayoutDesc compactedSet = set;
-				compactedSet.setIndex = static_cast<uint32_t>(compactedSets.size());
-				compactedSets.push_back(std::move(compactedSet));
-			}
-
-			descriptors.sets = std::move(compactedSets);
-		}
-
-		void AddDescriptorSetForParameterBlock(slang::TypeLayoutReflection* parameterBlockTypeLayout,
-			DescriptorSetBuilderContext& context,
-			const std::string& prefix);
-
-		void AddProgramParameters(slang::ProgramLayout* programLayout,
-			uint32_t defaultSetIndex,
-			DescriptorSetBuilderContext& context) {
-			const uint32_t parameterCount = static_cast<uint32_t>(programLayout->getParameterCount());
-			for (uint32_t parameterIndex = 0; parameterIndex < parameterCount; ++parameterIndex) {
-				auto* parameterLayout = programLayout->getParameterByIndex(parameterIndex);
-				auto* parameterTypeLayout = parameterLayout->getTypeLayout();
-				const std::string parameterName = parameterLayout->getName();
-
-				if (parameterTypeLayout->getKind() == slang::TypeReflection::Kind::ParameterBlock) {
-					AddDescriptorSetForParameterBlock(parameterTypeLayout, context, parameterName);
-					continue;
-				}
-
-				AddRangesForParameterBlockElement(parameterTypeLayout, defaultSetIndex, context, parameterName);
-			}
-		}
-
-		void AddDescriptorSetForParameterBlock(slang::TypeLayoutReflection* parameterBlockTypeLayout,
-			DescriptorSetBuilderContext& context,
-			const std::string& prefix) {
-			const uint32_t setIndex = static_cast<uint32_t>(context.descriptors.sets.size());
-			context.descriptors.sets.push_back(DescriptorSetLayoutDesc{
-				.setIndex = setIndex,
-			});
-
-			AddRangesForParameterBlockElement(
-				parameterBlockTypeLayout->getElementTypeLayout(), setIndex, context, prefix);
-		}
-
-		void RecordPushDataSize(slang::TypeLayoutReflection* typeLayout, DescriptorSetBuilderContext& context) {
-			if (typeLayout == nullptr) {
-				return;
-			}
-			auto* element = typeLayout->getElementTypeLayout();
-			if (element != nullptr) {
-				context.pushDataSize = std::max(context.pushDataSize, static_cast<uint32_t>(element->getSize()));
-			}
-		}
-
-		void AddSubObjectRanges(slang::TypeLayoutReflection* typeLayout,
-			uint32_t setIndex,
-			DescriptorSetBuilderContext& context,
-			const std::string& prefix) {
-			const uint32_t fieldCount = static_cast<uint32_t>(typeLayout->getFieldCount());
-			for (uint32_t fieldIndex = 0; fieldIndex < fieldCount; ++fieldIndex) {
-				auto* fieldLayout = typeLayout->getFieldByIndex(fieldIndex);
-				auto* fieldTypeLayout = fieldLayout->getTypeLayout();
-				const std::string fieldName = JoinBindingName(prefix, fieldLayout->getName());
-
-				switch (fieldTypeLayout->getKind()) {
-					case slang::TypeReflection::Kind::ParameterBlock:
-						AddDescriptorSetForParameterBlock(fieldTypeLayout, context, fieldName);
-						break;
-					default:
-						break;
+				auto* fieldTypeLayout = typeLayout->getFieldByIndex(fieldIndex)->getTypeLayout();
+				if (fieldTypeLayout->getKind() == slang::TypeReflection::Kind::ParameterBlock) {
+					CollectPushDataSize(fieldTypeLayout->getElementTypeLayout(), pushDataSize);
 				}
 
 				const int subObjectRangeCount = fieldTypeLayout->getSubObjectRangeCount();
-				for (int subObjectRangeIndex = 0; subObjectRangeIndex < subObjectRangeCount; ++subObjectRangeIndex) {
-					const int bindingRangeIndex =
-						fieldTypeLayout->getSubObjectRangeBindingRangeIndex(subObjectRangeIndex);
-					const slang::BindingType bindingType = fieldTypeLayout->getBindingRangeType(bindingRangeIndex);
-					slang::TypeLayoutReflection* leafTypeLayout =
-						fieldTypeLayout->getBindingRangeLeafTypeLayout(bindingRangeIndex);
-
-					switch (bindingType) {
+				for (int rangeIndex = 0; rangeIndex < subObjectRangeCount; ++rangeIndex) {
+					const int bindingRangeIndex = fieldTypeLayout->getSubObjectRangeBindingRangeIndex(rangeIndex);
+					auto* leafTypeLayout = fieldTypeLayout->getBindingRangeLeafTypeLayout(bindingRangeIndex);
+					switch (fieldTypeLayout->getBindingRangeType(bindingRangeIndex)) {
 						case slang::BindingType::ConstantBuffer:
-							AddRangesForParameterBlockElement(
-								leafTypeLayout->getElementTypeLayout(), setIndex, context, fieldName);
+							CollectPushDataSize(leafTypeLayout->getElementTypeLayout(), pushDataSize);
 							break;
 						case slang::BindingType::PushConstant:
-							RecordPushDataSize(leafTypeLayout, context);
+							if (leafTypeLayout != nullptr && leafTypeLayout->getElementTypeLayout() != nullptr) {
+								const auto size = leafTypeLayout->getElementTypeLayout()->getSize();
+								pushDataSize = std::max(pushDataSize, static_cast<uint32_t>(size));
+							}
 							break;
 						default:
 							break;
 					}
 				}
 			}
-		}
-
-		void AddRangesForParameterBlockElement(slang::TypeLayoutReflection* elementTypeLayout,
-			uint32_t setIndex,
-			DescriptorSetBuilderContext& context,
-			const std::string& prefix) {
-			if (elementTypeLayout->getSize() > 0) {
-				GetSet(context, setIndex)
-					.bindings.push_back(DescriptorBinding{
-						.name = prefix,
-						.binding = GetNextBindingIndex(context, setIndex),
-						.vkType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-						.descriptorCount = 1,
-					});
-			}
-
-			AddDescriptorRanges(elementTypeLayout, setIndex, context, prefix);
-			AddSubObjectRanges(elementTypeLayout, setIndex, context, prefix);
 		}
 	}
 
@@ -249,8 +74,8 @@ namespace RealRHI {
 
 		m_BufferLayout = ReflectLayout(composedProgram, m_EntryPoints, diagnostics);
 
-		m_DescriptorsDesc = ReflectDescriptors(composedProgram, diagnostics);
-		if (m_PushDataSize > m_Device->GetMaxPushDataSize()) {
+		const uint32_t pushDataSize = ReflectPushDataSize(composedProgram, diagnostics);
+		if (pushDataSize > m_Device->GetMaxPushDataSize()) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::ShaderCompilation,
 				"Shader push-constant data exceeds the device descriptor heap maxPushDataSize.");
@@ -356,39 +181,30 @@ namespace RealRHI {
 		return bufferLayout;
 	}
 
-	DescriptorsDesc VulkanShader::ReflectDescriptors(slang::IComponentType* composedProgram,
+	uint32_t VulkanShader::ReflectPushDataSize(slang::IComponentType* composedProgram,
 		Slang::ComPtr<slang::IBlob>& diagnostics) {
 		slang::ProgramLayout* programLayout = composedProgram->getLayout(0, diagnostics.writeRef());
 		if (programLayout == nullptr) {
 			CheckSlangDiagnostics(diagnostics, SLANG_FAIL);
-			return {};
+			return 0;
 		}
 		CheckSlangDiagnostics(diagnostics, SLANG_OK);
 
-		DescriptorsDesc result;
-		DescriptorSetBuilderContext context{
-			.descriptors = result,
-			.device = m_Device,
-			.pushDataSize = m_PushDataSize,
-		};
-
-		result.sets.push_back(DescriptorSetLayoutDesc{
-			.setIndex = 0,
-		});
-		const uint32_t defaultSetIndex = 0;
-
-		AddProgramParameters(programLayout, defaultSetIndex, context);
+		uint32_t pushDataSize = 0;
+		const uint32_t parameterCount = static_cast<uint32_t>(programLayout->getParameterCount());
+		for (uint32_t i = 0; i < parameterCount; ++i) {
+			auto* typeLayout = programLayout->getParameterByIndex(i)->getTypeLayout();
+			if (typeLayout->getKind() == slang::TypeReflection::Kind::ParameterBlock) {
+				typeLayout = typeLayout->getElementTypeLayout();
+			}
+			CollectPushDataSize(typeLayout, pushDataSize);
+		}
 
 		const uint32_t entryPointCount = programLayout->getEntryPointCount();
 		for (uint32_t i = 0; i < entryPointCount; ++i) {
-			auto* entryPointLayout = programLayout->getEntryPointByIndex(i);
-			AddRangesForParameterBlockElement(
-				entryPointLayout->getTypeLayout(), defaultSetIndex, context, entryPointLayout->getName());
+			CollectPushDataSize(programLayout->getEntryPointByIndex(i)->getTypeLayout(), pushDataSize);
 		}
-
-		CompactDescriptorSets(result);
-
-		return result;
+		return pushDataSize;
 	}
 
 	Slang::ComPtr<slang::IComponentType> VulkanShader::LinkProgram(slang::IComponentType* composed,

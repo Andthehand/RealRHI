@@ -133,7 +133,6 @@ namespace RealRHI {
 				return extent.depth > 1 && desc.baseArrayLayer == 0 && desc.arrayLayerCount == 1 && !attachmentUsage;
 
 			default:
-				// Only 2D, 2D array and 3D views are supported curerntly.
 				return false;
 		}
 	}

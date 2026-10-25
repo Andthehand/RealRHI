@@ -1,6 +1,5 @@
 #pragma once
 #include "BufferDesc.h"
-#include "DescriptorsDesc.h"
 #include "PipelineDesc.h"
 #include "RenderingInfo.h"
 #include "Shader.h"
@@ -13,36 +12,6 @@
 #include <vma/vk_mem_alloc.h>
 
 namespace RealRHI::Utils {
-	// Maps a slang::BindingType directly to VkDescriptorType.
-	// PushConstant is intentionally omitted — only descriptor sets are supported.
-	inline VkDescriptorType SlangBindingTypeToVkDescriptorType(slang::BindingType bindingType) {
-		switch (bindingType) {
-			case slang::BindingType::Sampler:
-				return VK_DESCRIPTOR_TYPE_SAMPLER;
-			case slang::BindingType::Texture:
-				return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-			case slang::BindingType::CombinedTextureSampler:
-				return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-			case slang::BindingType::MutableTexture:
-				return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-			case slang::BindingType::TypedBuffer:
-				return VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
-			case slang::BindingType::MutableTypedBuffer:
-				return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
-			case slang::BindingType::RawBuffer:
-				return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			case slang::BindingType::MutableRawBuffer:
-				return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-			case slang::BindingType::ConstantBuffer:
-				return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-			case slang::BindingType::RayTracingAccelerationStructure:
-				return VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-			default:
-				assert(!"Unmapped slang::BindingType — update SlangBindingTypeToVkDescriptorType");
-				return VK_DESCRIPTOR_TYPE_MAX_ENUM;
-		}
-	}
-
 	constexpr VkShaderStageFlagBits SlangStageToVkShaderStage(SlangStage stage) {
 		switch (stage) {
 			case SLANG_STAGE_VERTEX:
@@ -553,56 +522,6 @@ namespace RealRHI::Utils {
 				return VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 			default:
 				return VK_IMAGE_LAYOUT_UNDEFINED;
-		}
-	}
-
-	constexpr VkAccessFlags2 TextureLayoutToVkAccessFlags(TextureLayout layout) {
-		switch (layout) {
-			case TextureLayout::Undefined:
-				return 0;
-			case TextureLayout::ColorAttachment:
-				return VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-			case TextureLayout::ShaderRead:
-				return VK_ACCESS_2_SHADER_READ_BIT;
-			case TextureLayout::TransferSrc:
-				return VK_ACCESS_2_TRANSFER_READ_BIT;
-			case TextureLayout::TransferDst:
-				return VK_ACCESS_2_TRANSFER_WRITE_BIT;
-			case TextureLayout::Present:
-				return VK_ACCESS_2_NONE;
-			case TextureLayout::General:
-				return VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
-			case TextureLayout::DepthStencilAttachment:
-				return VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-			case TextureLayout::DepthStencilReadOnly:
-				return VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT;
-			default:
-				return 0;
-		}
-	}
-
-	constexpr VkPipelineStageFlags2 TextureLayoutToVkPipelineStageFlags(TextureLayout layout) {
-		switch (layout) {
-			case TextureLayout::Undefined:
-				return 0;
-			case TextureLayout::ColorAttachment:
-				return VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-			case TextureLayout::ShaderRead:
-				return VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
-					VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-			case TextureLayout::TransferSrc:
-			case TextureLayout::TransferDst:
-				return VK_PIPELINE_STAGE_2_TRANSFER_BIT;
-			case TextureLayout::Present:
-				return VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
-			case TextureLayout::General:
-				return VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-			case TextureLayout::DepthStencilAttachment:
-				return VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
-			case TextureLayout::DepthStencilReadOnly:
-				return VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-			default:
-				return 0;
 		}
 	}
 
