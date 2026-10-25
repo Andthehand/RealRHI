@@ -49,7 +49,7 @@ namespace RealRHI {
 		void BindPipeline(Pipeline* pipeline) override;
 		void SetPushConstants(const void* data, uint32_t size, uint32_t offset = 0) override;
 		void DispatchCompute(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
-		void BindVertexBuffer(Buffer* vertexBuffer) override;
+		void BindVertexBuffer(Buffer* vertexBuffer, uint32_t binding = 0, uint64_t offset = 0) override;
 		void BindIndexBuffer(Buffer* indexBuffer) override;
 
 		void CopyBuffer(Buffer* source, Buffer* destination, const BufferCopyRegion& region) override;
@@ -137,6 +137,8 @@ namespace RealRHI {
 			const ResourceOperation& operation,
 			SubmissionToken submission,
 			std::span<const VkSemaphoreSubmitInfo> waits) const;
+		bool RecordVertexBuffers(const char* operation);
+
 		void RecordBufferUse(VulkanBuffer* buffer, uint64_t offset, uint64_t size, const char* operation);
 		void RecordTextureUse(VulkanTexture* texture,
 			TextureSubresourceRange subresources,
@@ -176,7 +178,8 @@ namespace RealRHI {
 		std::vector<ResourceOperation> m_ResourceOperations;
 		std::vector<VulkanTextureView*> m_ShaderViews;
 		std::vector<VulkanBuffer*> m_ShaderBuffers;
-		VulkanBuffer* m_VertexBuffer = nullptr;
+		std::unordered_map<uint32_t, VulkanBuffer*> m_VertexBuffers;
+		std::vector<uint32_t> m_ActiveVertexBindings;
 		VulkanBuffer* m_IndexBuffer = nullptr;
 		// Local layouts check recording consistency without predicting other queues' submissions.
 		LayoutMap m_RecordedLayouts;

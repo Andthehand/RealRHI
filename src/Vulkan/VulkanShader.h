@@ -4,9 +4,6 @@
 #include "ShaderDesc.h"
 #include "VulkanDevice.h"
 
-#include <filesystem>
-#include <vector>
-
 namespace RealRHI {
 	class VulkanShader : public Shader {
 	public:
@@ -15,48 +12,16 @@ namespace RealRHI {
 
 		static Result Create(const VulkanDevice* device, const ShaderDesc& desc, Ref<VulkanShader>& outShader);
 		Result Init(const ShaderDesc& desc);
-
-	protected:
-		friend class VulkanPipeline;
-
+		
+		const ShaderReflection& GetReflection() const override { return m_Reflection; }
 		VkShaderModule GetShaderModule() const { return m_ShaderModule; }
-		const std::vector<EntryPoint>& GetEntryPoints() const { return m_EntryPoints; }
-		const BufferLayout& GetBufferLayout() const { return m_BufferLayout; }
-
-	private:
-		Slang::ComPtr<slang::IModule> LoadModule(const ShaderDesc& desc, Slang::ComPtr<slang::IBlob>& diagnostics);
-
-		Slang::ComPtr<slang::IComponentType> ComposeProgram(slang::IModule* module,
-			Slang::ComPtr<slang::IBlob>& diagnostics);
-
-		BufferLayout ReflectLayout(slang::IComponentType* composedProgram,
-			std::vector<EntryPoint>& outEntryPoints,
-			Slang::ComPtr<slang::IBlob>& diagnostics);
-
-		uint32_t ReflectPushDataSize(slang::IComponentType* composedProgram,
-			Slang::ComPtr<slang::IBlob>& diagnostics);
-
-		Slang::ComPtr<slang::IComponentType> LinkProgram(slang::IComponentType* composed,
-			Slang::ComPtr<slang::IBlob>& diagnostics);
-
-		VkShaderModule CreateVkShaderModule(slang::IComponentType* linkedProgram);
-
-		std::vector<BufferAttribute> CalculateCumulativeOffset(slang::TypeLayoutReflection* typeReflection,
-			uint32_t* offset);
-
-		static bool InitializeSlang(const VulkanDevice* device);
-
-		bool CheckSlangDiagnostics(const Slang::ComPtr<slang::IBlob>& diagnostics, SlangResult result);
+		const std::vector<std::string>& GetExportedEntryPoints() const { return m_ExportedEntryPoints; }
 
 	private:
 		const VulkanDevice* m_Device = nullptr;
-		Slang::ComPtr<slang::IModule> m_SlangModule;
+
 		VkShaderModule m_ShaderModule = VK_NULL_HANDLE;
-
-		std::vector<EntryPoint> m_EntryPoints;
-		BufferLayout m_BufferLayout;
-
-		inline static Slang::ComPtr<slang::IGlobalSession> s_SlangGlobalSession;
-		inline static Slang::ComPtr<slang::ISession> s_SlangSession;
+		ShaderReflection m_Reflection;
+		std::vector<std::string> m_ExportedEntryPoints;
 	};
 }

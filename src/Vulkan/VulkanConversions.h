@@ -12,114 +12,56 @@
 #include <vma/vk_mem_alloc.h>
 
 namespace RealRHI::Utils {
-	constexpr VkShaderStageFlagBits SlangStageToVkShaderStage(SlangStage stage) {
+	constexpr VkShaderStageFlagBits ShaderStageToVkShaderStage(ShaderStage stage) {
 		switch (stage) {
-			case SLANG_STAGE_VERTEX:
+			case ShaderStage::Vertex:
 				return VK_SHADER_STAGE_VERTEX_BIT;
-			case SLANG_STAGE_HULL:
-				return VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
-			case SLANG_STAGE_DOMAIN:
-				return VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
-			case SLANG_STAGE_GEOMETRY:
-				return VK_SHADER_STAGE_GEOMETRY_BIT;
-			case SLANG_STAGE_FRAGMENT:
+			case ShaderStage::Fragment:
 				return VK_SHADER_STAGE_FRAGMENT_BIT;
-			case SLANG_STAGE_COMPUTE:
+			case ShaderStage::Compute:
 				return VK_SHADER_STAGE_COMPUTE_BIT;
-			case SLANG_STAGE_RAY_GENERATION:
-				return VK_SHADER_STAGE_RAYGEN_BIT_KHR;
-			case SLANG_STAGE_INTERSECTION:
-				return VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
-			case SLANG_STAGE_ANY_HIT:
-				return VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
-			case SLANG_STAGE_CLOSEST_HIT:
-				return VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
-			case SLANG_STAGE_MISS:
-				return VK_SHADER_STAGE_MISS_BIT_KHR;
-			case SLANG_STAGE_CALLABLE:
-				return VK_SHADER_STAGE_CALLABLE_BIT_KHR;
-			case SLANG_STAGE_MESH:
-				return VK_SHADER_STAGE_MESH_BIT_EXT;
-			case SLANG_STAGE_AMPLIFICATION:
-				return VK_SHADER_STAGE_TASK_BIT_EXT;
 			default:
 				return static_cast<VkShaderStageFlagBits>(0);
 		}
 	}
-
-	constexpr VkFormat ScalarTypeToVkFormat(ScalarType type) {
-		switch (type) {
-			case ScalarType::Int8:
-				return VK_FORMAT_R8_SINT;
-			case ScalarType::UInt8:
-				return VK_FORMAT_R8_UINT;
-			case ScalarType::Int16:
-				return VK_FORMAT_R16_SINT;
-			case ScalarType::UInt16:
-				return VK_FORMAT_R16_UINT;
-			case ScalarType::Int32:
-				return VK_FORMAT_R32_SINT;
-			case ScalarType::UInt32:
-				return VK_FORMAT_R32_UINT;
-			case ScalarType::Int64:
-				return VK_FORMAT_R64_SINT;
-			case ScalarType::UInt64:
-				return VK_FORMAT_R64_UINT;
-			case ScalarType::Float16:
-				return VK_FORMAT_R16_SFLOAT;
-			case ScalarType::Float32:
-				return VK_FORMAT_R32_SFLOAT;
-			case ScalarType::Float64:
-				return VK_FORMAT_R64_SFLOAT;
-			case ScalarType::Vec2:
-				return VK_FORMAT_R32G32_SFLOAT;
-			case ScalarType::Vec3:
-				return VK_FORMAT_R32G32B32_SFLOAT;
-			case ScalarType::Vec4:
-				return VK_FORMAT_R32G32B32A32_SFLOAT;
+	struct VertexFormatInfo {
+		VkFormat format = VK_FORMAT_UNDEFINED;
+		ShaderScalarType scalarType = ShaderScalarType::Float32;
+		uint32_t components = 0;
+		uint32_t size = 0;
+	};
+	constexpr VertexFormatInfo GetVertexFormatInfo(VertexFormat format) {
+		switch (format) {
+			case VertexFormat::Float:
+				return {VK_FORMAT_R32_SFLOAT, ShaderScalarType::Float32, 1, 4};
+			case VertexFormat::Float2:
+				return {VK_FORMAT_R32G32_SFLOAT, ShaderScalarType::Float32, 2, 8};
+			case VertexFormat::Float3:
+				return {VK_FORMAT_R32G32B32_SFLOAT, ShaderScalarType::Float32, 3, 12};
+			case VertexFormat::Float4:
+				return {VK_FORMAT_R32G32B32A32_SFLOAT, ShaderScalarType::Float32, 4, 16};
+			case VertexFormat::Int:
+				return {VK_FORMAT_R32_SINT, ShaderScalarType::Int32, 1, 4};
+			case VertexFormat::Int2:
+				return {VK_FORMAT_R32G32_SINT, ShaderScalarType::Int32, 2, 8};
+			case VertexFormat::Int3:
+				return {VK_FORMAT_R32G32B32_SINT, ShaderScalarType::Int32, 3, 12};
+			case VertexFormat::Int4:
+				return {VK_FORMAT_R32G32B32A32_SINT, ShaderScalarType::Int32, 4, 16};
+			case VertexFormat::UInt:
+				return {VK_FORMAT_R32_UINT, ShaderScalarType::UInt32, 1, 4};
+			case VertexFormat::UInt2:
+				return {VK_FORMAT_R32G32_UINT, ShaderScalarType::UInt32, 2, 8};
+			case VertexFormat::UInt3:
+				return {VK_FORMAT_R32G32B32_UINT, ShaderScalarType::UInt32, 3, 12};
+			case VertexFormat::UInt4:
+				return {VK_FORMAT_R32G32B32A32_UINT, ShaderScalarType::UInt32, 4, 16};
+			case VertexFormat::UNorm8x4:
+				return {VK_FORMAT_R8G8B8A8_UNORM, ShaderScalarType::Float32, 4, 4};
+			case VertexFormat::SNorm8x4:
+				return {VK_FORMAT_R8G8B8A8_SNORM, ShaderScalarType::Float32, 4, 4};
 			default:
-				return VK_FORMAT_UNDEFINED;
-		}
-	}
-
-	constexpr uint8_t ScalarTypeToSizeOf(ScalarType type) {
-		switch (type) {
-			case ScalarType::Int8:
-			case ScalarType::UInt8:
-				return 1;
-			case ScalarType::Int16:
-			case ScalarType::UInt16:
-			case ScalarType::Float16:
-				return 2;
-			case ScalarType::Int32:
-			case ScalarType::UInt32:
-			case ScalarType::Float32:
-			case ScalarType::Vec2:
-			case ScalarType::Vec3:
-			case ScalarType::Vec4:
-				return 4;
-			case ScalarType::Int64:
-			case ScalarType::UInt64:
-			case ScalarType::Float64:
-				return 8;
-			default:
-				return 0;
-		}
-	}
-
-	constexpr ScalarType SlangVectorToRealRHIScalarType(slang::TypeReflection::ScalarType type, uint8_t elementCount) {
-		switch (type) {
-			case slang::TypeReflection::ScalarType::Float32:
-				switch (elementCount) {
-					case 2:
-						return ScalarType::Vec2;
-					case 3:
-						return ScalarType::Vec3;
-					case 4:
-						return ScalarType::Vec4;
-				}
-			default:
-				return ScalarType::None;
+				return {};
 		}
 	}
 

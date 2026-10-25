@@ -112,14 +112,17 @@ namespace RealRHI::Examples {
 
 	Result SceneRenderer::CreatePipelines(TextureFormat outputFormat) {
 		Ref<Shader> sceneShader;
-		Result result =
-			m_Device->CreateShader({.moduleName = "scene", .debugName = "Scene geometry shader"}, sceneShader);
+		Result result = m_Device->CreateShader({.moduleName = "scene",
+
+												   .debugName = "Scene geometry shader"},
+			sceneShader);
 		if (result != Result::Success) {
 			return result;
 		}
 
 		PipelineDesc sceneDesc{
 			.shader = sceneShader.Raw(),
+
 			.rasterState = {.cullMode = CullMode::None},
 			.renderTargetFormats =
 				{

@@ -4,6 +4,9 @@
 #include "VulkanCpuTimer.h"
 #include "VulkanShader.h"
 
+#include <algorithm>
+#include <unordered_set>
+
 namespace RealRHI {
 	VulkanPipeline::VulkanPipeline(const VulkanDevice* device)
 		: m_Device(device) { }
@@ -48,8 +51,8 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
-		const auto& entryPoints = shader->GetEntryPoints();
-		if (entryPoints.size() != 1 || entryPoints[0].stage != SLANG_STAGE_COMPUTE) {
+		const auto& entryPoints = shader->GetReflection().entryPoints;
+		if (entryPoints.size() != 1 || entryPoints[0].stage != ShaderStage::Compute) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
 				"Compute pipeline requires exactly one compute shader entry point.");
@@ -60,8 +63,7 @@ namespace RealRHI {
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
 			.stage = VK_SHADER_STAGE_COMPUTE_BIT,
 			.module = shader->GetShaderModule(),
-			// Slang's linked SPIR-V module exports the compute entry point as "main".
-			.pName = "main",
+			.pName = shader->GetExportedEntryPoints()[0].c_str(),
 		};
 		const VkPipelineCreateFlags2CreateInfo flags{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO,
@@ -88,7 +90,94 @@ namespace RealRHI {
 			return nameResult;
 		}
 		timer.Finish(VulkanProfiledOperation::ComputePipeline);
-		
+
+		return Result::Success;
+	}
+
+	Result VulkanPipeline::BuildVertexInputDescriptions(const VertexLayout& layout,
+		const Shader& shader,
+		std::vector<VkVertexInputBindingDescription>& bindingDescriptions,
+		std::vector<VkVertexInputAttributeDescription>& attributeDescriptions) const {
+		auto reject = [&](const std::string& reason) {
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, ("CreateGraphicsPipeline: " + reason).c_str());
+			return Result::InvalidParameter;
+		};
+
+		const auto& entryPoints = shader.GetReflection().entryPoints;
+		if (entryPoints.empty() || std::any_of(entryPoints.begin(), entryPoints.end(), [](const auto& entry) {
+				return entry.stage == ShaderStage::Compute;
+			})) {
+			return reject("Requires a graphics shader program.");
+		}
+
+		VkPhysicalDeviceProperties properties{};
+		vkGetPhysicalDeviceProperties(m_Device->GetPhysicalDevice(), &properties);
+
+		const auto& limits = properties.limits;
+		if (layout.bindings.size() > limits.maxVertexInputBindings ||
+			layout.attributes.size() > limits.maxVertexInputAttributes) {
+			return reject("Vertex layout exceeds the device binding or attribute limits.");
+		}
+
+		std::unordered_set<uint32_t> bindings;
+		for (const auto& binding : layout.bindings) {
+			if (!bindings.insert(binding.binding).second || binding.binding >= limits.maxVertexInputBindings ||
+				binding.stride == 0 || binding.stride > limits.maxVertexInputBindingStride ||
+				(binding.inputRate != VertexInputRate::Vertex && binding.inputRate != VertexInputRate::Instance)) {
+				return reject(
+					"Vertex bindings require unique valid indices, nonzero supported strides, and valid input rates.");
+			}
+
+			VkVertexInputRate rate = VK_VERTEX_INPUT_RATE_VERTEX;
+			if (binding.inputRate == VertexInputRate::Instance) {
+				rate = VK_VERTEX_INPUT_RATE_INSTANCE;
+			}
+
+			bindingDescriptions.push_back({binding.binding, binding.stride, rate});
+		}
+
+		std::unordered_set<uint32_t> locations;
+		for (const auto& attribute : layout.attributes) {
+			const auto format = Utils::GetVertexFormatInfo(attribute.format);
+			const auto binding = std::find_if(layout.bindings.begin(), layout.bindings.end(), [&](const auto& value) {
+				return value.binding == attribute.binding;
+			});
+
+			if (!locations.insert(attribute.location).second || attribute.location >= limits.maxVertexInputAttributes ||
+				binding == layout.bindings.end() || format.format == VK_FORMAT_UNDEFINED ||
+				attribute.offset > limits.maxVertexInputAttributeOffset || attribute.offset > binding->stride ||
+				format.size > binding->stride - attribute.offset) {
+				return reject("Vertex attributes require unique valid locations, existing bindings, and valid formats "
+							  "fitting their strides.");
+			}
+
+			VkFormatProperties support{};
+			vkGetPhysicalDeviceFormatProperties(m_Device->GetPhysicalDevice(), format.format, &support);
+			if (!(support.bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT)) {
+				return reject("Vertex attribute format is unsupported by this device.");
+			}
+
+			attributeDescriptions.push_back({attribute.location, attribute.binding, format.format, attribute.offset});
+		}
+
+		for (const auto& input : shader.GetReflection().vertexInputs) {
+			const auto attribute =
+				std::find_if(layout.attributes.begin(), layout.attributes.end(), [&](const auto& value) {
+					return value.location == input.location;
+				});
+
+			if (attribute == layout.attributes.end()) {
+				return reject(
+					"Missing vertex attribute for " + input.name + " at location " + std::to_string(input.location));
+			}
+
+			const auto format = Utils::GetVertexFormatInfo(attribute->format);
+			if (format.scalarType != input.scalarType || format.components != input.componentCount) {
+				return reject("Vertex format does not match shader input " + input.name);
+			}
+		}
+
 		return Result::Success;
 	}
 
@@ -104,41 +193,39 @@ namespace RealRHI {
 		}
 		VkShaderModule shaderModule = shader->GetShaderModule();
 
-		const std::vector<EntryPoint>& entryPoints = shader->GetEntryPoints();
+		const std::vector<ShaderEntryPoint>& entryPoints = shader->GetReflection().entryPoints;
 		std::vector<VkPipelineShaderStageCreateInfo> shaderStages(entryPoints.size());
 		for (uint32_t i = 0; i < entryPoints.size(); i++) {
 			shaderStages[i] = VkPipelineShaderStageCreateInfo{
 				.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-				.stage = Utils::SlangStageToVkShaderStage(entryPoints[i].stage),
+				.stage = Utils::ShaderStageToVkShaderStage(entryPoints[i].stage),
 				.module = shaderModule,
-				.pName = entryPoints[i].entryPointName.c_str(),
+				.pName = shader->GetExportedEntryPoints()[i].c_str(),
 			};
 		}
 
-		const BufferLayout& vertexLayout = shader->GetBufferLayout();
-		VkVertexInputBindingDescription bindingDescription{
-			.binding = 0,
-			.stride = vertexLayout.stride,
-			.inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
-		};
-
-		const std::vector<BufferAttribute>& vertexAttributes = vertexLayout.attributes;
-		std::vector<VkVertexInputAttributeDescription> attributeDescriptions(vertexAttributes.size());
-		for (uint32_t i = 0; i < vertexAttributes.size(); i++) {
-			const BufferAttribute& attr = vertexAttributes[i];
-
-			attributeDescriptions[i] = VkVertexInputAttributeDescription{
-				.location = i,
-				.binding = 0,
-				.format = Utils::ScalarTypeToVkFormat(attr.type),
-				.offset = attr.offset,
-			};
+		std::vector<VkVertexInputBindingDescription> bindingDescriptions;
+		std::vector<VkVertexInputAttributeDescription> attributeDescriptions;
+		const VertexLayout* vertexLayout = &desc.vertexLayout;
+		if (vertexLayout->bindings.empty() && vertexLayout->attributes.empty()) {
+			vertexLayout = &shader->GetReflection().vertexLayout;
 		}
 
+		const Result layoutResult =
+			BuildVertexInputDescriptions(*vertexLayout, *shader, bindingDescriptions, attributeDescriptions);
+		if (layoutResult != Result::Success) {
+			return layoutResult;
+		}
+		for (const auto& attribute : vertexLayout->attributes) {
+			if (std::find(m_VertexBindings.begin(), m_VertexBindings.end(), attribute.binding) ==
+				m_VertexBindings.end()) {
+				m_VertexBindings.push_back(attribute.binding);
+			}
+		}
 		VkPipelineVertexInputStateCreateInfo vertexInputInfo{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-			.vertexBindingDescriptionCount = vertexAttributes.empty() ? 0u : 1u,
-			.pVertexBindingDescriptions = &bindingDescription,
+			.vertexBindingDescriptionCount = static_cast<uint32_t>(bindingDescriptions.size()),
+			.pVertexBindingDescriptions = bindingDescriptions.data(),
 			.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size()),
 			.pVertexAttributeDescriptions = attributeDescriptions.data(),
 		};
@@ -267,7 +354,7 @@ namespace RealRHI {
 			return nameResult;
 		}
 		timer.Finish(VulkanProfiledOperation::GraphicsPipeline);
-		
+
 		return Result::Success;
 	}
 }

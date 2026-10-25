@@ -88,6 +88,7 @@ namespace RealRHI {
 			m_State = CommandListState::Recording;
 			m_ComputePipelineBound = false;
 			m_GraphicsPipelineBound = false;
+			m_ActiveVertexBindings.clear();
 			m_Rendering = false;
 		}
 
@@ -175,7 +176,7 @@ namespace RealRHI {
 		m_ResourceOperations.clear();
 		m_ShaderViews.clear();
 		m_ShaderBuffers.clear();
-		m_VertexBuffer = nullptr;
+		m_VertexBuffers.clear();
 		m_IndexBuffer = nullptr;
 		m_TimestampNames.clear();
 		m_TimestampResults.clear();
@@ -483,6 +484,7 @@ namespace RealRHI {
 		}
 		else {
 			m_GraphicsPipelineBound = true;
+			m_ActiveVertexBindings = vulkanPipeline->GetVertexBindings();
 		}
 	}
 
@@ -522,20 +524,27 @@ namespace RealRHI {
 		vkCmdPushDataEXT(m_CommandBuffer, &pushDataInfo);
 	}
 
-	void VulkanCommandList::BindVertexBuffer(Buffer* vertexBuffer) {
+	void VulkanCommandList::BindVertexBuffer(Buffer* vertexBuffer, uint32_t binding, uint64_t offset) {
 		auto* buffer = static_cast<VulkanBuffer*>(vertexBuffer);
 		if (GetState() != CommandListState::Recording || buffer == nullptr ||
-			!Any(buffer->GetUsage() & BufferUsage::Vertex)) {
+			!Any(buffer->GetUsage() & BufferUsage::Vertex) || offset >= buffer->GetSize()) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
-				"BindVertexBuffer: Requires recording and a Vulkan buffer with Vertex usage.");
+				"BindVertexBuffer: Requires recording, Vertex usage, and an offset within the buffer.");
+			return;
+		}
+		VkPhysicalDeviceProperties properties{};
+		vkGetPhysicalDeviceProperties(m_Device->GetPhysicalDevice(), &properties);
+		if (binding >= properties.limits.maxVertexInputBindings) {
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "BindVertexBuffer: Binding exceeds device limit.");
 			return;
 		}
 		RetainResource(vertexBuffer);
-		m_VertexBuffer = buffer;
+		m_VertexBuffers[binding] = buffer;
 		VkBuffer vertexBuffers[] = {buffer->GetBuffer()};
-		VkDeviceSize offsets[] = {0};
-		vkCmdBindVertexBuffers(m_CommandBuffer, 0, 1, vertexBuffers, offsets);
+		VkDeviceSize offsets[] = {offset};
+		vkCmdBindVertexBuffers(m_CommandBuffer, binding, 1, vertexBuffers, offsets);
 	}
 
 	void VulkanCommandList::BindIndexBuffer(Buffer* indexBuffer) {
@@ -550,6 +559,22 @@ namespace RealRHI {
 		RetainResource(indexBuffer);
 		m_IndexBuffer = buffer;
 		vkCmdBindIndexBuffer(m_CommandBuffer, buffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
+	}
+
+	bool VulkanCommandList::RecordVertexBuffers(const char* operation) {
+		for (uint32_t binding : m_ActiveVertexBindings) {
+			if (!m_VertexBuffers.contains(binding)) {
+				m_Device->SendDebugMessage(DebugSeverity::Error,
+					DebugMessageType::General,
+					(std::string(operation) + ": Bind a vertex buffer at binding " + std::to_string(binding)).c_str());
+				return false;
+			}
+		}
+		for (uint32_t binding : m_ActiveVertexBindings) {
+			auto* buffer = m_VertexBuffers.at(binding);
+			RecordBufferUse(buffer, 0, buffer->GetSize(), operation);
+		}
+		return true;
 	}
 
 	void VulkanCommandList::RecordBufferUse(VulkanBuffer* buffer,
@@ -596,8 +621,8 @@ namespace RealRHI {
 			return;
 		}
 		RecordShaderResources("Draw");
-		if (m_VertexBuffer) {
-			RecordBufferUse(m_VertexBuffer, 0, m_VertexBuffer->GetSize(), "Draw vertex buffer");
+		if (!RecordVertexBuffers("Draw vertex buffer")) {
+			return;
 		}
 		vkCmdDraw(m_CommandBuffer, vertexCount, instanceCount, firstVertex, firstInstance);
 	}
@@ -623,8 +648,8 @@ namespace RealRHI {
 		}
 
 		RecordShaderResources("DrawIndexed");
-		if (m_VertexBuffer) {
-			RecordBufferUse(m_VertexBuffer, 0, m_VertexBuffer->GetSize(), "DrawIndexed vertex buffer");
+		if (!RecordVertexBuffers("DrawIndexed vertex buffer")) {
+			return;
 		}
 		RecordBufferUse(m_IndexBuffer, 0, m_IndexBuffer->GetSize(), "DrawIndexed index buffer");
 		vkCmdDrawIndexed(m_CommandBuffer, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);

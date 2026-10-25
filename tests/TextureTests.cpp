@@ -339,7 +339,9 @@ namespace {
 
 		Ref<Shader> shader;
 		Ref<Pipeline> pipeline;
-		Expect(device.CreateShader({.moduleName = "ownership_texture"}, shader) == Result::Success,
+		Expect(device.CreateShader(
+				   {.moduleName = "ownership_texture", .entryPoints = {{"computeMain", RealRHI::ShaderStage::Compute}}},
+				   shader) == Result::Success,
 			"Compile storage shader");
 		Expect(device.CreateComputePipeline({.shader = shader.Raw()}, pipeline) == Result::Success,
 			"Create storage pipeline");
@@ -439,7 +441,9 @@ namespace {
 
 		Ref<Shader> shader;
 		Ref<Pipeline> pipeline;
-		Expect(device.CreateShader({.moduleName = "texture_sampling"}, shader) == Result::Success,
+		Expect(device.CreateShader(
+				   {.moduleName = "texture_sampling", .entryPoints = {{"computeMain", RealRHI::ShaderStage::Compute}}},
+				   shader) == Result::Success,
 			"Compile sampling shader");
 		Expect(device.CreateComputePipeline({.shader = shader.Raw()}, pipeline) == Result::Success,
 			"Create sampling pipeline");

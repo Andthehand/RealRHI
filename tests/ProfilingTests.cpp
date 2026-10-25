@@ -274,15 +274,24 @@ namespace {
 			Ref<Shader> computeShader;
 			Ref<Pipeline> graphicsPipeline;
 			Ref<Pipeline> computePipeline;
-			Expect(device.CreateShader({.moduleName = "draw", .debugName = "Named graphics shader"}, graphicsShader) ==
-					Result::Success,
+			Expect(device.CreateShader({.moduleName = "draw",
+										   .entryPoints =
+											   {{"vertexMain", RealRHI::ShaderStage::Vertex},
+												   {"fragmentMain", RealRHI::ShaderStage::Fragment}},
+										   .debugName = "Named graphics shader"},
+					   graphicsShader) == Result::Success,
 				"Name a graphics shader module");
-			Expect(device.CreateShader({.moduleName = "ownership_compute", .debugName = "Named compute shader"},
+			Expect(device.CreateShader({.moduleName = "ownership_compute",
+										   .entryPoints = {{"computeMain", RealRHI::ShaderStage::Compute}},
+										   .debugName = "Named compute shader"},
 					   computeShader) == Result::Success,
 				"Name a compute shader module");
 			Expect(device.CreateGraphicsPipeline(
 					   {
 						   .shader = graphicsShader.Raw(),
+						   .vertexLayout =
+							   {.bindings = {{.stride = sizeof(float) * 2}},
+								   .attributes = {{.format = RealRHI::VertexFormat::Float2}}},
 						   .depthState = {.depthTestEnable = false, .depthWriteEnable = false},
 						   .renderTargetFormats = {.colorFormats = {TextureFormat::RGBA8_UNorm}},
 						   .debugName = "Named graphics pipeline",
@@ -374,17 +383,26 @@ namespace {
 			Ref<Shader> computeShader;
 			Ref<Pipeline> graphics;
 			Ref<Pipeline> compute;
-			Expect(device.CreateShader({.moduleName = "draw"}, graphicsShader) == Result::Success,
+			Expect(device.CreateShader({.moduleName = "draw",
+										   .entryPoints =
+											   {{"vertexMain", RealRHI::ShaderStage::Vertex},
+												   {"fragmentMain", RealRHI::ShaderStage::Fragment}}},
+					   graphicsShader) == Result::Success,
 				"Create graphics shader");
 			Expect(device.CreateGraphicsPipeline(
 					   {
 						   .shader = graphicsShader.Raw(),
+						   .vertexLayout =
+							   {.bindings = {{.stride = sizeof(float) * 2}},
+								   .attributes = {{.format = RealRHI::VertexFormat::Float2}}},
 						   .depthState = {.depthTestEnable = false, .depthWriteEnable = false},
 						   .renderTargetFormats = {.colorFormats = {TextureFormat::RGBA8_UNorm}},
 					   },
 					   graphics) == Result::Success,
 				"Create tracked graphics pipeline");
-			Expect(device.CreateShader({.moduleName = "ownership_compute"}, computeShader) == Result::Success,
+			Expect(device.CreateShader({.moduleName = "ownership_compute",
+										   .entryPoints = {{"computeMain", RealRHI::ShaderStage::Compute}}},
+					   computeShader) == Result::Success,
 				"Create compute shader");
 			Expect(device.CreateComputePipeline({.shader = computeShader.Raw()}, compute) == Result::Success,
 				"Create tracked compute pipeline");

@@ -66,6 +66,8 @@ namespace RealRHI {
 			m_DebugCallback = desc.debugCallback;
 		}
 
+		m_ShaderCompiler = std::make_unique<SlangShaderCompiler>(m_ShaderDirectory, m_EnableDebug, m_DebugCallback);
+
 		if (!SDL_Init(SDL_INIT_VIDEO)) {
 			SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to init SDL video.");
 			return Result::Failed;

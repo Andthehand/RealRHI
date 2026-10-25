@@ -18,7 +18,7 @@ struct VSOutput {
 };
 
 [shader("vertex")]
-VSOutput main(VSInput input) {
+VSOutput vertexMain(VSInput input) {
 	VSOutput output;
 
 	output.pos = float4(input.pos, 0.0, 1.0);
@@ -28,6 +28,6 @@ VSOutput main(VSInput input) {
 }
 
 [shader("fragment")]
-float4 main(VSOutput input) : SV_Target {
+float4 fragmentMain(VSOutput input) : SV_Target {
 	return parameters1.myTexture.Sample(input.texCoord);
 }

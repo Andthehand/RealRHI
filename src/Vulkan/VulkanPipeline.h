@@ -24,10 +24,18 @@ namespace RealRHI {
 
 	protected:
 		friend class VulkanCommandList;
+		const std::vector<uint32_t>& GetVertexBindings() const { return m_VertexBindings; }
 		VkPipeline GetPipeline() const { return m_Pipeline; }
 		VkPipelineBindPoint GetBindPoint() const { return m_BindPoint; }
 
 	private:
+		Result BuildVertexInputDescriptions(const VertexLayout& layout,
+			const Shader& shader,
+			std::vector<VkVertexInputBindingDescription>& bindings,
+			std::vector<VkVertexInputAttributeDescription>& attributes) const;
+
+	private:
+		std::vector<uint32_t> m_VertexBindings;
 		const VulkanDevice* m_Device = nullptr;
 
 		VkPipeline m_Pipeline = VK_NULL_HANDLE;

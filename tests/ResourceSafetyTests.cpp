@@ -13,7 +13,7 @@
 #include <limits>
 #include <thread>
 
-static_assert(RealRHI::Utils::ScalarTypeToVkFormat(RealRHI::Float32) == VK_FORMAT_R32_SFLOAT);
+static_assert(RealRHI::Utils::GetVertexFormatInfo(RealRHI::VertexFormat::Float).format == VK_FORMAT_R32_SFLOAT);
 
 namespace {
 	VKAPI_ATTR VkResult VKAPI_CALL FailSemaphoreCreation(VkDevice,
@@ -279,10 +279,21 @@ int main() {
 
 	{
 		Ref<Shader> shader;
-		Expect(device->CreateShader({.moduleName = "shader"}, shader) == Result::Success, "Compile graphics shader");
+		Expect(device->CreateShader({.moduleName = "shader",
+										.entryPoints =
+											{{"vertexMain", RealRHI::ShaderStage::Vertex},
+												{"fragmentMain", RealRHI::ShaderStage::Fragment}}},
+				   shader) == Result::Success,
+			"Compile graphics shader");
 		Expect(g_ShaderErrors == 0, "Successful reflection is not logged as a shader error");
 		PipelineDesc pipelineDesc{};
 		pipelineDesc.shader = shader.Raw();
+		pipelineDesc.vertexLayout = {
+			.bindings = {{.stride = 20}},
+			.attributes = {
+				{.format = VertexFormat::Float2}, {.location = 1, .format = VertexFormat::Float3, .offset = 8}
+			}
+		};
 		pipelineDesc.depthState.depthTestEnable = false;
 		pipelineDesc.depthState.depthWriteEnable = false;
 		pipelineDesc.renderTargetFormats.colorFormats = {TextureFormat::RGBA8_UNorm, TextureFormat::RGBA8_UNorm};

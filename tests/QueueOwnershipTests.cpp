@@ -84,7 +84,10 @@ namespace {
 	Ref<Pipeline> MakeCompute(Device& device, const char* module) {
 		Ref<Shader> shader;
 		Ref<Pipeline> pipeline;
-		Expect(device.CreateShader({.moduleName = module}, shader) == Result::Success, "Compile compute shader");
+		Expect(
+			device.CreateShader({.moduleName = module, .entryPoints = {{"computeMain", RealRHI::ShaderStage::Compute}}},
+				shader) == Result::Success,
+			"Compile compute shader");
 		Expect(device.CreateComputePipeline({.shader = shader.Raw()}, pipeline) == Result::Success,
 			"Create compute pipeline");
 		return pipeline;
@@ -137,13 +140,14 @@ namespace {
 		ResourceState before,
 		ResourceState after) {
 		BarrierDesc barriers;
-		barriers.buffers.push_back({.buffer = buffer,
-			.before = before,
-			.after = after,
-			.offset = offset,
-			.size = size,
-			.sourceQueue = source,
-			.destinationQueue = destination});
+		barriers.buffers.push_back(
+			{.buffer = buffer,
+				.before = before,
+				.after = after,
+				.offset = offset,
+				.size = size,
+				.sourceQueue = source,
+				.destinationQueue = destination});
 		list.Barrier(barriers);
 	}
 
@@ -157,21 +161,24 @@ namespace {
 		std::optional<QueueType> destination = {},
 		TextureSubresourceRange range = {}) {
 		BarrierDesc barriers;
-		barriers.textures.push_back({.texture = texture,
-			.before = before,
-			.after = after,
-			.oldLayout = oldLayout,
-			.newLayout = newLayout,
-			.subresources = range,
-			.sourceQueue = source,
-			.destinationQueue = destination});
+		barriers.textures.push_back(
+			{.texture = texture,
+				.before = before,
+				.after = after,
+				.oldLayout = oldLayout,
+				.newLayout = newLayout,
+				.subresources = range,
+				.sourceQueue = source,
+				.destinationQueue = destination});
 		list.Barrier(barriers);
 	}
 
 	constexpr ResourceState transferWrite{PipelineStage::Transfer, ResourceAccess::TransferWrite};
 	constexpr ResourceState transferRead{PipelineStage::Transfer, ResourceAccess::TransferRead};
-	constexpr ResourceState computeReadWrite{PipelineStage::ComputeShader,
-		ResourceAccess::ShaderRead | ResourceAccess::ShaderWrite};
+	constexpr ResourceState computeReadWrite{
+		PipelineStage::ComputeShader,
+		ResourceAccess::ShaderRead | ResourceAccess::ShaderWrite
+	};
 	constexpr ResourceState fragmentRead{PipelineStage::FragmentShader, ResourceAccess::ShaderRead};
 
 	bool DifferentFamilies(Device& device, QueueType first, QueueType second) {
@@ -200,10 +207,17 @@ namespace {
 		auto computePipeline = MakeCompute(device, "ownership_compute");
 		Ref<Shader> graphicsShader;
 		Ref<Pipeline> graphicsPipeline;
-		Expect(device.CreateShader({.moduleName = "ownership_graphics"}, graphicsShader) == Result::Success,
+		Expect(device.CreateShader({.moduleName = "ownership_graphics",
+									   .entryPoints =
+										   {{"vertexMain", RealRHI::ShaderStage::Vertex},
+											   {"fragmentMain", RealRHI::ShaderStage::Fragment}}},
+				   graphicsShader) == Result::Success,
 			"Compile graphics shader");
 		PipelineDesc pipelineDesc{};
 		pipelineDesc.shader = graphicsShader.Raw();
+		pipelineDesc.vertexLayout = {
+			.bindings = {{.stride = sizeof(float) * 2}}, .attributes = {{.format = RealRHI::VertexFormat::Float2}}
+		};
 		pipelineDesc.rasterState.cullMode = CullMode::None;
 		pipelineDesc.depthState.depthTestEnable = false;
 		pipelineDesc.depthState.depthWriteEnable = false;

@@ -1,6 +1,7 @@
 #pragma once
 #include "Shader.h"
 #include "TextureFormat.h"
+#include "VertexLayout.h"
 
 #include <cstdint>
 #include <memory>
@@ -57,6 +58,8 @@ namespace RealRHI {
 
 	struct PipelineDesc {
 		Shader* shader = nullptr;
+		// Empty uses the shader-reflected, tightly packed layout on binding zero.
+		VertexLayout vertexLayout;
 
 		RasterState rasterState;
 		DepthState depthState;

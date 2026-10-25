@@ -1,52 +1,51 @@
 #pragma once
 #include "RefCounted.h"
+#include "VertexLayout.h"
 
-#include <slang/slang-com-ptr.h>
-#include <slang/slang.h>
-
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 namespace RealRHI {
-	struct EntryPoint {
-		std::string entryPointName;
-		SlangStage stage;
+	enum class ShaderStage {
+		Vertex,
+		Fragment,
+		Compute
+	};
+	enum class ShaderScalarType {
+		Float16,
+		Float32,
+		Float64,
+		Int32,
+		UInt32
 	};
 
-	enum ScalarType {
-		None = SLANG_SCALAR_TYPE_NONE,
-		Void = SLANG_SCALAR_TYPE_VOID,
-		Bool = SLANG_SCALAR_TYPE_BOOL,
-		Int32 = SLANG_SCALAR_TYPE_INT32,
-		UInt32 = SLANG_SCALAR_TYPE_UINT32,
-		Int64 = SLANG_SCALAR_TYPE_INT64,
-		UInt64 = SLANG_SCALAR_TYPE_UINT64,
-		Float16 = SLANG_SCALAR_TYPE_FLOAT16,
-		Float32 = SLANG_SCALAR_TYPE_FLOAT32,
-		Float64 = SLANG_SCALAR_TYPE_FLOAT64,
-		Int8 = SLANG_SCALAR_TYPE_INT8,
-		UInt8 = SLANG_SCALAR_TYPE_UINT8,
-		Int16 = SLANG_SCALAR_TYPE_INT16,
-		UInt16 = SLANG_SCALAR_TYPE_UINT16,
-
-		Vec2,
-		Vec3,
-		Vec4
+	struct ShaderVertexInput {
+		std::string name;
+		uint32_t location = 0;
+		ShaderScalarType scalarType = ShaderScalarType::Float32;
+		uint32_t componentCount = 1;
 	};
-
-	struct BufferAttribute {
-		ScalarType type;
-		uint32_t offset;
+	struct ShaderEntryPoint {
+		std::string name;
+		ShaderStage stage = ShaderStage::Vertex;
+		std::array<uint32_t, 3> computeGroupSize{};
 	};
-
-	struct BufferLayout {
-		std::vector<BufferAttribute> attributes;
-		uint32_t stride = 0;
+	// The current Vulkan contract permits one push block rooted at byte zero.
+	struct ShaderPushData {
+		uint32_t offset = 0;
+		uint32_t size = 0;
 	};
-
+	struct ShaderReflection {
+		std::vector<ShaderEntryPoint> entryPoints;
+		std::vector<ShaderVertexInput> vertexInputs;
+		VertexLayout vertexLayout;
+		ShaderPushData pushData;
+	};
 	class Shader : public RefCounted {
 	public:
 		virtual ~Shader() = default;
+		virtual const ShaderReflection& GetReflection() const = 0;
 	};
 }

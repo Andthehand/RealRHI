@@ -99,6 +99,7 @@ namespace {
 		void CreateGraphicsPipeline() {
 			const RealRHI::ShaderDesc shaderDesc{
 				.moduleName = "shader",
+
 			};
 
 			RealRHI::Ref<RealRHI::Shader> shader;
@@ -110,6 +111,7 @@ namespace {
 
 			RealRHI::PipelineDesc desc{
 				.shader = shader.Raw(),
+
 				.rasterState =
 					{
 						.cullMode = RealRHI::CullMode::Back,

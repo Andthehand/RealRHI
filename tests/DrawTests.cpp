@@ -47,9 +47,15 @@ namespace {
 
 	void TestDraws(Device& device) {
 		Ref<Shader> shader;
-		Expect(device.CreateShader({.moduleName = "draw"}, shader) == Result::Success, "Compile draw test shader");
+		Expect(device.CreateShader({.moduleName = "draw",
+									   .entryPoints =
+										   {{"vertexMain", RealRHI::ShaderStage::Vertex},
+											   {"fragmentMain", RealRHI::ShaderStage::Fragment}}},
+				   shader) == Result::Success,
+			"Compile draw test shader");
 		PipelineDesc pipelineDesc{
 			.shader = shader.Raw(),
+
 			.rasterState = {.cullMode = CullMode::None},
 			.renderTargetFormats = {
 				.colorFormats = {TextureFormat::RGBA8_UNorm},
@@ -67,7 +73,11 @@ namespace {
 
 		Ref<Shader> instanceShader;
 		Ref<Pipeline> instances;
-		Expect(device.CreateShader({.moduleName = "instances"}, instanceShader) == Result::Success,
+		Expect(device.CreateShader({.moduleName = "instances",
+									   .entryPoints =
+										   {{"vertexMain", RealRHI::ShaderStage::Vertex},
+											   {"fragmentMain", RealRHI::ShaderStage::Fragment}}},
+				   instanceShader) == Result::Success,
 			"Compile procedural instance shader");
 		pipelineDesc.shader = instanceShader.Raw();
 		pipelineDesc.depthState.depthWriteEnable = true;

@@ -16,7 +16,7 @@ struct VSOutput {
 
 [require(spvDescriptorHeapEXT)]
 [shader("vertex")]
-VSOutput main(VSInput input) {
+VSOutput vertexMain(VSInput input) {
 	VSOutput output;
 	output.pos = float4(input.pos, 0.0, 1.0);
 	output.uv = input.uv;
@@ -27,7 +27,7 @@ VSOutput main(VSInput input) {
 
 [require(spvDescriptorHeapEXT)]
 [shader("fragment")]
-float4 main(VSOutput input) : SV_Target {
+float4 fragmentMain(VSOutput input) : SV_Target {
 	Texture2D texture = Texture2D.Handle(uint2(input.textureIndex, 0));
 	SamplerState sampler = SamplerState.Handle(uint2(input.samplerIndex, 0));
 	return texture.Sample(sampler, input.uv);
