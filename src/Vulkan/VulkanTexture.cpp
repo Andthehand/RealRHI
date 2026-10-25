@@ -57,6 +57,14 @@ namespace RealRHI {
 			return Result::InvalidParameter;
 		}
 
+		if (!m_Device->SupportsTexture(desc)) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"CreateTexture: The format, combined usages, dimensions, mip count, or layer count is unsupported by "
+				"this device.");
+			return Result::InvalidParameter;
+		}
+
 		m_Format = Utils::TextureFormatToVkFormat(desc.format);
 		m_Usage = desc.usage;
 		m_MipLevels = desc.mipLevels;

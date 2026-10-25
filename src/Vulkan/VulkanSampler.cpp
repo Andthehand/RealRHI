@@ -48,9 +48,6 @@ namespace RealRHI {
 	}
 
 	Result VulkanSampler::Init(const SamplerDesc& desc) {
-		VkPhysicalDeviceProperties properties{};
-		vkGetPhysicalDeviceProperties(m_Device->GetPhysicalDevice(), &properties);
-
 		if (!IsValidFilter(desc.minFilter) || !IsValidFilter(desc.magFilter) || !IsValidFilter(desc.mipFilter) ||
 			ConvertAddressMode(desc.addressU) == VK_SAMPLER_ADDRESS_MODE_MAX_ENUM ||
 			ConvertAddressMode(desc.addressV) == VK_SAMPLER_ADDRESS_MODE_MAX_ENUM ||
@@ -65,7 +62,7 @@ namespace RealRHI {
 		}
 
 		if (!std::isfinite(desc.mipLodBias) || !std::isfinite(desc.minLod) || !std::isfinite(desc.maxLod) ||
-			std::abs(desc.mipLodBias) > properties.limits.maxSamplerLodBias || desc.minLod < 0.0f ||
+			std::abs(desc.mipLodBias) > m_Device->GetCapabilities().limits.maxSamplerLodBias || desc.minLod < 0.0f ||
 			desc.maxLod < desc.minLod) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,

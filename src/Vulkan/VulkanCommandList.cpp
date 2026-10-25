@@ -533,9 +533,7 @@ namespace RealRHI {
 				"BindVertexBuffer: Requires recording, Vertex usage, and an offset within the buffer.");
 			return;
 		}
-		VkPhysicalDeviceProperties properties{};
-		vkGetPhysicalDeviceProperties(m_Device->GetPhysicalDevice(), &properties);
-		if (binding >= properties.limits.maxVertexInputBindings) {
+		if (binding >= m_Device->GetCapabilities().limits.maxVertexInputBindings) {
 			m_Device->SendDebugMessage(
 				DebugSeverity::Error, DebugMessageType::General, "BindVertexBuffer: Binding exceeds device limit.");
 			return;

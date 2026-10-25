@@ -112,10 +112,7 @@ namespace RealRHI {
 			return reject("Requires a graphics shader program.");
 		}
 
-		VkPhysicalDeviceProperties properties{};
-		vkGetPhysicalDeviceProperties(m_Device->GetPhysicalDevice(), &properties);
-
-		const auto& limits = properties.limits;
+		const auto& limits = m_Device->GetCapabilities().limits;
 		if (layout.bindings.size() > limits.maxVertexInputBindings ||
 			layout.attributes.size() > limits.maxVertexInputAttributes) {
 			return reject("Vertex layout exceeds the device binding or attribute limits.");
@@ -153,9 +150,7 @@ namespace RealRHI {
 							  "fitting their strides.");
 			}
 
-			VkFormatProperties support{};
-			vkGetPhysicalDeviceFormatProperties(m_Device->GetPhysicalDevice(), format.format, &support);
-			if (!(support.bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT)) {
+			if (!m_Device->SupportsVertexFormat(attribute.format)) {
 				return reject("Vertex attribute format is unsupported by this device.");
 			}
 
@@ -196,9 +191,7 @@ namespace RealRHI {
 				"Provide exactly one colorBlendStates entry per color target, or leave it empty to use blendState.");
 		}
 
-		VkPhysicalDeviceProperties properties{};
-		vkGetPhysicalDeviceProperties(m_Device->GetPhysicalDevice(), &properties);
-		if (count > properties.limits.maxColorAttachments) {
+		if (count > m_Device->GetCapabilities().limits.maxColorAttachments) {
 			return reject("Color target count exceeds maxColorAttachments.");
 		}
 
@@ -239,15 +232,9 @@ namespace RealRHI {
 				return reject("Invalid blend factor, operation, or write mask for color target " + std::to_string(i));
 			}
 
-			if (state->enable) {
-				VkFormatProperties support{};
-				vkGetPhysicalDeviceFormatProperties(m_Device->GetPhysicalDevice(),
-					Utils::TextureFormatToVkFormat(desc.renderTargetFormats.colorFormats[i]),
-					&support);
-
-				if (!(support.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT)) {
-					return reject("Blending is unsupported for color target " + std::to_string(i) + "'s format.");
-				}
+			if (state->enable &&
+				!m_Device->GetTextureFormatSupport(desc.renderTargetFormats.colorFormats[i]).colorBlending) {
+				return reject("Blending is unsupported for color target " + std::to_string(i) + "'s format.");
 			}
 
 			attachments.push_back(attachment);

@@ -301,7 +301,7 @@ int main() {
 		Expect(device->CreateGraphicsPipeline(pipelineDesc, pipeline) == Result::Success,
 			"Create multiple-color-attachment pipeline");
 		pipelineDesc.rasterState.fillMode = FillMode::Wireframe;
-		if (static_cast<VulkanDevice*>(device.get())->SupportsWireframe()) {
+		if (device->GetCapabilities().features.wireframe) {
 			Expect(device->CreateGraphicsPipeline(pipelineDesc, pipeline) == Result::Success,
 				"Create supported wireframe pipeline");
 		}

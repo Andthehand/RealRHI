@@ -52,6 +52,11 @@ namespace RealRHI {
 
 		Result Init(const DeviceDesc& desc);
 
+		const DeviceCapabilitiesInfo& GetCapabilities() const override { return m_Capabilities; }
+		TextureFormatSupport GetTextureFormatSupport(TextureFormat format) const override;
+		bool SupportsVertexFormat(VertexFormat format) const override;
+		bool SupportsTexture(const TextureDesc& desc) const override;
+
 		VkInstance GetInstance() const { return m_Instance; }
 		VkDevice GetDevice() const { return m_Device; }
 		VkPhysicalDevice GetPhysicalDevice() const { return m_PhysicalDevice; }
@@ -129,12 +134,14 @@ namespace RealRHI {
 		void ProcessDeferredDeletions() override;
 
 		VkPhysicalDeviceDescriptorHeapPropertiesEXT GetDescriptorHeapProperties() const;
-		uint32_t GetMaxPushDataSize() const { return m_MaxPushDataSize; }
-		bool SupportsWireframe() const { return m_SupportsWireframe; }
-		bool SupportsIndependentBlend() const { return m_SupportsIndependentBlend; }
-		bool SupportsDepthBiasClamp() const { return m_SupportsDepthBiasClamp; }
+		uint32_t GetMaxPushDataSize() const { return m_Capabilities.limits.maxPushDataSize; }
+		bool SupportsWireframe() const { return m_Capabilities.features.wireframe; }
+		bool SupportsIndependentBlend() const { return m_Capabilities.features.independentBlend; }
+		bool SupportsDepthBiasClamp() const { return m_Capabilities.features.depthBiasClamp; }
 
 	private:
+		void InitCapabilities();
+
 		Result SetDebugObjectName(VkObjectType type, uint64_t handle, const char* name) const;
 		bool CreateInstance(const char* appName, bool enableValidationLayer);
 		bool SetupDebugMessenger();
@@ -171,10 +178,7 @@ namespace RealRHI {
 		std::unique_ptr<VulkanDescriptorManager> m_DescriptorManager;
 
 		VmaAllocator m_Allocator = VK_NULL_HANDLE;
-		uint32_t m_MaxPushDataSize = 0;
-		bool m_SupportsWireframe = false;
-		bool m_SupportsIndependentBlend = false;
-		bool m_SupportsDepthBiasClamp = false;
+		DeviceCapabilitiesInfo m_Capabilities;
 
 		std::filesystem::path m_ShaderDirectory;
 		DebugCallback m_DebugCallback;

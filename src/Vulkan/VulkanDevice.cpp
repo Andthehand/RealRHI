@@ -6,6 +6,7 @@
 #include "VulkanCommandAllocator.h"
 #include "VulkanCommandList.h"
 #include "VulkanCommandQueue.h"
+#include "VulkanConversions.h"
 #include "VulkanDescriptorManager.h"
 #include "VulkanPipeline.h"
 #include "VulkanSampler.h"
@@ -15,6 +16,7 @@
 #include "VulkanWindow.h"
 
 #include <algorithm>
+#include <bit>
 #include <cstring>
 #include <iostream>
 #include <limits>
@@ -100,8 +102,8 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
-		m_MaxPushDataSize = GetDescriptorHeapProperties().maxPushDataSize;
-		if (m_MaxPushDataSize == 0) {
+		m_Capabilities.limits.maxPushDataSize = GetDescriptorHeapProperties().maxPushDataSize;
+		if (m_Capabilities.limits.maxPushDataSize == 0) {
 			SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
 				"Selected device does not report descriptor heap push data support.");
@@ -120,6 +122,8 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
+		InitCapabilities();
+
 		if (!CreateAllocator()) {
 			SendDebugMessage(
 				DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan memory allocator.");
@@ -134,6 +138,137 @@ namespace RealRHI {
 		}
 
 		return Result::Success;
+	}
+
+	void VulkanDevice::InitCapabilities() {
+		VkPhysicalDeviceProperties properties{};
+		vkGetPhysicalDeviceProperties(m_PhysicalDevice, &properties);
+
+		m_Capabilities.name = properties.deviceName;
+		m_Capabilities.vendorId = properties.vendorID;
+		m_Capabilities.deviceId = properties.deviceID;
+		m_Capabilities.features.debugLabels = m_DebugLabelsEnabled;
+
+		const auto& source = properties.limits;
+		auto& limits = m_Capabilities.limits;
+		limits.maxTextureDimension2D = source.maxImageDimension2D;
+		limits.maxTextureDimension3D = source.maxImageDimension3D;
+		limits.maxTextureArrayLayers = source.maxImageArrayLayers;
+		limits.maxColorAttachments = source.maxColorAttachments;
+
+		limits.maxVertexInputBindings = source.maxVertexInputBindings;
+		limits.maxVertexInputAttributes = source.maxVertexInputAttributes;
+		limits.maxVertexInputBindingStride = source.maxVertexInputBindingStride;
+		limits.maxVertexInputAttributeOffset = source.maxVertexInputAttributeOffset;
+
+		for (uint32_t axis = 0; axis < 3; ++axis) {
+			limits.maxComputeWorkGroupCount[axis] = source.maxComputeWorkGroupCount[axis];
+			limits.maxComputeWorkGroupSize[axis] = source.maxComputeWorkGroupSize[axis];
+		}
+		limits.maxComputeWorkGroupInvocations = source.maxComputeWorkGroupInvocations;
+		limits.maxComputeSharedMemorySize = source.maxComputeSharedMemorySize;
+
+		limits.maxUniformBufferRange = source.maxUniformBufferRange;
+		limits.maxStorageBufferRange = source.maxStorageBufferRange;
+		limits.minUniformBufferOffsetAlignment = source.minUniformBufferOffsetAlignment;
+		limits.minStorageBufferOffsetAlignment = source.minStorageBufferOffsetAlignment;
+		limits.nonCoherentAtomSize = source.nonCoherentAtomSize;
+		limits.maxSamplerLodBias = source.maxSamplerLodBias;
+	}
+
+	TextureFormatSupport VulkanDevice::GetTextureFormatSupport(TextureFormat format) const {
+		const VkFormat nativeFormat = Utils::TextureFormatToVkFormat(format);
+		if (nativeFormat == VK_FORMAT_UNDEFINED) {
+			return {};
+		}
+
+		VkFormatProperties properties{};
+		vkGetPhysicalDeviceFormatProperties(m_PhysicalDevice, nativeFormat, &properties);
+		const auto flags = properties.optimalTilingFeatures;
+		TextureFormatSupport support;
+
+		if (flags & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) {
+			support.usages |= TextureUsage::ShaderResource;
+		}
+		if (flags & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) {
+			support.usages |= TextureUsage::Storage;
+		}
+		if (flags & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) {
+			support.usages |= TextureUsage::RenderTarget;
+		}
+		if (flags & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+			support.usages |= TextureUsage::DepthStencil;
+		}
+		if (flags & VK_FORMAT_FEATURE_TRANSFER_SRC_BIT) {
+			support.usages |= TextureUsage::TransferSrc;
+		}
+		if (flags & VK_FORMAT_FEATURE_TRANSFER_DST_BIT) {
+			support.usages |= TextureUsage::TransferDst;
+		}
+
+		support.linearFiltering = (flags & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0;
+		support.colorBlending = (flags & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT) != 0;
+		support.blitSource = (flags & VK_FORMAT_FEATURE_BLIT_SRC_BIT) != 0;
+		support.blitDestination = (flags & VK_FORMAT_FEATURE_BLIT_DST_BIT) != 0;
+		support.storageAtomics = (flags & VK_FORMAT_FEATURE_STORAGE_IMAGE_ATOMIC_BIT) != 0;
+		return support;
+	}
+
+	bool VulkanDevice::SupportsVertexFormat(VertexFormat format) const {
+		const auto info = Utils::GetVertexFormatInfo(format);
+		if (info.format == VK_FORMAT_UNDEFINED) {
+			return false;
+		}
+
+		VkFormatProperties properties{};
+		vkGetPhysicalDeviceFormatProperties(m_PhysicalDevice, info.format, &properties);
+		return (properties.bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT) != 0;
+	}
+
+	bool VulkanDevice::SupportsTexture(const TextureDesc& desc) const {
+		constexpr auto knownUsages = TextureUsage::ShaderResource | TextureUsage::Storage | TextureUsage::RenderTarget |
+			TextureUsage::DepthStencil | TextureUsage::TransferSrc | TextureUsage::TransferDst;
+		if (!desc.width || !desc.height || !desc.depth || !desc.arrayLayers || !desc.mipLevels ||
+			desc.mipLevels > std::bit_width(std::max({desc.width, desc.height, desc.depth})) ||
+			desc.usage == TextureUsage::None ||
+			(static_cast<uint32_t>(desc.usage) & ~static_cast<uint32_t>(knownUsages)) != 0) {
+			return false;
+		}
+
+		const VkFormat format = Utils::TextureFormatToVkFormat(desc.format);
+		if (format == VK_FORMAT_UNDEFINED) {
+			return false;
+		}
+
+		const bool depthFormat = (Utils::TextureFormatToVkImageAspect(desc.format) & VK_IMAGE_ASPECT_DEPTH_BIT) != 0;
+		if ((depthFormat && Any(desc.usage & TextureUsage::RenderTarget)) ||
+			(!depthFormat && Any(desc.usage & TextureUsage::DepthStencil)) ||
+			(desc.depth > 1 &&
+				(desc.arrayLayers != 1 ||
+					Any(desc.usage & (TextureUsage::RenderTarget | TextureUsage::DepthStencil))))) {
+			return false;
+		}
+
+		const auto support = GetTextureFormatSupport(desc.format);
+		if ((support.usages & desc.usage) != desc.usage) {
+			return false;
+		}
+
+		VkImageFormatProperties properties{};
+		const auto result = vkGetPhysicalDeviceImageFormatProperties(m_PhysicalDevice,
+			format,
+			Utils::TextureDescToVkImageType(desc),
+			VK_IMAGE_TILING_OPTIMAL,
+			Utils::TextureUsageToVkImageUsage(desc.usage),
+			0,
+			&properties);
+		if (result != VK_SUCCESS) {
+			return false;
+		}
+
+		return desc.width <= properties.maxExtent.width && desc.height <= properties.maxExtent.height &&
+			desc.depth <= properties.maxExtent.depth && desc.mipLevels <= properties.maxMipLevels &&
+			desc.arrayLayers <= properties.maxArrayLayers && (properties.sampleCounts & VK_SAMPLE_COUNT_1_BIT) != 0;
 	}
 
 	Result VulkanDevice::SetDebugObjectName(VkObjectType type, uint64_t handle, const char* name) const {
@@ -843,9 +978,9 @@ namespace RealRHI {
 			.pNext = &supportedVk12Features,
 		};
 		vkGetPhysicalDeviceFeatures2(m_PhysicalDevice, &supportedFeatures);
-		m_SupportsWireframe = supportedFeatures.features.fillModeNonSolid == VK_TRUE;
-		m_SupportsIndependentBlend = supportedFeatures.features.independentBlend == VK_TRUE;
-		m_SupportsDepthBiasClamp = supportedFeatures.features.depthBiasClamp == VK_TRUE;
+		m_Capabilities.features.wireframe = supportedFeatures.features.fillModeNonSolid == VK_TRUE;
+		m_Capabilities.features.independentBlend = supportedFeatures.features.independentBlend == VK_TRUE;
+		m_Capabilities.features.depthBiasClamp = supportedFeatures.features.depthBiasClamp == VK_TRUE;
 		m_SupportsHostQueryReset = supportedVk12Features.hostQueryReset == VK_TRUE;
 		enabledVk12Features.hostQueryReset = supportedVk12Features.hostQueryReset;
 

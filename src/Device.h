@@ -3,6 +3,7 @@
 #include "BufferDesc.h"
 #include "CommandAllocator.h"
 #include "CommandList.h"
+#include "DeviceCapabilities.h"
 #include "DeviceDesc.h"
 #include "FrameContext.h"
 #include "Pipeline.h"
@@ -37,6 +38,13 @@ namespace RealRHI {
 	class Device {
 	public:
 		virtual ~Device() = default;
+
+		// Immutable snapshot; valid for the lifetime of this device.
+		virtual const DeviceCapabilitiesInfo& GetCapabilities() const = 0;
+		virtual TextureFormatSupport GetTextureFormatSupport(TextureFormat format) const = 0;
+		virtual bool SupportsVertexFormat(VertexFormat format) const = 0;
+		// Quiet, allocation-free check of the complete description. Success does not guarantee memory availability.
+		virtual bool SupportsTexture(const TextureDesc& desc) const = 0;
 
 		virtual std::filesystem::path GetShaderDirectory() const = 0;
 		virtual bool IsDebugEnabled() const = 0;

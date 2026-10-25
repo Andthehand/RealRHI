@@ -24,6 +24,7 @@ find_library(Slang_LIBRARY NAMES slang slang-compiler HINTS "$ENV{VULKAN_SDK}/li
 find_library(SDL_LIBRARY NAMES SDL3 HINTS "$ENV{VULKAN_SDK}/lib" REQUIRED)
 
 set(REALRHI_HEADERS
+    "src/DeviceCapabilities.h"
     "src/VertexLayout.h"
     "src/Slang/SlangShaderCompiler.h"
     "src/Slang/SlangShaderReflection.h"
@@ -123,6 +124,7 @@ if(REALRHI_BUILD_TESTS)
         add_test(NAME ${name} COMMAND ${name})
     endfunction()
 
+    realrhi_add_test(CapabilitiesTests tests/CapabilitiesTests.cpp)
     realrhi_add_test(PipelineStateTests tests/PipelineStateTests.cpp)
     realrhi_add_test(ShaderPipelineTests tests/ShaderPipelineTests.cpp)
     realrhi_add_test(ShaderTests tests/ShaderTests.cpp)
@@ -149,7 +151,7 @@ if(REALRHI_BUILD_TESTS)
     target_compile_definitions(SceneTests PRIVATE
         REALRHI_SCENE_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/examples/SceneExample/shaders")
 
-    foreach(name IN ITEMS PipelineStateTests ShaderPipelineTests ProfilingTests TextureTests QueueOwnershipTests UploadTests SceneTests DrawTests)
+    foreach(name IN ITEMS CapabilitiesTests PipelineStateTests ShaderPipelineTests ProfilingTests TextureTests QueueOwnershipTests UploadTests SceneTests DrawTests)
         set_tests_properties(${name} PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
     endforeach()
 endif()

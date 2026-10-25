@@ -1,5 +1,4 @@
 #include "Device.h"
-#include "Vulkan/VulkanDevice.h"
 
 #include <array>
 #include <cmath>
@@ -204,7 +203,7 @@ namespace {
 		bool m_Initialized = false;
 	};
 
-	void TestBlending(RenderTest& test, VulkanDevice& device) {
+	void TestBlending(RenderTest& test, Device& device) {
 		auto desc = test.Description();
 		auto pipeline = test.Create(desc);
 		test.Render({{pipeline.Raw(), {.color = {0.3f, 0.2f, 0.1f, 0.5f}}}});
@@ -311,7 +310,7 @@ namespace {
 				.destinationColorFactor = BlendFactor::One,
 				.writeMask = ColorWriteMask::Green | ColorWriteMask::Blue}
 		};
-		if (device.SupportsIndependentBlend()) {
+		if (device.GetCapabilities().features.independentBlend) {
 			pipeline = test.Create(desc);
 			test.Render({{pipeline.Raw(), {.color = {0.8f, 0.2f, 0.1f, 0.2f}}}});
 			test.Pixel(0, 8, 8, {0.8f, 0.4f, 0.6f, 0.2f}, "First target has its own color mask and disabled blend");
@@ -376,7 +375,7 @@ namespace {
 		test.Pixel(0, 4, 4, {1, 1, 1, 1}, "Triangle fan renders its first triangle");
 	}
 
-	void TestDepthBias(RenderTest& test, VulkanDevice& device) {
+	void TestDepthBias(RenderTest& test, Device& device) {
 		auto desc = test.Description();
 		desc.depthState = {};
 		auto normal = test.Create(desc);
@@ -403,7 +402,7 @@ namespace {
 		test.Pixel(0, 8, 8, {1, 0, 0, 1}, "Slope-scaled depth bias moves the sloped surface forward");
 
 		desc.rasterState.depthBias.clamp = -0.001f;
-		if (device.SupportsDepthBiasClamp()) {
+		if (device.GetCapabilities().features.depthBiasClamp) {
 			biased = test.Create(desc);
 			test.Render({{normal.Raw(), reference}, {biased.Raw(), sloped}});
 			test.Pixel(0, 8, 8, {0, 1, 0, 1}, "Depth bias clamp limits the slope contribution");
@@ -453,10 +452,9 @@ int main() {
 		"Create validation-enabled pipeline test device");
 	{
 		RenderTest test(*device);
-		auto& vulkanDevice = *static_cast<RealRHI::VulkanDevice*>(device.get());
-		TestBlending(test, vulkanDevice);
+		TestBlending(test, *device);
 		TestTopology(test, *device);
-		TestDepthBias(test, vulkanDevice);
+		TestDepthBias(test, *device);
 		TestInvalidStates(test);
 	}
 	device->WaitIdle();
