@@ -224,6 +224,7 @@ namespace {
 	}
 
 	void TestResourceNames(Device& device) {
+		device.ClearShaderAndPipelineCaches();
 		const bool enabled = static_cast<VulkanDevice&>(device).SupportsDebugLabels();
 		const auto baseline = device.GetStatistics();
 		s_NamedObjects.clear();
@@ -309,6 +310,7 @@ namespace {
 					"Name identical descriptors while reusing a slot");
 			}
 		}
+		device.ClearShaderAndPipelineCaches();
 		CheckResourcesEqual(device.GetStatistics(), baseline);
 		if (enabled) {
 			for (const auto& expected : std::vector<NamedObject>{
@@ -357,6 +359,7 @@ namespace {
 	}
 
 	void TestUsageCounters(Device& device) {
+		device.ClearShaderAndPipelineCaches();
 		const auto before = device.GetStatistics();
 		{
 			Ref<Buffer> buffer;
@@ -451,6 +454,7 @@ namespace {
 			vkWriteResourceDescriptorsEXT = nativeWrite;
 			CheckResourcesEqual(device.GetStatistics(), saved);
 		}
+		device.ClearShaderAndPipelineCaches();
 		const auto after = device.GetStatistics();
 		CheckResourcesEqual(after, before);
 		Expect(

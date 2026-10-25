@@ -23,6 +23,86 @@
 #include <set>
 
 namespace RealRHI {
+	namespace {
+		template <typename T>
+		void AppendCacheKey(std::string& key, T value) {
+			static_assert(std::is_arithmetic_v<T> || std::is_enum_v<T>);
+			// Serialize fields individually: struct padding and debug-name pointers are not identity.
+			key.append(reinterpret_cast<const char*>(&value), sizeof(value));
+		}
+
+		void AppendBlendKey(std::string& key, const BlendState& blend) {
+			AppendCacheKey(key, blend.enable);
+			AppendCacheKey(key, blend.sourceColorFactor);
+			AppendCacheKey(key, blend.destinationColorFactor);
+			AppendCacheKey(key, blend.colorOperation);
+			AppendCacheKey(key, blend.sourceAlphaFactor);
+			AppendCacheKey(key, blend.destinationAlphaFactor);
+			AppendCacheKey(key, blend.alphaOperation);
+			AppendCacheKey(key, blend.writeMask);
+		}
+
+		std::string BuildGraphicsPipelineKey(const PipelineDesc& desc) {
+			std::string key("graphics");
+			AppendCacheKey(key, reinterpret_cast<uintptr_t>(desc.shader));
+
+			const VertexLayout* layout = &desc.vertexLayout;
+			if (desc.shader && layout->bindings.empty() && layout->attributes.empty()) {
+				layout = &desc.shader->GetReflection().vertexLayout;
+			}
+			AppendCacheKey(key, layout->bindings.size());
+			for (const auto& binding : layout->bindings) {
+				AppendCacheKey(key, binding.binding);
+				AppendCacheKey(key, binding.stride);
+				AppendCacheKey(key, binding.inputRate);
+			}
+			AppendCacheKey(key, layout->attributes.size());
+			for (const auto& attribute : layout->attributes) {
+				AppendCacheKey(key, attribute.location);
+				AppendCacheKey(key, attribute.binding);
+				AppendCacheKey(key, attribute.format);
+				AppendCacheKey(key, attribute.offset);
+			}
+
+			const auto& raster = desc.rasterState;
+			AppendCacheKey(key, raster.cullMode);
+			AppendCacheKey(key, raster.fillMode);
+			AppendCacheKey(key, raster.frontCounterClockwise);
+			AppendCacheKey(key, raster.depthBias.enable);
+			AppendCacheKey(key, raster.depthBias.constantFactor);
+			AppendCacheKey(key, raster.depthBias.clamp);
+			AppendCacheKey(key, raster.depthBias.slopeFactor);
+			AppendCacheKey(key, desc.depthState.depthTestEnable);
+			AppendCacheKey(key, desc.depthState.depthWriteEnable);
+			AppendCacheKey(key, desc.depthState.compareOp);
+			AppendCacheKey(key, desc.topology);
+			AppendCacheKey(key, desc.primitiveRestartEnable);
+
+			AppendCacheKey(key, desc.renderTargetFormats.colorFormats.size());
+			for (auto format : desc.renderTargetFormats.colorFormats) {
+				AppendCacheKey(key, format);
+			}
+			AppendCacheKey(key, desc.renderTargetFormats.depthFormat);
+			// Normalize an omitted per-target array to its effective attachment states.
+			if (desc.colorBlendStates.empty()) {
+				AppendCacheKey(key, desc.renderTargetFormats.colorFormats.size());
+				for (size_t i = 0; i < desc.renderTargetFormats.colorFormats.size(); ++i) {
+					AppendBlendKey(key, desc.blendState);
+				}
+			}
+			else {
+				AppendCacheKey(key, desc.colorBlendStates.size());
+				for (const auto& blend : desc.colorBlendStates) {
+					AppendBlendKey(key, blend);
+				}
+			}
+			for (float constant : desc.blendConstants) {
+				AppendCacheKey(key, constant);
+			}
+			return key;
+		}
+	}
+
 	VulkanDevice::VulkanDevice() = default;
 
 	VulkanDevice::~VulkanDevice() {
@@ -31,6 +111,7 @@ namespace RealRHI {
 			vkDeviceWaitIdle(m_Device);
 			ProcessDeferredDeletions();
 		}
+		ClearShaderAndPipelineCaches();
 		m_Queues.clear();
 		m_GraphicsCommandQueue = nullptr;
 
@@ -301,33 +382,71 @@ namespace RealRHI {
 	}
 
 	Result VulkanDevice::CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) const {
-		Ref<VulkanShader> vkShader;
-		Result res = VulkanShader::Create(this, desc, vkShader);
-		if (res == Result::Success) {
-			outShader = vkShader;
+		std::scoped_lock lock(m_CacheMutex);
+		CompiledShaderProgram program;
+		const auto compiled = m_ShaderCompiler->Compile(desc, program);
+		if (compiled != Result::Success) {
+			return compiled;
+		}
+		const auto cached = m_Shaders.find(program.cacheId);
+		if (cached != m_Shaders.end()) {
+			outShader = cached->second;
+			return Result::Success;
 		}
 
-		return res;
+		Ref<VulkanShader> shader;
+		const auto result = VulkanShader::Create(this, program, desc.debugName, shader);
+		if (result == Result::Success) {
+			m_Shaders.emplace(program.cacheId, shader);
+			outShader = shader;
+		}
+		return result;
 	}
 
 	Result VulkanDevice::CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) const {
-		Ref<VulkanPipeline> vkPipeline;
-		Result res = VulkanPipeline::CreateGraphics(this, desc, vkPipeline);
-		if (res == Result::Success) {
-			outPipeline = vkPipeline;
+		std::scoped_lock lock(m_CacheMutex);
+		const auto key = BuildGraphicsPipelineKey(desc);
+		const auto cached = m_Pipelines.find(key);
+		if (cached != m_Pipelines.end()) {
+			outPipeline = cached->second.pipeline;
+			return Result::Success;
 		}
 
-		return res;
+		Ref<VulkanPipeline> pipeline;
+		const auto result = VulkanPipeline::CreateGraphics(this, desc, pipeline);
+		if (result == Result::Success) {
+			m_Pipelines.emplace(key, CachedPipeline{Ref<Shader>(desc.shader), pipeline});
+			outPipeline = pipeline;
+		}
+		return result;
 	}
 
 	Result VulkanDevice::CreateComputePipeline(const ComputePipelineDesc& desc, Ref<Pipeline>& outPipeline) const {
-		Ref<VulkanPipeline> pipeline;
-		const Result result = VulkanPipeline::CreateCompute(this, desc, pipeline);
-		if (result == Result::Success) {
-			outPipeline = pipeline;
+		std::scoped_lock lock(m_CacheMutex);
+		std::string key("compute");
+		AppendCacheKey(key, reinterpret_cast<uintptr_t>(desc.shader));
+		const auto cached = m_Pipelines.find(key);
+		if (cached != m_Pipelines.end()) {
+			outPipeline = cached->second.pipeline;
+			return Result::Success;
 		}
 
+		Ref<VulkanPipeline> pipeline;
+		const auto result = VulkanPipeline::CreateCompute(this, desc, pipeline);
+		if (result == Result::Success) {
+			m_Pipelines.emplace(key, CachedPipeline{Ref<Shader>(desc.shader), pipeline});
+			outPipeline = pipeline;
+		}
 		return result;
+	}
+
+	void VulkanDevice::ClearShaderAndPipelineCaches() const {
+		std::scoped_lock lock(m_CacheMutex);
+		m_Pipelines.clear();
+		m_Shaders.clear();
+		if (m_ShaderCompiler) {
+			m_ShaderCompiler->ClearCache();
+		}
 	}
 
 	Result VulkanDevice::CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) const {

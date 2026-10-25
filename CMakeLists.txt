@@ -124,6 +124,9 @@ if(REALRHI_BUILD_TESTS)
         add_test(NAME ${name} COMMAND ${name})
     endfunction()
 
+    realrhi_add_test(CacheTests tests/CacheTests.cpp)
+    target_compile_definitions(CacheTests PRIVATE
+        REALRHI_CACHE_TEST_DIRECTORY="${CMAKE_CURRENT_BINARY_DIR}/cache-test-shaders")
     realrhi_add_test(IndirectTests examples/CullingExample/CullingExample.cpp)
     target_compile_definitions(IndirectTests PRIVATE REALRHI_INDIRECT_TESTS
         REALRHI_CULLING_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/examples/CullingExample/shaders")
@@ -154,7 +157,7 @@ if(REALRHI_BUILD_TESTS)
     target_compile_definitions(SceneTests PRIVATE
         REALRHI_SCENE_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/examples/SceneExample/shaders")
 
-    foreach(name IN ITEMS IndirectTests CapabilitiesTests PipelineStateTests ShaderPipelineTests ProfilingTests TextureTests QueueOwnershipTests UploadTests SceneTests DrawTests)
+    foreach(name IN ITEMS CacheTests IndirectTests CapabilitiesTests PipelineStateTests ShaderPipelineTests ProfilingTests TextureTests QueueOwnershipTests UploadTests SceneTests DrawTests)
         set_tests_properties(${name} PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
     endforeach()
 endif()

@@ -10,9 +10,12 @@ namespace RealRHI {
 		VulkanShader(const VulkanDevice* device);
 		~VulkanShader();
 
-		static Result Create(const VulkanDevice* device, const ShaderDesc& desc, Ref<VulkanShader>& outShader);
-		Result Init(const ShaderDesc& desc);
-		
+		static Result Create(const VulkanDevice* device,
+			const CompiledShaderProgram& program,
+			const char* debugName,
+			Ref<VulkanShader>& outShader);
+		Result Init(const CompiledShaderProgram& program, const char* debugName);
+
 		const ShaderReflection& GetReflection() const override { return m_Reflection; }
 		VkShaderModule GetShaderModule() const { return m_ShaderModule; }
 		const std::vector<std::string>& GetExportedEntryPoints() const { return m_ExportedEntryPoints; }

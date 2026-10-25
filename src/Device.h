@@ -55,9 +55,17 @@ namespace RealRHI {
 		// Optional debugName strings need only survive the creation call. Names are ignored
 		// when debug naming is unavailable; textures also pass their name to default views/samplers.
 		virtual Result CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) const = 0;
+		// Thread-safe, per-device shader/pipeline reuse. Source dependencies are checked
+		// on CreateShader; existing shaders and pipelines keep their compiled version.
+		// Debug names do not affect identity; the first creation names the shared object.
 		virtual Result CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) const = 0;
 		virtual Result CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) const = 0;
 		virtual Result CreateComputePipeline(const ComputePipelineDesc& desc, Ref<Pipeline>& outPipeline) const = 0;
+
+		// In-memory caches retain successful objects until cleared or device destruction.
+		// Drop cache-owned references and compiled programs. Existing objects remain valid.
+		virtual void ClearShaderAndPipelineCaches() const = 0;
+
 		virtual Result CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) const = 0;
 		virtual Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) const = 0;
 		virtual Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const = 0;

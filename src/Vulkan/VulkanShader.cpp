@@ -10,22 +10,19 @@ namespace RealRHI {
 		vkDestroyShaderModule(m_Device->GetDevice(), m_ShaderModule, nullptr);
 	}
 
-	Result VulkanShader::Create(const VulkanDevice* device, const ShaderDesc& desc, Ref<VulkanShader>& outShader) {
+	Result VulkanShader::Create(const VulkanDevice* device,
+		const CompiledShaderProgram& program,
+		const char* debugName,
+		Ref<VulkanShader>& outShader) {
 		auto shader = Ref<VulkanShader>::Create(device);
-		const Result result = shader->Init(desc);
+		const Result result = shader->Init(program, debugName);
 		if (result == Result::Success) {
 			outShader = shader;
 		}
 		return result;
 	}
 
-	Result VulkanShader::Init(const ShaderDesc& desc) {
-		CompiledShaderProgram program;
-		const Result result = m_Device->GetShaderCompiler().Compile(desc, program);
-		if (result != Result::Success) {
-			return result;
-		}
-
+	Result VulkanShader::Init(const CompiledShaderProgram& program, const char* debugName) {
 		const auto& push = program.reflection.pushData;
 		if (push.offset > m_Device->GetMaxPushDataSize() || push.size > m_Device->GetMaxPushDataSize() - push.offset) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
@@ -46,9 +43,9 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
-		m_Reflection = std::move(program.reflection);
-		m_ExportedEntryPoints = std::move(program.exportedEntryPoints);
+		m_Reflection = program.reflection;
+		m_ExportedEntryPoints = program.exportedEntryPoints;
 
-		return m_Device->SetDebugName(VK_OBJECT_TYPE_SHADER_MODULE, m_ShaderModule, desc.debugName);
+		return m_Device->SetDebugName(VK_OBJECT_TYPE_SHADER_MODULE, m_ShaderModule, debugName);
 	}
 }

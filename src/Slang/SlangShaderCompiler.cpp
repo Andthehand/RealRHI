@@ -2,19 +2,20 @@
 
 #include "SlangShaderReflection.h"
 
-#include <array>
 #include <cstring>
+#include <fstream>
+#include <iterator>
 #include <spirv/unified1/spirv.h>
 
 namespace RealRHI {
 	SlangShaderCompiler::SlangShaderCompiler(const std::filesystem::path& directory, bool debug, DebugCallback callback)
-		: m_Directory(directory.string()), m_Callback(callback) {
+		: m_Directory(std::filesystem::absolute(directory).lexically_normal().string()), m_Callback(callback) {
 		if (!m_Callback) {
 			m_Callback = DefaultDebugCallback;
 		}
 
 		if (!Initialize(debug)) {
-			m_Session = nullptr;
+			m_GlobalSession = nullptr;
 		}
 	}
 
@@ -51,35 +52,55 @@ namespace RealRHI {
 			return Check(SLANG_FAIL, {}, "Installed Slang compiler lacks spvDescriptorHeapEXT");
 		}
 
-		const slang::TargetDesc target{
-			.format = SLANG_SPIRV,
-			.profile = m_GlobalSession->findProfile("spirv_1_6"),
-		};
-
-		const std::array<slang::CompilerOptionEntry, 3> options{{
+		m_CompilerOptions = {
 			{slang::CompilerOptionName::EmitSpirvDirectly, {slang::CompilerOptionValueKind::Int, 1}},
 			{slang::CompilerOptionName::Capability, {slang::CompilerOptionValueKind::Int, capability}},
-			{slang::CompilerOptionName::DebugInformation,
-				{slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_STANDARD}},
-		}};
-
-		const char* directory = m_Directory.c_str();
-		SlangInt optionCount = 2;
-		if (enableDebugInfo) {
-			optionCount = 3;
-		}
-
-		const slang::SessionDesc desc{
-			.targets = &target,
-			.targetCount = 1,
-			.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR,
-			.searchPaths = &directory,
-			.searchPathCount = 1,
-			.compilerOptionEntries = options.data(),
-			.compilerOptionEntryCount = static_cast<uint32_t>(optionCount),
 		};
+		if (enableDebugInfo) {
+			m_CompilerOptions.push_back(
+				{slang::CompilerOptionName::DebugInformation,
+					{slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_STANDARD}});
+		}
+		return true;
+	}
 
-		return Check(m_GlobalSession->createSession(desc, m_Session.writeRef()), {}, "Create compilation session");
+	std::string SlangShaderCompiler::BuildCacheKey(const ShaderDesc& desc) {
+		std::string key = std::to_string(std::strlen(desc.moduleName)) + ":" + desc.moduleName;
+		for (const auto& entry : desc.entryPoints) {
+			key += std::to_string(entry.name.size()) + ":" + entry.name;
+			if (entry.stage) {
+				key += ":" + std::to_string(static_cast<int>(*entry.stage));
+			}
+			else {
+				key += ":auto";
+			}
+			key += ";";
+		}
+		return key;
+	}
+
+	bool SlangShaderCompiler::ReadDependency(const std::filesystem::path& path, std::string& contents) {
+		std::ifstream file(path, std::ios::binary);
+		if (!file) {
+			return false;
+		}
+		contents.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+		return !file.bad();
+	}
+
+	bool SlangShaderCompiler::DependenciesMatch(const CachedProgram& cached) {
+		for (const auto& dependency : cached.dependencies) {
+			std::string contents;
+			if (!ReadDependency(dependency.path, contents) || contents != dependency.contents) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	void SlangShaderCompiler::ClearCache() {
+		std::scoped_lock lock(m_Mutex);
+		m_Cache.clear();
 	}
 
 	Result SlangShaderCompiler::Compile(const ShaderDesc& desc, CompiledShaderProgram& outProgram) {
@@ -90,13 +111,42 @@ namespace RealRHI {
 			return Result::InvalidParameter;
 		}
 
-		if (!m_Session) {
+		if (!m_GlobalSession) {
 			Check(SLANG_FAIL, {}, context + " compilation session initialization failed");
 			return Result::Failed;
 		}
 
+		// The compiler options and search directory are immutable and scoped to this cache.
+		const auto key = BuildCacheKey(desc);
+		const auto cached = m_Cache.find(key);
+		if (cached != m_Cache.end()) {
+			if (DependenciesMatch(cached->second)) {
+				outProgram = cached->second.program;
+				return Result::Success;
+			}
+			m_Cache.erase(cached);
+		}
+
+		// Slang sessions memoize loaded modules. A fresh session on a miss prevents stale
+		// imports/includes after source edits or a previously failed compilation.
+		const slang::TargetDesc target{.format = SLANG_SPIRV, .profile = m_GlobalSession->findProfile("spirv_1_6")};
+		const char* directory = m_Directory.c_str();
+		const slang::SessionDesc sessionDesc{
+			.targets = &target,
+			.targetCount = 1,
+			.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR,
+			.searchPaths = &directory,
+			.searchPathCount = 1,
+			.compilerOptionEntries = m_CompilerOptions.data(),
+			.compilerOptionEntryCount = static_cast<uint32_t>(m_CompilerOptions.size()),
+		};
+		Slang::ComPtr<slang::ISession> session;
+		if (!Check(m_GlobalSession->createSession(sessionDesc, session.writeRef()), {}, context + " create session")) {
+			return Result::Failed;
+		}
+
 		Slang::ComPtr<slang::IBlob> diagnostics;
-		auto module = Slang::ComPtr<slang::IModule>(m_Session->loadModule(desc.moduleName, diagnostics.writeRef()));
+		auto module = Slang::ComPtr<slang::IModule>(session->loadModule(desc.moduleName, diagnostics.writeRef()));
 		if (!Check(module ? SLANG_OK : SLANG_FAIL, diagnostics, context + " load module")) {
 			return Result::Failed;
 		}
@@ -133,7 +183,7 @@ namespace RealRHI {
 		}
 
 		Slang::ComPtr<slang::IComponentType> composed;
-		auto result = m_Session->createCompositeComponentType(
+		auto result = session->createCompositeComponentType(
 			components.data(), components.size(), composed.writeRef(), diagnostics.writeRef());
 		if (!Check(result, diagnostics, context + " compose program") || !composed) {
 			return Result::Failed;
@@ -214,8 +264,7 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
-
-		// Devided by 4 because SPIR-V is a binary format consisting of 32-bit words.
+		// SPIR-V consists of 32-bit words.
 		program.spirv.resize(code->getBufferSize() / 4);
 		std::memcpy(program.spirv.data(), code->getBufferPointer(), code->getBufferSize());
 
@@ -223,6 +272,22 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
+		CachedProgram entry;
+		bool cacheable = module->getDependencyFileCount() > 0;
+		for (SlangInt32 i = 0; i < module->getDependencyFileCount(); ++i) {
+			Dependency dependency;
+			dependency.path = module->getDependencyFilePath(i);
+			if (!ReadDependency(dependency.path, dependency.contents)) {
+				cacheable = false;
+				break;
+			}
+			entry.dependencies.push_back(std::move(dependency));
+		}
+		program.cacheId = m_NextCacheId++;
+		if (cacheable) {
+			entry.program = program;
+			m_Cache.emplace(key, std::move(entry));
+		}
 		outProgram = std::move(program);
 		return Result::Success;
 	}
