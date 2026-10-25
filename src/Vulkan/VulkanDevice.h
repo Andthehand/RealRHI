@@ -54,10 +54,8 @@ namespace RealRHI {
 		VkInstance GetInstance() const { return m_Instance; }
 		VkDevice GetDevice() const { return m_Device; }
 		VkPhysicalDevice GetPhysicalDevice() const { return m_PhysicalDevice; }
-		VkQueue GetGraphicsQueue() const { return m_GraphicsQueue; }
 		VkQueue GetPresentQueue() const { return m_PresentQueue; }
 		uint32_t GetGraphicsQueueFamily() const { return m_GraphicsQueueFamily; }
-		uint32_t GetPresentQueueFamily() const { return m_PresentQueueFamily; }
 		CommandQueue* GetGraphicsCommandQueue() const override;
 		CommandQueue* GetCommandQueue(QueueType type) const override;
 		VulkanCommandQueue* GetCommandQueue(const QueueId& queueId) const;
@@ -106,9 +104,12 @@ namespace RealRHI {
 		Result CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) const override;
 		Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) const override;
 		Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const override;
-		Result CreateTextureView(Texture* texture, const TextureViewDesc& desc, Ref<TextureView>& outView) const override;
+		Result CreateTextureView(Texture* texture,
+			const TextureViewDesc& desc,
+			Ref<TextureView>& outView) const override;
 		Result CreateSampler(const SamplerDesc& desc, Ref<Sampler>& outSampler) const override;
-		Result CreateUploadContext(const UploadContextDesc& desc, std::unique_ptr<UploadContext>& outContext) const override;
+		Result CreateUploadContext(const UploadContextDesc& desc,
+			std::unique_ptr<UploadContext>& outContext) const override;
 		Result CreateCommandAllocator(QueueType type, Ref<CommandAllocator>& outAllocator) const override;
 		Result CreateCommandList(CommandAllocator* allocator, Ref<CommandList>& outCommandList) const override;
 
@@ -155,10 +156,9 @@ namespace RealRHI {
 		uint32_t m_PresentQueueFamily = 0;
 		uint32_t m_ComputeQueueFamily = 0;
 		uint32_t m_TransferQueueFamily = 0;
-		VkQueue m_GraphicsQueue = VK_NULL_HANDLE;
 		VkQueue m_PresentQueue = VK_NULL_HANDLE;
 		VulkanCommandQueue* m_GraphicsCommandQueue = nullptr;
-		std::unordered_map<QueueId, VulkanCommandQueue*> m_Queues;
+		std::unordered_map<QueueId, std::unique_ptr<VulkanCommandQueue>> m_Queues;
 		mutable DeferredDeletionQueue m_DeferredDeletions;
 		mutable std::recursive_mutex m_StateTrackingMutex;
 

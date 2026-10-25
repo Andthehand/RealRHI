@@ -20,7 +20,6 @@ namespace RealRHI {
 		void Free(VkCommandBuffer buffer);
 		VkResult ResetBuffer(VkCommandBuffer buffer);
 
-		VkCommandPool GetPool() const { return m_Pool; }
 		uint32_t GetQueueFamilyIndex() const { return m_Family; }
 
 	private:

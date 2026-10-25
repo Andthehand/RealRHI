@@ -1,7 +1,7 @@
 #include "VulkanSwapchain.h"
 
 #include "VulkanCommandQueue.h"
-#include "VulkanConvertions.h"
+#include "VulkanConversions.h"
 
 #include <algorithm>
 #include <iostream>
@@ -337,13 +337,7 @@ namespace RealRHI {
 		sync.submitted = false;
 
 		if (m_Swapchain == VK_NULL_HANDLE || m_SwapchainExtent.width == 0 || m_SwapchainExtent.height == 0) {
-			return FrameContext{
-				.frameIndex = frameIdx,
-				.imageIndex = std::numeric_limits<uint32_t>::max(),
-				.backBufferView = nullptr,
-				.width = 0,
-				.height = 0,
-			};
+			return FrameContext{.frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max()};
 		}
 
 		uint32_t imageIndex = std::numeric_limits<uint32_t>::max();
@@ -358,13 +352,7 @@ namespace RealRHI {
 				return FrameContext{.imageIndex = std::numeric_limits<uint32_t>::max()};
 			}
 			if (m_Swapchain == VK_NULL_HANDLE || m_SwapchainExtent.width == 0 || m_SwapchainExtent.height == 0) {
-				return FrameContext{
-					.frameIndex = frameIdx,
-					.imageIndex = std::numeric_limits<uint32_t>::max(),
-					.backBufferView = nullptr,
-					.width = 0,
-					.height = 0,
-				};
+				return FrameContext{.frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max()};
 			}
 
 			result = vkAcquireNextImageKHR(m_Device->GetDevice(),
@@ -382,36 +370,18 @@ namespace RealRHI {
 				m_Device->SendDebugMessage(DebugSeverity::Error,
 					DebugMessageType::General,
 					"Failed to acquire swapchain image after recreation.");
-				return FrameContext{
-					.frameIndex = frameIdx,
-					.imageIndex = std::numeric_limits<uint32_t>::max(),
-					.backBufferView = nullptr,
-					.width = 0,
-					.height = 0,
-				};
+				return FrameContext{.frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max()};
 			}
 		}
 		else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
 			m_Device->SendDebugMessage(
 				DebugSeverity::Error, DebugMessageType::General, "Failed to acquire swapchain image.");
-			return FrameContext{
-				.frameIndex = frameIdx,
-				.imageIndex = std::numeric_limits<uint32_t>::max(),
-				.backBufferView = nullptr,
-				.width = 0,
-				.height = 0,
-			};
+			return FrameContext{.frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max()};
 		}
 
 		if (imageIndex >= m_SwapchainImages.size()) {
 			m_FrameFailed = true;
-			return FrameContext{
-				.frameIndex = frameIdx,
-				.imageIndex = std::numeric_limits<uint32_t>::max(),
-				.backBufferView = nullptr,
-				.width = 0,
-				.height = 0,
-			};
+			return FrameContext{.frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max()};
 		}
 
 		return FrameContext{

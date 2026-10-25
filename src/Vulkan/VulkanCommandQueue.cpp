@@ -242,9 +242,7 @@ namespace RealRHI {
 		});
 
 		for (CommandList* commandList : trackedLists) {
-			if (commandList != nullptr) {
-				static_cast<VulkanCommandList*>(commandList)->SetState(CommandListState::Pending);
-			}
+			static_cast<VulkanCommandList*>(commandList)->SetState(CommandListState::Pending);
 		}
 
 		submitLock.unlock();

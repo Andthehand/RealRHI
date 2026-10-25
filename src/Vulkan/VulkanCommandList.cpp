@@ -3,7 +3,7 @@
 #include "VulkanBarrierConversions.h"
 #include "VulkanBuffer.h"
 #include "VulkanCommandQueue.h"
-#include "VulkanConvertions.h"
+#include "VulkanConversions.h"
 #include "VulkanPipeline.h"
 #include "VulkanTexture.h"
 #include "VulkanTextureView.h"
@@ -201,9 +201,9 @@ namespace RealRHI {
 		}
 
 		const uint32_t mip = view->GetSubresources().baseMipLevel;
-		const auto extent = texture->GetExtent();
-		const uint32_t width = std::max(1u, extent.width >> mip);
-		const uint32_t height = std::max(1u, extent.height >> mip);
+		const auto extent = texture->GetMipExtent(mip);
+		const uint32_t width = extent.width;
+		const uint32_t height = extent.height;
 		if (renderArea.x < 0 || renderArea.y < 0 || static_cast<uint32_t>(renderArea.x) > width ||
 			static_cast<uint32_t>(renderArea.y) > height ||
 			renderArea.width > width - static_cast<uint32_t>(renderArea.x) ||
@@ -533,7 +533,7 @@ namespace RealRHI {
 		}
 		RetainResource(vertexBuffer);
 		m_VertexBuffer = buffer;
-		VkBuffer vertexBuffers[] = {static_cast<VulkanBuffer*>(vertexBuffer)->GetBuffer()};
+		VkBuffer vertexBuffers[] = {buffer->GetBuffer()};
 		VkDeviceSize offsets[] = {0};
 		vkCmdBindVertexBuffers(m_CommandBuffer, 0, 1, vertexBuffers, offsets);
 	}
@@ -549,196 +549,7 @@ namespace RealRHI {
 		}
 		RetainResource(indexBuffer);
 		m_IndexBuffer = buffer;
-		vkCmdBindIndexBuffer(
-			m_CommandBuffer, static_cast<VulkanBuffer*>(indexBuffer)->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
-	}
-
-	TextureLayout VulkanCommandList::GetExpectedLayout(const VulkanTexture* texture,
-		uint32_t mip,
-		uint32_t layer) const {
-		const auto it = m_RecordedLayouts.find({texture, mip, layer});
-		if (it != m_RecordedLayouts.end()) {
-			return it->second;
-		}
-
-		return texture->GetSubmittedState(mip, layer).layout;
-	}
-
-	bool VulkanCommandList::ValidateOwnership(VulkanQueueOwnership& ownership,
-		const ResourceOperation& operation,
-		SubmissionToken submission,
-		std::span<const VkSemaphoreSubmitInfo> waits) const {
-		auto reject = [&](const char* cause) {
-			std::ostringstream message;
-			message << "Submit: " << operation.name << ": " << cause << "; family=" << m_QueueId.familyIndex
-					<< ", owner=" << ownership.family << ", pending destination=" << ownership.pendingFamily;
-			if (operation.buffer) {
-				message << ", buffer=" << operation.buffer << ", offset=" << operation.offset
-						<< ", size=" << operation.size;
-			}
-			else {
-				message << ", texture=" << operation.texture << ", base mip=" << operation.subresources.baseMipLevel
-						<< ", base layer=" << operation.subresources.baseArrayLayer;
-			}
-			if (ownership.release.IsValid()) {
-				message << ", release token=" << ownership.release.queue.familyIndex << ":"
-						<< ownership.release.queue.queueIndex << "/" << ownership.release.value;
-			}
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, message.str().c_str());
-			return false;
-		};
-
-		const bool transfer =
-			operation.sourceFamily != UINT32_MAX && operation.sourceFamily != operation.destinationFamily;
-		const bool acquire = transfer && m_QueueId.familyIndex == operation.destinationFamily;
-		if (acquire) {
-			if (ownership.family != operation.sourceFamily || ownership.pendingFamily != operation.destinationFamily ||
-				!ownership.release.IsValid()) {
-				return reject("acquire requires a matching release from the source family");
-			}
-			auto* sourceQueue = m_Device->GetCommandQueue(ownership.release.queue);
-			bool waited = false;
-			for (const auto& wait : waits) {
-				if (sourceQueue && wait.semaphore == sourceQueue->GetTimelineSemaphore() &&
-					wait.value >= ownership.release.value &&
-					(wait.stageMask & VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT) != 0) {
-					waited = true;
-					break;
-				}
-			}
-			if (!waited) {
-				return reject("acquire must waitFor the release submission token (or a later token on that queue)");
-			}
-			ownership.family = operation.destinationFamily;
-			ownership.pendingFamily = UINT32_MAX;
-			ownership.release = {};
-			return true;
-		}
-
-		if (ownership.pendingFamily != UINT32_MAX) {
-			return reject("resource was released; record a matching acquire before using or releasing it again");
-		}
-		if (ownership.family != UINT32_MAX && ownership.family != m_QueueId.familyIndex) {
-			return reject("resource belongs to another family; release there and acquire on this family");
-		}
-		ownership.family = m_QueueId.familyIndex;
-		if (transfer) {
-			ownership.pendingFamily = operation.destinationFamily;
-			ownership.release = submission;
-		}
-		return true;
-	}
-
-	bool VulkanCommandList::ValidateSubmissionState(SubmissionState& predicted,
-		SubmissionToken submission,
-		std::span<const VkSemaphoreSubmitInfo> waits) const {
-		for (const auto& operation : m_ResourceOperations) {
-			const bool transfer =
-				operation.sourceFamily != UINT32_MAX && operation.sourceFamily != operation.destinationFamily;
-			const bool acquire = transfer && m_QueueId.familyIndex == operation.destinationFamily;
-			if (operation.buffer) {
-				auto [entry, inserted] = predicted.buffers.try_emplace(operation.buffer);
-				if (inserted) {
-					entry->second = operation.buffer->GetSubmittedRanges();
-				}
-				auto& ranges = entry->second;
-				const uint64_t end = operation.offset + operation.size;
-				// Split at operation boundaries so disjoint buffer regions can change owners independently.
-				for (uint64_t boundary : {operation.offset, end}) {
-					for (size_t i = 0; i < ranges.size(); ++i) {
-						auto& range = ranges[i];
-						if (boundary > range.offset && boundary < range.offset + range.size) {
-							auto tail = range;
-							tail.size = range.offset + range.size - boundary;
-							tail.offset = boundary;
-							range.size = boundary - range.offset;
-							ranges.insert(ranges.begin() + i + 1, tail);
-							break;
-						}
-					}
-				}
-				for (auto& range : ranges) {
-					if (range.offset < operation.offset || range.offset >= end) {
-						continue;
-					}
-					if (!ValidateOwnership(range.ownership, operation, submission, waits)) {
-						return false;
-					}
-					if (acquire && (range.releaseOffset != operation.offset || range.releaseSize != operation.size)) {
-						m_Device->SendDebugMessage(DebugSeverity::Error,
-							DebugMessageType::General,
-							"Submit: Buffer acquire offset and size must exactly match the release barrier.");
-						return false;
-					}
-					if (transfer && !acquire) {
-						range.releaseOffset = operation.offset;
-						range.releaseSize = operation.size;
-					}
-				}
-				continue;
-			}
-
-			const auto& subresources = operation.subresources;
-			for (uint32_t mip = subresources.baseMipLevel; mip < subresources.baseMipLevel + subresources.mipLevelCount;
-				++mip) {
-				for (uint32_t layer = subresources.baseArrayLayer;
-					layer < subresources.baseArrayLayer + subresources.arrayLayerCount;
-					++layer) {
-					const SubresourceKey key{operation.texture, mip, layer};
-					auto [entry, inserted] = predicted.textures.try_emplace(key);
-					if (inserted) {
-						entry->second = operation.texture->GetSubmittedState(mip, layer);
-					}
-					auto& state = entry->second;
-					if (!ValidateOwnership(state.ownership, operation, submission, waits)) {
-						return false;
-					}
-					if (acquire) {
-						const auto& released = state.releaseRange;
-						if (state.releaseOldLayout != operation.oldLayout ||
-							state.releaseNewLayout != operation.newLayout ||
-							released.baseMipLevel != subresources.baseMipLevel ||
-							released.mipLevelCount != subresources.mipLevelCount ||
-							released.baseArrayLayer != subresources.baseArrayLayer ||
-							released.arrayLayerCount != subresources.arrayLayerCount) {
-							m_Device->SendDebugMessage(DebugSeverity::Error,
-								DebugMessageType::General,
-								"Submit: Texture acquire old/new layouts and mip/layer range must exactly match the "
-								"release barrier.");
-							return false;
-						}
-					}
-					else if (operation.oldLayout != TextureLayout::Undefined && state.layout != operation.oldLayout) {
-						std::ostringstream message;
-						message << "Submit: " << operation.name << ": texture=" << operation.texture << ", mip=" << mip
-								<< ", layer=" << layer << ": layout differs from the recorded requirement; expected="
-								<< static_cast<uint32_t>(operation.oldLayout)
-								<< ", submitted=" << static_cast<uint32_t>(state.layout);
-						m_Device->SendDebugMessage(
-							DebugSeverity::Error, DebugMessageType::General, message.str().c_str());
-						return false;
-					}
-					if (transfer && !acquire) {
-						state.releaseOldLayout = operation.oldLayout;
-						state.releaseNewLayout = operation.newLayout;
-						state.releaseRange = subresources;
-					}
-					if (operation.barrier) {
-						state.layout = operation.newLayout;
-					}
-				}
-			}
-		}
-		return true;
-	}
-
-	void VulkanCommandList::CommitSubmissionState(SubmissionState& predicted) {
-		for (auto& [buffer, ranges] : predicted.buffers) {
-			buffer->CommitSubmittedRanges(std::move(ranges));
-		}
-		for (const auto& [key, state] : predicted.textures) {
-			const_cast<VulkanTexture*>(key.texture)->CommitSubmittedState(key.mipLevel, key.arrayLayer, state);
-		}
+		vkCmdBindIndexBuffer(m_CommandBuffer, buffer->GetBuffer(), 0, VK_INDEX_TYPE_UINT32);
 	}
 
 	void VulkanCommandList::RecordBufferUse(VulkanBuffer* buffer,
@@ -774,19 +585,339 @@ namespace RealRHI {
 		}
 	}
 
-	bool VulkanCommandList::HasRecordedLayout(const VulkanTexture* texture,
-		uint32_t mipLevel,
-		uint32_t baseLayer,
-		uint32_t layerCount,
-		TextureLayout expected) const {
-		for (uint32_t layer = baseLayer; layer < baseLayer + layerCount; ++layer) {
-			const auto recorded = m_RecordedLayouts.find({texture, mipLevel, layer});
-			if (expected != TextureLayout::Undefined && recorded != m_RecordedLayouts.end() &&
-				recorded->second != expected) {
-				return false;
-			}
+	void VulkanCommandList::Draw(uint32_t vertexCount,
+		uint32_t instanceCount,
+		uint32_t firstVertex,
+		uint32_t firstInstance) {
+		if (GetState() != CommandListState::Recording || !m_Rendering || !m_GraphicsPipelineBound) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"Draw: Requires an active rendering scope and a bound graphics pipeline.");
+			return;
 		}
-		return true;
+		RecordShaderResources("Draw");
+		if (m_VertexBuffer) {
+			RecordBufferUse(m_VertexBuffer, 0, m_VertexBuffer->GetSize(), "Draw vertex buffer");
+		}
+		vkCmdDraw(m_CommandBuffer, vertexCount, instanceCount, firstVertex, firstInstance);
+	}
+
+	void VulkanCommandList::DrawIndexed(uint32_t indexCount,
+		uint32_t instanceCount,
+		uint32_t firstIndex,
+		int32_t vertexOffset,
+		uint32_t firstInstance) {
+		if (GetState() != CommandListState::Recording || !m_Rendering || !m_GraphicsPipelineBound) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"DrawIndexed: Requires an active rendering scope and a bound graphics pipeline.");
+			return;
+		}
+		if (m_IndexBuffer == nullptr || firstIndex > m_IndexBuffer->GetSize() / sizeof(uint32_t) ||
+			indexCount > m_IndexBuffer->GetSize() / sizeof(uint32_t) - firstIndex) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"DrawIndexed: Bind an index buffer and select an in-bounds range of 32-bit indices.");
+
+			return;
+		}
+
+		RecordShaderResources("DrawIndexed");
+		if (m_VertexBuffer) {
+			RecordBufferUse(m_VertexBuffer, 0, m_VertexBuffer->GetSize(), "DrawIndexed vertex buffer");
+		}
+		RecordBufferUse(m_IndexBuffer, 0, m_IndexBuffer->GetSize(), "DrawIndexed index buffer");
+		vkCmdDrawIndexed(m_CommandBuffer, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
+	}
+
+	void VulkanCommandList::CopyBuffer(Buffer* source, Buffer* destination, const BufferCopyRegion& region) {
+		if (GetState() != CommandListState::Recording || region.size == 0) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"CopyBuffer failed: Command list is not recording or region size is zero.");
+
+			return;
+		}
+
+		auto* sourceBuffer = static_cast<VulkanBuffer*>(source);
+		auto* destinationBuffer = static_cast<VulkanBuffer*>(destination);
+		if (sourceBuffer == nullptr || destinationBuffer == nullptr ||
+			!Any(sourceBuffer->GetUsage() & BufferUsage::TransferSrc) ||
+			!Any(destinationBuffer->GetUsage() & BufferUsage::TransferDst)) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"CopyBuffer: Provide non-null source and destination buffers with TransferSrc "
+				"and TransferDst usage respectively.");
+
+			return;
+		}
+
+		if (region.sourceOffset > sourceBuffer->GetSize() ||
+			region.size > sourceBuffer->GetSize() - region.sourceOffset ||
+			region.destinationOffset > destinationBuffer->GetSize() ||
+			region.size > destinationBuffer->GetSize() - region.destinationOffset) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"CopyBuffer failed: Copy region is out of bounds of source or destination buffer.");
+
+			return;
+		}
+
+		RetainResource(sourceBuffer);
+		RetainResource(destinationBuffer);
+		RecordBufferUse(sourceBuffer, region.sourceOffset, region.size, "CopyBuffer source");
+		RecordBufferUse(destinationBuffer, region.destinationOffset, region.size, "CopyBuffer destination");
+
+		VkBufferCopy copyRegion{
+			.srcOffset = region.sourceOffset,
+			.dstOffset = region.destinationOffset,
+			.size = region.size,
+		};
+		vkCmdCopyBuffer(m_CommandBuffer, sourceBuffer->GetBuffer(), destinationBuffer->GetBuffer(), 1, &copyRegion);
+	}
+
+	void VulkanCommandList::CopyBufferToTexture(Buffer* source,
+		Texture* destination,
+		const BufferTextureCopyRegion& region) {
+		if (GetState() != CommandListState::Recording || region.width == 0 || region.height == 0 || region.depth == 0 ||
+			region.layerCount == 0) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"CopyBufferToTexture failed: Command list is not recording or region dimensions are zero.");
+
+			return;
+		}
+
+		auto* sourceBuffer = static_cast<VulkanBuffer*>(source);
+		auto* destinationTexture = static_cast<VulkanTexture*>(destination);
+		if (sourceBuffer == nullptr || destinationTexture == nullptr ||
+			region.mipLevel >= destinationTexture->GetMipLevelCount() ||
+			region.baseArrayLayer >= destinationTexture->GetArrayLayerCount() ||
+			region.layerCount > destinationTexture->GetArrayLayerCount() - region.baseArrayLayer ||
+			!Any(sourceBuffer->GetUsage() & BufferUsage::TransferSrc) ||
+			!Any(destinationTexture->GetUsage() & TextureUsage::TransferDst)) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"CopyBufferToTexture failed: Invalid source buffer or destination texture, or "
+				"invalid copy region parameters.");
+
+			return;
+		}
+
+		const VkExtent3D mipExtent = destinationTexture->GetMipExtent(region.mipLevel);
+		if (region.width > mipExtent.width || region.height > mipExtent.height || region.depth > mipExtent.depth ||
+			region.bufferOffset >= sourceBuffer->GetSize()) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"CopyBufferToTexture failed: Copy region dimensions exceed mip level extent or "
+				"buffer offset is out of bounds.");
+
+			return;
+		}
+
+		const uint32_t texelSize =
+			Utils::TextureFormatByteSize(Utils::VkFormatToTextureFormat(destinationTexture->GetFormat()));
+		if (texelSize == 0 || region.bufferOffset % texelSize != 0 ||
+			region.width > UINT64_MAX / region.height / region.depth / region.layerCount / texelSize ||
+			static_cast<uint64_t>(region.width) * region.height * region.depth * region.layerCount * texelSize >
+				sourceBuffer->GetSize() - region.bufferOffset) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"CopyBufferToTexture: Unsupported format, misaligned buffer offset, or "
+				"insufficient source buffer capacity.");
+			return;
+		}
+
+		RecordTextureUse(destinationTexture,
+			{region.mipLevel, 1, region.baseArrayLayer, region.layerCount},
+			TextureLayout::TransferDst,
+			"CopyBufferToTexture");
+		RetainResource(sourceBuffer);
+		RetainResource(destinationTexture);
+		RecordBufferUse(sourceBuffer,
+			region.bufferOffset,
+			static_cast<uint64_t>(region.width) * region.height * region.depth * region.layerCount * texelSize,
+			"CopyBufferToTexture");
+		VkBufferImageCopy copyRegion{
+			.bufferOffset = region.bufferOffset,
+			.imageSubresource =
+				{
+					.aspectMask = Utils::TextureFormatToVkImageAspect(
+						Utils::VkFormatToTextureFormat(destinationTexture->GetFormat())),
+					.mipLevel = region.mipLevel,
+					.baseArrayLayer = region.baseArrayLayer,
+					.layerCount = region.layerCount,
+				},
+			.imageExtent = {region.width, region.height, region.depth},
+		};
+		vkCmdCopyBufferToImage(m_CommandBuffer,
+			sourceBuffer->GetBuffer(),
+			destinationTexture->GetImage(),
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			1,
+			&copyRegion);
+	}
+
+	void VulkanCommandList::CopyTextureToBuffer(Texture* source,
+		Buffer* destination,
+		const BufferTextureCopyRegion& region) {
+		if (GetState() != CommandListState::Recording || region.width == 0 || region.height == 0 || region.depth == 0 ||
+			region.layerCount == 0) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"Texture copy failed: Command list is not recording or region dimensions are zero.");
+			return;
+		}
+
+		auto* texture = static_cast<VulkanTexture*>(source);
+		auto* buffer = static_cast<VulkanBuffer*>(destination);
+		if (texture == nullptr || buffer == nullptr || !Any(texture->GetUsage() & TextureUsage::TransferSrc) ||
+			!Any(buffer->GetUsage() & BufferUsage::TransferDst) ||
+
+			region.mipLevel >= texture->GetMipLevelCount() || region.baseArrayLayer >= texture->GetArrayLayerCount() ||
+			region.layerCount > texture->GetArrayLayerCount() - region.baseArrayLayer ||
+			region.bufferOffset >= buffer->GetSize() ||
+			!HasRecordedLayout(
+				texture, region.mipLevel, region.baseArrayLayer, region.layerCount, TextureLayout::TransferSrc)) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"CopyTextureToBuffer failed: Invalid source texture, destination buffer, or subresource range.");
+			return;
+		}
+
+		const VkExtent3D mipExtent = texture->GetMipExtent(region.mipLevel);
+		if (region.width > mipExtent.width || region.height > mipExtent.height || region.depth > mipExtent.depth) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"CopyTextureToBuffer failed: Copy dimensions exceed source mip extent.");
+			return;
+		}
+
+		// Initial readback supports tightly packed RGBA8 data. Other formats
+		// need format-aware block size and row pitch handling.
+		if (texture->GetFormat() != VK_FORMAT_R8G8B8A8_UNORM ||
+			region.width > UINT64_MAX / region.height / region.depth / region.layerCount / 4 ||
+			static_cast<uint64_t>(region.width) * region.height * region.depth * region.layerCount * 4 >
+				buffer->GetSize() - region.bufferOffset) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"CopyTextureToBuffer failed: Unsupported texture format or insufficient readback buffer capacity.");
+			return;
+		}
+
+		RecordTextureUse(texture,
+			{region.mipLevel, 1, region.baseArrayLayer, region.layerCount},
+			TextureLayout::TransferSrc,
+			"CopyTextureToBuffer");
+		RetainResource(texture);
+		RetainResource(buffer);
+		RecordBufferUse(buffer,
+			region.bufferOffset,
+			static_cast<uint64_t>(region.width) * region.height * region.depth * region.layerCount * 4,
+			"CopyTextureToBuffer");
+		VkBufferImageCopy copyRegion{
+			.bufferOffset = region.bufferOffset,
+			.imageSubresource =
+				{
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+					.mipLevel = region.mipLevel,
+					.baseArrayLayer = region.baseArrayLayer,
+					.layerCount = region.layerCount,
+				},
+			.imageExtent = {region.width, region.height, region.depth},
+		};
+		vkCmdCopyImageToBuffer(m_CommandBuffer,
+			texture->GetImage(),
+			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			buffer->GetBuffer(),
+			1,
+			&copyRegion);
+	}
+
+	void VulkanCommandList::CopyTexture(Texture* source, Texture* destination, const TextureCopyRegion& region) {
+		if (GetState() != CommandListState::Recording || region.width == 0 || region.height == 0 || region.depth == 0 ||
+			region.layerCount == 0) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"Texture copy failed: Command list is not recording or region dimensions are zero.");
+			return;
+		}
+
+		auto* sourceTexture = static_cast<VulkanTexture*>(source);
+		auto* destinationTexture = static_cast<VulkanTexture*>(destination);
+		if (sourceTexture == nullptr || destinationTexture == nullptr ||
+			!Any(sourceTexture->GetUsage() & TextureUsage::TransferSrc) ||
+			!Any(destinationTexture->GetUsage() & TextureUsage::TransferDst) ||
+
+			sourceTexture == destinationTexture || sourceTexture->GetFormat() != destinationTexture->GetFormat() ||
+			sourceTexture->GetFormat() != VK_FORMAT_R8G8B8A8_UNORM ||
+			region.sourceMipLevel >= sourceTexture->GetMipLevelCount() ||
+			region.destinationMipLevel >= destinationTexture->GetMipLevelCount() ||
+			region.sourceBaseArrayLayer >= sourceTexture->GetArrayLayerCount() ||
+			region.destinationBaseArrayLayer >= destinationTexture->GetArrayLayerCount() ||
+			region.layerCount > sourceTexture->GetArrayLayerCount() - region.sourceBaseArrayLayer ||
+			region.layerCount > destinationTexture->GetArrayLayerCount() - region.destinationBaseArrayLayer ||
+			!HasRecordedLayout(sourceTexture,
+				region.sourceMipLevel,
+				region.sourceBaseArrayLayer,
+				region.layerCount,
+				TextureLayout::TransferSrc) ||
+			!HasRecordedLayout(destinationTexture,
+				region.destinationMipLevel,
+				region.destinationBaseArrayLayer,
+				region.layerCount,
+				TextureLayout::TransferDst)) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"CopyTexture failed: Invalid textures, formats, or subresource range.");
+			return;
+		}
+
+		const auto fits = [&](const VulkanTexture* texture, uint32_t mipLevel) {
+			const auto extent = texture->GetMipExtent(mipLevel);
+			return region.width <= extent.width && region.height <= extent.height && region.depth <= extent.depth;
+		};
+		if (!fits(sourceTexture, region.sourceMipLevel) || !fits(destinationTexture, region.destinationMipLevel)) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"CopyTexture failed: Copy dimensions exceed source or destination mip extent.");
+			return;
+		}
+
+		RecordTextureUse(sourceTexture,
+			{region.sourceMipLevel, 1, region.sourceBaseArrayLayer, region.layerCount},
+			TextureLayout::TransferSrc,
+			"CopyTexture source");
+		RecordTextureUse(destinationTexture,
+			{region.destinationMipLevel, 1, region.destinationBaseArrayLayer, region.layerCount},
+			TextureLayout::TransferDst,
+			"CopyTexture destination");
+		RetainResource(sourceTexture);
+		RetainResource(destinationTexture);
+		VkImageCopy copyRegion{
+			.srcSubresource =
+				{
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+					.mipLevel = region.sourceMipLevel,
+					.baseArrayLayer = region.sourceBaseArrayLayer,
+					.layerCount = region.layerCount,
+				},
+			.dstSubresource =
+				{
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+					.mipLevel = region.destinationMipLevel,
+					.baseArrayLayer = region.destinationBaseArrayLayer,
+					.layerCount = region.layerCount,
+				},
+			.extent = {region.width, region.height, region.depth},
+		};
+		vkCmdCopyImage(m_CommandBuffer,
+			sourceTexture->GetImage(),
+			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			destinationTexture->GetImage(),
+			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			1,
+			&copyRegion);
 	}
 
 	bool VulkanCommandList::ResolveQueueFamilies(std::optional<QueueType> source,
@@ -1040,50 +1171,578 @@ namespace RealRHI {
 		vkCmdPipelineBarrier2(m_CommandBuffer, &dependencyInfo);
 	}
 
-	void VulkanCommandList::Draw(uint32_t vertexCount,
-		uint32_t instanceCount,
-		uint32_t firstVertex,
-		uint32_t firstInstance) {
-		if (GetState() != CommandListState::Recording || !m_Rendering || !m_GraphicsPipelineBound) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"Draw: Requires an active rendering scope and a bound graphics pipeline.");
-			return;
+	TextureLayout VulkanCommandList::GetExpectedLayout(const VulkanTexture* texture,
+		uint32_t mip,
+		uint32_t layer) const {
+		const auto it = m_RecordedLayouts.find({texture, mip, layer});
+		if (it != m_RecordedLayouts.end()) {
+			return it->second;
 		}
-		RecordShaderResources("Draw");
-		if (m_VertexBuffer) {
-			RecordBufferUse(m_VertexBuffer, 0, m_VertexBuffer->GetSize(), "Draw vertex buffer");
-		}
-		vkCmdDraw(m_CommandBuffer, vertexCount, instanceCount, firstVertex, firstInstance);
+
+		return texture->GetSubmittedState(mip, layer).layout;
 	}
 
-	void VulkanCommandList::DrawIndexed(uint32_t indexCount,
-		uint32_t instanceCount,
-		uint32_t firstIndex,
-		int32_t vertexOffset,
-		uint32_t firstInstance) {
-		if (GetState() != CommandListState::Recording || !m_Rendering || !m_GraphicsPipelineBound) {
+	bool VulkanCommandList::ValidateOwnership(VulkanQueueOwnership& ownership,
+		const ResourceOperation& operation,
+		SubmissionToken submission,
+		std::span<const VkSemaphoreSubmitInfo> waits) const {
+		auto reject = [&](const char* cause) {
+			std::ostringstream message;
+			message << "Submit: " << operation.name << ": " << cause << "; family=" << m_QueueId.familyIndex
+					<< ", owner=" << ownership.family << ", pending destination=" << ownership.pendingFamily;
+			if (operation.buffer) {
+				message << ", buffer=" << operation.buffer << ", offset=" << operation.offset
+						<< ", size=" << operation.size;
+			}
+			else {
+				message << ", texture=" << operation.texture << ", base mip=" << operation.subresources.baseMipLevel
+						<< ", base layer=" << operation.subresources.baseArrayLayer;
+			}
+			if (ownership.release.IsValid()) {
+				message << ", release token=" << ownership.release.queue.familyIndex << ":"
+						<< ownership.release.queue.queueIndex << "/" << ownership.release.value;
+			}
+			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, message.str().c_str());
+			return false;
+		};
+
+		const bool transfer =
+			operation.sourceFamily != UINT32_MAX && operation.sourceFamily != operation.destinationFamily;
+		const bool acquire = transfer && m_QueueId.familyIndex == operation.destinationFamily;
+		if (acquire) {
+			if (ownership.family != operation.sourceFamily || ownership.pendingFamily != operation.destinationFamily ||
+				!ownership.release.IsValid()) {
+				return reject("acquire requires a matching release from the source family");
+			}
+			auto* sourceQueue = m_Device->GetCommandQueue(ownership.release.queue);
+			bool waited = false;
+			for (const auto& wait : waits) {
+				if (sourceQueue && wait.semaphore == sourceQueue->GetTimelineSemaphore() &&
+					wait.value >= ownership.release.value &&
+					(wait.stageMask & VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT) != 0) {
+					waited = true;
+					break;
+				}
+			}
+			if (!waited) {
+				return reject("acquire must waitFor the release submission token (or a later token on that queue)");
+			}
+			ownership.family = operation.destinationFamily;
+			ownership.pendingFamily = UINT32_MAX;
+			ownership.release = {};
+			return true;
+		}
+
+		if (ownership.pendingFamily != UINT32_MAX) {
+			return reject("resource was released; record a matching acquire before using or releasing it again");
+		}
+		if (ownership.family != UINT32_MAX && ownership.family != m_QueueId.familyIndex) {
+			return reject("resource belongs to another family; release there and acquire on this family");
+		}
+		ownership.family = m_QueueId.familyIndex;
+		if (transfer) {
+			ownership.pendingFamily = operation.destinationFamily;
+			ownership.release = submission;
+		}
+		return true;
+	}
+
+	bool VulkanCommandList::ValidateSubmissionState(SubmissionState& predicted,
+		SubmissionToken submission,
+		std::span<const VkSemaphoreSubmitInfo> waits) const {
+		for (const auto& operation : m_ResourceOperations) {
+			const bool transfer =
+				operation.sourceFamily != UINT32_MAX && operation.sourceFamily != operation.destinationFamily;
+			const bool acquire = transfer && m_QueueId.familyIndex == operation.destinationFamily;
+			if (operation.buffer) {
+				auto [entry, inserted] = predicted.buffers.try_emplace(operation.buffer);
+				if (inserted) {
+					entry->second = operation.buffer->GetSubmittedRanges();
+				}
+				auto& ranges = entry->second;
+				const uint64_t end = operation.offset + operation.size;
+				// Split at operation boundaries so disjoint buffer regions can change owners independently.
+				for (uint64_t boundary : {operation.offset, end}) {
+					for (size_t i = 0; i < ranges.size(); ++i) {
+						auto& range = ranges[i];
+						if (boundary > range.offset && boundary < range.offset + range.size) {
+							auto tail = range;
+							tail.size = range.offset + range.size - boundary;
+							tail.offset = boundary;
+							range.size = boundary - range.offset;
+							ranges.insert(ranges.begin() + i + 1, tail);
+							break;
+						}
+					}
+				}
+				for (auto& range : ranges) {
+					if (range.offset < operation.offset || range.offset >= end) {
+						continue;
+					}
+					if (!ValidateOwnership(range.ownership, operation, submission, waits)) {
+						return false;
+					}
+					if (acquire && (range.releaseOffset != operation.offset || range.releaseSize != operation.size)) {
+						m_Device->SendDebugMessage(DebugSeverity::Error,
+							DebugMessageType::General,
+							"Submit: Buffer acquire offset and size must exactly match the release barrier.");
+						return false;
+					}
+					if (transfer && !acquire) {
+						range.releaseOffset = operation.offset;
+						range.releaseSize = operation.size;
+					}
+				}
+				continue;
+			}
+
+			const auto& subresources = operation.subresources;
+			for (uint32_t mip = subresources.baseMipLevel; mip < subresources.baseMipLevel + subresources.mipLevelCount;
+				++mip) {
+				for (uint32_t layer = subresources.baseArrayLayer;
+					layer < subresources.baseArrayLayer + subresources.arrayLayerCount;
+					++layer) {
+					const SubresourceKey key{operation.texture, mip, layer};
+					auto [entry, inserted] = predicted.textures.try_emplace(key);
+					if (inserted) {
+						entry->second = operation.texture->GetSubmittedState(mip, layer);
+					}
+					auto& state = entry->second;
+					if (!ValidateOwnership(state.ownership, operation, submission, waits)) {
+						return false;
+					}
+					if (acquire) {
+						const auto& released = state.releaseRange;
+						if (state.releaseOldLayout != operation.oldLayout ||
+							state.releaseNewLayout != operation.newLayout ||
+							released.baseMipLevel != subresources.baseMipLevel ||
+							released.mipLevelCount != subresources.mipLevelCount ||
+							released.baseArrayLayer != subresources.baseArrayLayer ||
+							released.arrayLayerCount != subresources.arrayLayerCount) {
+							m_Device->SendDebugMessage(DebugSeverity::Error,
+								DebugMessageType::General,
+								"Submit: Texture acquire old/new layouts and mip/layer range must exactly match the "
+								"release barrier.");
+							return false;
+						}
+					}
+					else if (operation.oldLayout != TextureLayout::Undefined && state.layout != operation.oldLayout) {
+						std::ostringstream message;
+						message << "Submit: " << operation.name << ": texture=" << operation.texture << ", mip=" << mip
+								<< ", layer=" << layer << ": layout differs from the recorded requirement; expected="
+								<< static_cast<uint32_t>(operation.oldLayout)
+								<< ", submitted=" << static_cast<uint32_t>(state.layout);
+						m_Device->SendDebugMessage(
+							DebugSeverity::Error, DebugMessageType::General, message.str().c_str());
+						return false;
+					}
+					if (transfer && !acquire) {
+						state.releaseOldLayout = operation.oldLayout;
+						state.releaseNewLayout = operation.newLayout;
+						state.releaseRange = subresources;
+					}
+					if (operation.barrier) {
+						state.layout = operation.newLayout;
+					}
+				}
+			}
+		}
+		return true;
+	}
+
+	void VulkanCommandList::CommitSubmissionState(SubmissionState& predicted) {
+		for (auto& [buffer, ranges] : predicted.buffers) {
+			buffer->CommitSubmittedRanges(std::move(ranges));
+		}
+		for (const auto& [key, state] : predicted.textures) {
+			const_cast<VulkanTexture*>(key.texture)->CommitSubmittedState(key.mipLevel, key.arrayLayer, state);
+		}
+	}
+
+	bool VulkanCommandList::HasRecordedLayout(const VulkanTexture* texture,
+		uint32_t mipLevel,
+		uint32_t baseLayer,
+		uint32_t layerCount,
+		TextureLayout expected) const {
+		for (uint32_t layer = baseLayer; layer < baseLayer + layerCount; ++layer) {
+			const auto recorded = m_RecordedLayouts.find({texture, mipLevel, layer});
+			if (expected != TextureLayout::Undefined && recorded != m_RecordedLayouts.end() &&
+				recorded->second != expected) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	Result VulkanCommandList::InitTimestamps() {
+		if (!m_Device->IsProfilingEnabled() || !m_Device->SupportsHostQueryReset()) {
+			return Result::Success;
+		}
+
+		uint32_t familyCount = 0;
+		vkGetPhysicalDeviceQueueFamilyProperties(m_Device->GetPhysicalDevice(), &familyCount, nullptr);
+		std::vector<VkQueueFamilyProperties> families(familyCount);
+		vkGetPhysicalDeviceQueueFamilyProperties(m_Device->GetPhysicalDevice(), &familyCount, families.data());
+		m_TimestampValidBits = families[m_QueueId.familyIndex].timestampValidBits;
+		if (m_TimestampValidBits == 0) {
+			return Result::Success;
+		}
+
+		VkPhysicalDeviceProperties properties{};
+		vkGetPhysicalDeviceProperties(m_Device->GetPhysicalDevice(), &properties);
+		m_TimestampPeriod = properties.limits.timestampPeriod;
+
+		const VkQueryPoolCreateInfo info{
+			.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+			.queryType = VK_QUERY_TYPE_TIMESTAMP,
+			.queryCount = s_MaxTimestampCount,
+		};
+		if (vkCreateQueryPool(m_Device->GetDevice(), &info, nullptr, &m_TimestampPool) != VK_SUCCESS) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
-				"DrawIndexed: Requires an active rendering scope and a bound graphics pipeline.");
+				"CreateCommandList: Failed to allocate the profiling timestamp query pool.");
+			return Result::Failed;
+		}
+		return Result::Success;
+	}
+
+	void VulkanCommandList::WriteTimestamp(const char* name) {
+		if (!SupportsTimestamps()) {
 			return;
 		}
-		if (m_IndexBuffer == nullptr || firstIndex > m_IndexBuffer->GetSize() / sizeof(uint32_t) ||
-			indexCount > m_IndexBuffer->GetSize() / sizeof(uint32_t) - firstIndex) {
+		if (GetState() != CommandListState::Recording || name == nullptr || name[0] == '\0' ||
+			m_TimestampNames.size() == s_MaxTimestampCount) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
-				"DrawIndexed: Bind an index buffer and select an in-bounds range of 32-bit indices.");
-
+				"WriteTimestamp: Requires recording, a nonempty name, and fewer than 128 recorded markers.");
 			return;
 		}
 
-		RecordShaderResources("DrawIndexed");
-		if (m_VertexBuffer) {
-			RecordBufferUse(m_VertexBuffer, 0, m_VertexBuffer->GetSize(), "DrawIndexed vertex buffer");
+		const uint32_t query = static_cast<uint32_t>(m_TimestampNames.size());
+		m_TimestampNames.emplace_back(name);
+		vkCmdWriteTimestamp2(m_CommandBuffer, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, m_TimestampPool, query);
+	}
+
+	void VulkanCommandList::PrepareTimestampSubmission() {
+		std::scoped_lock lock(m_StateMutex);
+		if (!m_TimestampNames.empty()) {
+			// Command-buffer query resets are unavailable on transfer-only queues. Reset on the host
+			// immediately before every submission, including replays of an executable recording.
+			vkResetQueryPool(m_Device->GetDevice(), m_TimestampPool, 0, static_cast<uint32_t>(m_TimestampNames.size()));
 		}
-		if (m_IndexBuffer) {
-			RecordBufferUse(m_IndexBuffer, 0, m_IndexBuffer->GetSize(), "DrawIndexed index buffer");
+	}
+
+	Result VulkanCommandList::ReadTimestamps() {
+		if (m_TimestampNames.empty()) {
+			return Result::Success;
 		}
-		vkCmdDrawIndexed(m_CommandBuffer, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
+
+		std::vector<uint64_t> ticks(m_TimestampNames.size());
+		const VkResult result = vkGetQueryPoolResults(m_Device->GetDevice(),
+			m_TimestampPool,
+			0,
+			static_cast<uint32_t>(ticks.size()),
+			ticks.size() * sizeof(uint64_t),
+			ticks.data(),
+			sizeof(uint64_t),
+			VK_QUERY_RESULT_64_BIT);
+		if (result == VK_NOT_READY) {
+			return Result::NotReady;
+		}
+		if (result != VK_SUCCESS) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"GetTimestampResults: Failed to read completed GPU timestamp queries.");
+			return Result::Failed;
+		}
+
+		uint64_t mask = UINT64_MAX;
+		if (m_TimestampValidBits < 64) {
+			mask = (uint64_t{1} << m_TimestampValidBits) - 1;
+		}
+		uint64_t elapsedTicks = 0;
+		for (size_t index = 0; index < ticks.size(); ++index) {
+			if (index != 0) {
+				elapsedTicks += (ticks[index] - ticks[index - 1]) & mask;
+			}
+			m_TimestampResults.push_back({
+				.name = m_TimestampNames[index],
+				.milliseconds = static_cast<double>(elapsedTicks) * m_TimestampPeriod / 1'000'000.0,
+			});
+		}
+		return Result::Success;
+	}
+
+	void VulkanCommandList::SetState(CommandListState state) {
+		std::scoped_lock lock(m_StateMutex);
+		if (state == CommandListState::Pending) {
+			m_TimestampResults.clear();
+			m_TimestampReadResult = Result::NotReady;
+		}
+		if (m_Device->IsProfilingEnabled() && m_State == CommandListState::Pending &&
+			state == CommandListState::Executable) {
+			// Collect before publishing Executable: another thread may immediately recycle this recording.
+			m_TimestampReadResult = ReadTimestamps();
+			if (m_TimestampReadResult == Result::Success) {
+				m_Device->RecordGpuTimings(m_QueueId, m_TimestampResults);
+			}
+		}
+		m_State = state;
+	}
+
+	Result VulkanCommandList::GetTimestampResults(std::vector<GpuTimestamp>& outTimestamps) const {
+		std::scoped_lock lock(m_StateMutex);
+		outTimestamps.clear();
+		if (!SupportsTimestamps()) {
+			return Result::Success;
+		}
+		if (m_State != CommandListState::Executable) {
+			return Result::NotReady;
+		}
+		if (m_TimestampReadResult != Result::Success) {
+			return m_TimestampReadResult;
+		}
+		outTimestamps = m_TimestampResults;
+		return Result::Success;
+	}
+
+	bool VulkanCommandList::ValidateDebugLabel(const char* operation, const char* name) const {
+		if (GetState() == CommandListState::Recording && name != nullptr && name[0] != '\0') {
+			return true;
+		}
+		const std::string message = std::string(operation) + ": Requires recording and a nonempty label name.";
+		m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, message.c_str());
+		return false;
+	}
+
+	void VulkanCommandList::BeginDebugLabel(const char* name) {
+		if (!m_Device->SupportsDebugLabels() || !ValidateDebugLabel("BeginDebugLabel", name)) {
+			return;
+		}
+		const VkDebugUtilsLabelEXT label{
+			.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
+			.pLabelName = name,
+			.color = {0.2f, 0.6f, 0.9f, 1.0f},
+		};
+		vkCmdBeginDebugUtilsLabelEXT(m_CommandBuffer, &label);
+	}
+
+	void VulkanCommandList::EndDebugLabel() {
+		if (!m_Device->SupportsDebugLabels()) {
+			return;
+		}
+		if (GetState() != CommandListState::Recording) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"EndDebugLabel: Requires a recording command list and an outstanding label in queue submission order.");
+			return;
+		}
+		vkCmdEndDebugUtilsLabelEXT(m_CommandBuffer);
+	}
+
+	void VulkanCommandList::InsertDebugLabel(const char* name) {
+		if (!m_Device->SupportsDebugLabels() || !ValidateDebugLabel("InsertDebugLabel", name)) {
+			return;
+		}
+		const VkDebugUtilsLabelEXT label{
+			.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
+			.pLabelName = name,
+			.color = {0.2f, 0.6f, 0.9f, 1.0f},
+		};
+		vkCmdInsertDebugUtilsLabelEXT(m_CommandBuffer, &label);
+	}
+
+	bool VulkanCommandList::ValidateMipGeneration(VulkanTexture* texture,
+		const MipGenerationDesc& desc,
+		TextureSubresourceRange& range) const {
+		if (GetState() != CommandListState::Recording || m_Rendering || texture == nullptr) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"GenerateMipmaps: Requires recording outside rendering and a non-null texture.");
+
+			return false;
+		}
+
+		if (desc.baseMipLevel >= texture->GetMipLevelCount() || desc.baseArrayLayer >= texture->GetArrayLayerCount()) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"GenerateMipmaps: Select an in-bounds base mip and array layer.");
+
+			return false;
+		}
+
+		range = {desc.baseMipLevel, desc.mipLevelCount, desc.baseArrayLayer, desc.arrayLayerCount};
+		if (range.mipLevelCount == 0) {
+			range.mipLevelCount = texture->GetMipLevelCount() - range.baseMipLevel;
+		}
+
+		if (range.arrayLayerCount == 0) {
+			range.arrayLayerCount = texture->GetArrayLayerCount() - range.baseArrayLayer;
+		}
+
+		if (range.mipLevelCount < 2 || range.mipLevelCount > texture->GetMipLevelCount() - range.baseMipLevel ||
+			range.arrayLayerCount > texture->GetArrayLayerCount() - range.baseArrayLayer) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"GenerateMipmaps: Select at least two in-bounds mips and a valid layer range.");
+
+			return false;
+		}
+
+		const TextureUsage usage = texture->GetUsage();
+		if (texture->IsExternal() || !Any(usage & TextureUsage::TransferSrc) ||
+			!Any(usage & TextureUsage::TransferDst) ||
+			Utils::TextureFormatToVkImageAspect(Utils::VkFormatToTextureFormat(texture->GetFormat())) !=
+				VK_IMAGE_ASPECT_COLOR_BIT) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"GenerateMipmaps: Requires an owned color texture with TransferSrc and TransferDst usage.");
+
+			return false;
+		}
+
+		bool validFinalLayout = false;
+		switch (desc.finalLayout) {
+			case TextureLayout::General:
+			case TextureLayout::TransferSrc:
+			case TextureLayout::TransferDst:
+				validFinalLayout = true;
+				break;
+			case TextureLayout::ShaderRead:
+				validFinalLayout = Any(usage & TextureUsage::ShaderResource);
+				break;
+			case TextureLayout::ColorAttachment:
+				validFinalLayout = Any(usage & TextureUsage::RenderTarget);
+				break;
+			default:
+				break;
+		}
+
+		if (!validFinalLayout || (desc.filter != Filter::Nearest && desc.filter != Filter::Linear)) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"GenerateMipmaps: Provide a supported filter and final layout compatible with texture usage.");
+
+			return false;
+		}
+
+		uint32_t familyCount = 0;
+		vkGetPhysicalDeviceQueueFamilyProperties(m_Device->GetPhysicalDevice(), &familyCount, nullptr);
+		std::vector<VkQueueFamilyProperties> families(familyCount);
+		vkGetPhysicalDeviceQueueFamilyProperties(m_Device->GetPhysicalDevice(), &familyCount, families.data());
+
+		if ((families[m_QueueId.familyIndex].queueFlags & VK_QUEUE_GRAPHICS_BIT) == 0) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"GenerateMipmaps: Blits require a graphics-capable queue family.");
+
+			return false;
+		}
+
+		VkFormatProperties properties{};
+		vkGetPhysicalDeviceFormatProperties(m_Device->GetPhysicalDevice(), texture->GetFormat(), &properties);
+		VkFormatFeatureFlags requiredFeatures = VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT;
+		if (desc.filter == Filter::Linear) {
+			requiredFeatures |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+		}
+
+		if ((properties.optimalTilingFeatures & requiredFeatures) != requiredFeatures) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"GenerateMipmaps: Texture format does not support blitting with the selected filter.");
+
+			return false;
+		}
+
+		for (uint32_t layer = range.baseArrayLayer; layer < range.baseArrayLayer + range.arrayLayerCount; ++layer) {
+			if (GetExpectedLayout(texture, range.baseMipLevel, layer) == TextureLayout::Undefined) {
+				m_Device->SendDebugMessage(DebugSeverity::Error,
+					DebugMessageType::General,
+					"GenerateMipmaps: Initialize the source mip before generating its descendants.");
+
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	void VulkanCommandList::GenerateMipmaps(Texture* texture, const MipGenerationDesc& desc) {
+		auto* vulkanTexture = static_cast<VulkanTexture*>(texture);
+		TextureSubresourceRange range;
+		if (!ValidateMipGeneration(vulkanTexture, desc, range)) {
+			return;
+		}
+
+		RetainResource(texture);
+
+		const auto transitionMip = [&](uint32_t mip, TextureLayout layout, ResourceState after) {
+			BarrierDesc barriers;
+			for (uint32_t layer = range.baseArrayLayer; layer < range.baseArrayLayer + range.arrayLayerCount; ++layer) {
+				barriers.textures.push_back({
+					.texture = texture,
+					.before = {PipelineStage::AllCommands, ResourceAccess::MemoryRead | ResourceAccess::MemoryWrite},
+					.after = after,
+					.oldLayout = GetExpectedLayout(vulkanTexture, mip, layer),
+					.newLayout = layout,
+					.subresources = {mip, 1, layer, 1},
+				});
+			}
+
+			Barrier(barriers);
+		};
+
+		VkFilter filter = VK_FILTER_NEAREST;
+		if (desc.filter == Filter::Linear) {
+			filter = VK_FILTER_LINEAR;
+		}
+
+		const uint32_t endMip = range.baseMipLevel + range.mipLevelCount;
+		for (uint32_t mip = range.baseMipLevel + 1; mip < endMip; ++mip) {
+			transitionMip(mip - 1, TextureLayout::TransferSrc, {PipelineStage::Transfer, ResourceAccess::TransferRead});
+			transitionMip(mip, TextureLayout::TransferDst, {PipelineStage::Transfer, ResourceAccess::TransferWrite});
+
+			const auto sourceExtent = vulkanTexture->GetMipExtent(mip - 1);
+			const auto destinationExtent = vulkanTexture->GetMipExtent(mip);
+			const VkOffset3D sourceEnd{
+				.x = static_cast<int32_t>(sourceExtent.width),
+				.y = static_cast<int32_t>(sourceExtent.height),
+				.z = static_cast<int32_t>(sourceExtent.depth),
+			};
+			const VkOffset3D destinationEnd{
+				.x = static_cast<int32_t>(destinationExtent.width),
+				.y = static_cast<int32_t>(destinationExtent.height),
+				.z = static_cast<int32_t>(destinationExtent.depth),
+			};
+
+			VkImageBlit blit{
+				.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, mip - 1, range.baseArrayLayer, range.arrayLayerCount},
+				.srcOffsets = {{0, 0, 0}, sourceEnd},
+				.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, mip, range.baseArrayLayer, range.arrayLayerCount},
+				.dstOffsets = {{0, 0, 0}, destinationEnd},
+			};
+
+			RecordTextureUse(vulkanTexture,
+				{mip - 1, 1, range.baseArrayLayer, range.arrayLayerCount},
+				TextureLayout::TransferSrc,
+				"GenerateMipmaps source");
+			RecordTextureUse(vulkanTexture,
+				{mip, 1, range.baseArrayLayer, range.arrayLayerCount},
+				TextureLayout::TransferDst,
+				"GenerateMipmaps destination");
+
+			vkCmdBlitImage(m_CommandBuffer,
+				vulkanTexture->GetImage(),
+				VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+				vulkanTexture->GetImage(),
+				VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				1,
+				&blit,
+				filter);
+		}
+
+		for (uint32_t mip = range.baseMipLevel; mip < endMip; ++mip) {
+			transitionMip(mip, desc.finalLayout, desc.finalState);
+		}
 	}
 }

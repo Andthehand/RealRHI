@@ -50,6 +50,7 @@ This library is written to be easy for another engineer to read and reason about
 
 ### Headers and includes
 - Use `#pragma once` for headers.
+- Keep each class's implementation in its matching `.cpp` file; do not split one header's implementation across multiple source files.
 - Keep local headers grouped first and standard library includes after them, as seen in the current code.
 - Prefer cleaning up include dependencies instead of relying on broad forward declarations when a header can be made self-contained.
 - Keep the external interface stable and understandable; avoid unnecessary public surface area.

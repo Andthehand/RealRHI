@@ -1,6 +1,6 @@
 #include "VulkanSampler.h"
 
-#include "VulkanConvertions.h"
+#include "VulkanConversions.h"
 #include "VulkanDescriptorManager.h"
 
 #include <cmath>

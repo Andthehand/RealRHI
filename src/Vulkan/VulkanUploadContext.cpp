@@ -1,6 +1,6 @@
 #include "VulkanUploadContext.h"
 
-#include "VulkanConvertions.h"
+#include "VulkanConversions.h"
 #include "VulkanCpuTimer.h"
 #include "VulkanTexture.h"
 
@@ -484,10 +484,10 @@ namespace RealRHI {
 			return Result::InvalidParameter;
 		}
 
-		const auto extent = destination->GetExtent();
-		const uint32_t width = std::max(1u, extent.width >> desc.mipLevel);
-		const uint32_t height = std::max(1u, extent.height >> desc.mipLevel);
-		const uint32_t depth = std::max(1u, extent.depth >> desc.mipLevel);
+		const auto extent = destination->GetMipExtent(desc.mipLevel);
+		const uint32_t width = extent.width;
+		const uint32_t height = extent.height;
+		const uint32_t depth = extent.depth;
 
 		uint64_t required = texelSize;
 		for (uint32_t factor : {width, height, depth, desc.layerCount}) {

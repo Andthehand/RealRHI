@@ -29,9 +29,6 @@ namespace RealRHI {
 			vkDeviceWaitIdle(m_Device);
 			ProcessDeferredDeletions();
 		}
-		for (auto& [queueId, queue] : m_Queues) {
-			delete queue;
-		}
 		m_Queues.clear();
 		m_GraphicsCommandQueue = nullptr;
 
@@ -157,7 +154,7 @@ namespace RealRHI {
 		Ref<VulkanWindow> vkWindow;
 		Result res = VulkanWindow::Create(this, desc, vkWindow);
 		if (res == Result::Success) {
-			outWindow = vkWindow.As<Window>();
+			outWindow = vkWindow;
 		}
 
 		return res;
@@ -167,7 +164,7 @@ namespace RealRHI {
 		Ref<VulkanShader> vkShader;
 		Result res = VulkanShader::Create(this, desc, vkShader);
 		if (res == Result::Success) {
-			outShader = vkShader.As<Shader>();
+			outShader = vkShader;
 		}
 
 		return res;
@@ -177,7 +174,7 @@ namespace RealRHI {
 		Ref<VulkanPipeline> vkPipeline;
 		Result res = VulkanPipeline::CreateGraphics(this, desc, vkPipeline);
 		if (res == Result::Success) {
-			outPipeline = vkPipeline.As<Pipeline>();
+			outPipeline = vkPipeline;
 		}
 
 		return res;
@@ -187,7 +184,7 @@ namespace RealRHI {
 		Ref<VulkanPipeline> pipeline;
 		const Result result = VulkanPipeline::CreateCompute(this, desc, pipeline);
 		if (result == Result::Success) {
-			outPipeline = pipeline.As<Pipeline>();
+			outPipeline = pipeline;
 		}
 
 		return result;
@@ -197,7 +194,7 @@ namespace RealRHI {
 		Ref<VulkanSwapchain> vkSwapchain;
 		Result res = VulkanSwapchain::Create(this, desc, vkSwapchain);
 		if (res == Result::Success) {
-			outSwapchain = vkSwapchain.As<Swapchain>();
+			outSwapchain = vkSwapchain;
 		}
 
 		return res;
@@ -207,7 +204,7 @@ namespace RealRHI {
 		Ref<VulkanBuffer> vkBuffer;
 		Result res = VulkanBuffer::Create(this, desc, vkBuffer);
 		if (res == Result::Success) {
-			outBuffer = vkBuffer.As<Buffer>();
+			outBuffer = vkBuffer;
 		}
 
 		return res;
@@ -217,7 +214,7 @@ namespace RealRHI {
 		Ref<VulkanTexture> vkTexture;
 		Result res = VulkanTexture::Create(this, desc, vkTexture);
 		if (res == Result::Success) {
-			outTexture = vkTexture.As<Texture>();
+			outTexture = vkTexture;
 		}
 
 		return res;
@@ -264,7 +261,7 @@ namespace RealRHI {
 
 		const Result result = VulkanCommandAllocator::Create(this, queue->GetQueueId().familyIndex, allocator);
 		if (result == Result::Success) {
-			outAllocator = allocator.As<CommandAllocator>();
+			outAllocator = allocator;
 		}
 
 		return result;
@@ -279,7 +276,7 @@ namespace RealRHI {
 		const Result result = VulkanCommandList::Create(this, Ref<VulkanCommandAllocator>(vkAllocator), list);
 
 		if (result == Result::Success) {
-			outCommandList = list.As<CommandList>();
+			outCommandList = list;
 		}
 		return result;
 	}
@@ -323,22 +320,22 @@ namespace RealRHI {
 			return nullptr;
 		}
 
-		return it->second;
+		return it->second.get();
 	}
 
 	void VulkanDevice::BindDescriptorHeaps(VkCommandBuffer commandBuffer) const {
 		m_DescriptorManager->BindDescriptorHeaps(commandBuffer);
 	}
 
-	Result VulkanDevice::Submit(CommandList* cmd,
-		Swapchain* sc,
+	Result VulkanDevice::Submit(CommandList* commandList,
+		Swapchain* swapchain,
 		const FrameContext& frame,
 		SubmissionToken* outToken,
 		std::span<const SubmissionToken> waitFor) {
 		if (outToken) {
 			*outToken = {};
 		}
-		if (cmd == nullptr || sc == nullptr || m_GraphicsCommandQueue == nullptr) {
+		if (commandList == nullptr || swapchain == nullptr || m_GraphicsCommandQueue == nullptr) {
 			return Result::Failed;
 		}
 
@@ -346,66 +343,69 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
-		auto* vkSC = static_cast<VulkanSwapchain*>(sc);
-		auto* vkCmd = static_cast<VulkanCommandList*>(cmd);
-		if (!vkSC->IsFrameValid(frame)) {
+		auto* vulkanSwapchain = static_cast<VulkanSwapchain*>(swapchain);
+		auto* vulkanCommandList = static_cast<VulkanCommandList*>(commandList);
+		if (!vulkanSwapchain->IsFrameValid(frame)) {
 			SendDebugMessage(
 				DebugSeverity::Error, DebugMessageType::General, "Submit: Frame must match the swapchain.");
 			return Result::Failed;
 		}
 
-		if (!vkSC->PrepareFrameSubmission(frame.frameIndex)) {
+		if (!vulkanSwapchain->PrepareFrameSubmission(frame.frameIndex)) {
 			SendDebugMessage(
 				DebugSeverity::Error, DebugMessageType::General, "Submit: Frame is not ready for submission.");
 			return Result::Failed;
 		}
 
-		VkCommandBuffer preCmdBuf = vkSC->RecordPreTransitionCmd(frame.frameIndex, frame.imageIndex);
-		VkCommandBuffer postCmdBuf = vkSC->RecordPostTransitionCmd(frame.frameIndex, frame.imageIndex);
+		VkCommandBuffer preTransition = vulkanSwapchain->RecordPreTransitionCmd(frame.frameIndex, frame.imageIndex);
+		VkCommandBuffer postTransition = vulkanSwapchain->RecordPostTransitionCmd(frame.frameIndex, frame.imageIndex);
 
-		std::array<VkCommandBufferSubmitInfo, 3> cmdInfos = {
+		std::array<VkCommandBufferSubmitInfo, 3> commandBufferInfos = {
 			VkCommandBufferSubmitInfo{
 				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-				.commandBuffer = preCmdBuf,
+				.commandBuffer = preTransition,
 			},
 			VkCommandBufferSubmitInfo{
 				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-				.commandBuffer = vkCmd->GetCommandBuffer(),
+				.commandBuffer = vulkanCommandList->GetCommandBuffer(),
 			},
 			VkCommandBufferSubmitInfo{
 				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-				.commandBuffer = postCmdBuf,
+				.commandBuffer = postTransition,
 			},
 		};
 
 		VkSemaphoreSubmitInfo waitInfo{
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-			.semaphore = vkSC->GetImageAvailableSemaphore(frame.frameIndex),
+			.semaphore = vulkanSwapchain->GetImageAvailableSemaphore(frame.frameIndex),
 			// Include the pre-render image layout transition in the acquire wait.
 			.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
 		};
 
 		VkSemaphoreSubmitInfo signalInfo{
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
-			.semaphore = vkSC->GetRenderFinishedSemaphore(frame.imageIndex),
+			.semaphore = vulkanSwapchain->GetRenderFinishedSemaphore(frame.imageIndex),
 			// The post-render transition is a pipeline barrier, not a graphics stage.
 			.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
 		};
 
-		std::array<CommandList*, 1> tracked = {cmd};
+		std::array<CommandList*, 1> tracked = {commandList};
 
-		const SubmissionToken token = m_GraphicsCommandQueue->SubmitTracked(
-			{cmdInfos.data(), cmdInfos.size()}, {&waitInfo, 1}, {&signalInfo, 1}, tracked, VK_NULL_HANDLE, waitFor);
-		vkSC->FinishFrameSubmission(frame.frameIndex, token);
-		if (outToken && token.IsValid()) {
-			*outToken = token;
-		}
-		if (token.IsValid()) {
-			ProcessDeferredDeletions();
-		}
+		const SubmissionToken token =
+			m_GraphicsCommandQueue->SubmitTracked({commandBufferInfos.data(), commandBufferInfos.size()},
+				{&waitInfo, 1},
+				{&signalInfo, 1},
+				tracked,
+				VK_NULL_HANDLE,
+				waitFor);
+		vulkanSwapchain->FinishFrameSubmission(frame.frameIndex, token);
 		if (!token.IsValid()) {
 			return Result::Failed;
 		}
+		if (outToken) {
+			*outToken = token;
+		}
+		ProcessDeferredDeletions();
 
 		return Result::Success;
 	}
@@ -937,12 +937,10 @@ namespace RealRHI {
 				return false;
 			}
 
-			m_Queues.emplace(id, commandQueue.get());
-			commandQueue.release();
+			m_Queues.emplace(id, std::move(commandQueue));
 		}
 
-		m_GraphicsCommandQueue = m_Queues.at(QueueId{m_GraphicsQueueFamily, 0});
-		m_GraphicsQueue = m_GraphicsCommandQueue->GetQueue();
+		m_GraphicsCommandQueue = m_Queues.at(QueueId{m_GraphicsQueueFamily, 0}).get();
 		m_PresentQueue = m_Queues.at(QueueId{m_PresentQueueFamily, 0})->GetQueue();
 
 		return true;
@@ -1000,5 +998,102 @@ namespace RealRHI {
 		debugCallback(message);
 
 		return VK_FALSE;
+	}
+
+	namespace {
+		ResourceStatistics& SelectResource(DeviceStatistics& statistics, VulkanProfiledResource type) {
+			switch (type) {
+				case VulkanProfiledResource::Buffer:
+					return statistics.buffers;
+				case VulkanProfiledResource::Texture:
+					return statistics.textures;
+				case VulkanProfiledResource::Pipeline:
+					return statistics.pipelines;
+			}
+			return statistics.buffers;
+		}
+
+		void AddTiming(TimingStatistics& timing, double milliseconds) {
+			++timing.sampleCount;
+			timing.totalMilliseconds += milliseconds;
+			timing.maximumMilliseconds = std::max(timing.maximumMilliseconds, milliseconds);
+		}
+	}
+
+	DeviceStatistics VulkanDevice::GetStatistics() const {
+		DeviceStatistics snapshot;
+		{
+			std::scoped_lock lock(m_StatisticsMutex);
+			snapshot = m_Statistics;
+		}
+
+		if (m_DescriptorManager) {
+			snapshot.descriptors = m_DescriptorManager->GetStatistics();
+		}
+
+		return snapshot;
+	}
+
+	void VulkanDevice::RecordResourceCreated(VulkanProfiledResource type, uint64_t bytes) const {
+		std::scoped_lock lock(m_StatisticsMutex);
+		auto& usage = SelectResource(m_Statistics, type);
+		++usage.liveCount;
+		usage.liveBytes += bytes;
+		usage.peakCount = std::max(usage.peakCount, usage.liveCount);
+		usage.peakBytes = std::max(usage.peakBytes, usage.liveBytes);
+	}
+
+	void VulkanDevice::RecordResourceDestroyed(VulkanProfiledResource type, uint64_t bytes) const {
+		std::scoped_lock lock(m_StatisticsMutex);
+		auto& usage = SelectResource(m_Statistics, type);
+		--usage.liveCount;
+		usage.liveBytes -= bytes;
+	}
+
+	void VulkanDevice::RecordCpuTiming(VulkanProfiledOperation operation, double milliseconds, uint64_t bytes) const {
+		std::scoped_lock lock(m_StatisticsMutex);
+		switch (operation) {
+			case VulkanProfiledOperation::UploadStaging:
+				AddTiming(m_Statistics.uploadStaging, milliseconds);
+				m_Statistics.stagedUploadBytes += bytes;
+				break;
+			case VulkanProfiledOperation::Submission:
+				AddTiming(m_Statistics.submissions, milliseconds);
+				break;
+			case VulkanProfiledOperation::GraphicsPipeline:
+				AddTiming(m_Statistics.graphicsPipelineCreation, milliseconds);
+				break;
+			case VulkanProfiledOperation::ComputePipeline:
+				AddTiming(m_Statistics.computePipelineCreation, milliseconds);
+				break;
+		}
+	}
+
+	void VulkanDevice::RecordUploadBatch(uint64_t bytes) const {
+		if (!m_EnableProfiling) {
+			return;
+		}
+
+		std::scoped_lock lock(m_StatisticsMutex);
+		++m_Statistics.uploadBatchCount;
+		m_Statistics.submittedUploadBytes += bytes;
+	}
+
+	void VulkanDevice::RecordGpuTimings(QueueId queue, std::span<const GpuTimestamp> timestamps) const {
+		std::scoped_lock lock(m_StatisticsMutex);
+		for (size_t index = 1; index < timestamps.size(); ++index) {
+			const auto& begin = timestamps[index - 1];
+			const double milliseconds = timestamps[index].milliseconds - begin.milliseconds;
+			auto found =
+				std::find_if(m_Statistics.gpuTimings.begin(), m_Statistics.gpuTimings.end(), [&](const auto& timing) {
+					return timing.name == begin.name && timing.queue == queue;
+				});
+			if (found == m_Statistics.gpuTimings.end()) {
+				m_Statistics.gpuTimings.push_back({.name = begin.name, .queue = queue});
+				found = m_Statistics.gpuTimings.end() - 1;
+			}
+
+			AddTiming(found->timing, milliseconds);
+		}
 	}
 }

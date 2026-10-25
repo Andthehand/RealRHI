@@ -37,6 +37,9 @@ namespace RealRHI {
 		DescriptorStatistics GetStatistics() const;
 
 	private:
+		void FreeDescriptor(uint32_t index,
+			std::unordered_set<uint32_t>& allocatedDescriptors,
+			std::vector<uint32_t>& freeDescriptors);
 		const char* RetainDebugName(const char* name);
 		void UpdateHighWaterMarks();
 

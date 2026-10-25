@@ -54,6 +54,25 @@ int main() {
 	}
 	Expect(Base::s_Destroyed == 3, "Each owned object is destroyed exactly once");
 	{
+		auto derived = RealRHI::Ref<Derived>::Create();
+		RealRHI::Ref<Base> base;
+		base = derived;
+		Expect(base.Raw() == derived.Raw() && base->GetRefCount() == 2, "Converting copy shares ownership");
+		base = derived;
+		base = base;
+		Expect(base->GetRefCount() == 2, "Alias and self copy preserve the reference count");
+		RealRHI::Ref<Base> other = RealRHI::Ref<Base>::Create();
+		other = base;
+		Expect(Base::s_Destroyed == 4 && base->GetRefCount() == 3,
+			"Copy assignment releases the old object and retains the replacement");
+		other = nullptr;
+		base.Reset();
+		Expect(derived->GetRefCount() == 1, "Null assignment and Reset release their references");
+		derived.Release();
+		derived.Release();
+		Expect(Base::s_Destroyed == 5, "Repeated release destroys the object exactly once");
+	}
+	{
 		RealRHI::DeferredDeletionQueue deletions;
 		const RealRHI::SubmissionToken first{.queue = {0, 0}, .value = 1};
 		const RealRHI::SubmissionToken second{.queue = {1, 0}, .value = 2};

@@ -57,7 +57,8 @@ set(REALRHI_HEADERS
     "src/Vulkan/VulkanWindow.h"
     "src/WindowDesc.h"
     "src/Vulkan/VulkanPipeline.h"
-    "src/Vulkan/VulkanConvertions.h"
+    "src/Vulkan/VulkanConversions.h"
+    "src/Vulkan/VulkanBarrierConversions.h"
     "src/TextureFormat.h"
     "src/ShaderDesc.h"
     "src/Vulkan/VulkanBuffer.h"
@@ -75,11 +76,7 @@ set(REALRHI_HEADERS
 )
 
 set(REALRHI_SOURCES
-    "src/Vulkan/VulkanCommandCopy.cpp"
-    "src/Vulkan/VulkanCommandProfiling.cpp"
-    "src/Vulkan/VulkanStatistics.cpp"
     "src/Vulkan/VulkanSampler.cpp"
-    "src/Vulkan/VulkanMipGeneration.cpp"
     "src/Vulkan/VulkanUploadContext.cpp"
     "src/Vulkan/VulkanCommandAllocator.cpp"
     "src/Vulkan/VulkanDevice.cpp"

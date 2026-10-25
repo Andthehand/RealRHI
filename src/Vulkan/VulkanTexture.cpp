@@ -2,7 +2,7 @@
 
 #include "VulkanBuffer.h"
 #include "VulkanCommandList.h"
-#include "VulkanConvertions.h"
+#include "VulkanConversions.h"
 #include "VulkanDescriptorManager.h"
 
 #include <algorithm>
@@ -11,6 +11,14 @@
 namespace RealRHI {
 	VulkanTexture::VulkanTexture(const VulkanDevice* device)
 		: m_Device(device) { }
+
+	VkExtent3D VulkanTexture::GetMipExtent(uint32_t mipLevel) const {
+		return {
+			.width = std::max(1u, m_ImageExtent.width >> mipLevel),
+			.height = std::max(1u, m_ImageExtent.height >> mipLevel),
+			.depth = std::max(1u, m_ImageExtent.depth >> mipLevel),
+		};
+	}
 
 	VulkanTexture::~VulkanTexture() {
 		// Views must be destroyed before the image they reference.
@@ -103,8 +111,7 @@ namespace RealRHI {
 		}
 
 		uint32_t viewMipCount = m_MipLevels;
-		// Storage, RenderTarget, and DepthStencil textures can only have a single mip level view
-		// because they are not allowed to be sampled in a shader, and therefore cannot use mipmapping.
+		// Storage and attachment views select one mip, even when the texture is also sampled.
 		if (Any(m_Usage & (TextureUsage::Storage | TextureUsage::RenderTarget | TextureUsage::DepthStencil))) {
 			viewMipCount = 1;
 		}
@@ -260,7 +267,7 @@ namespace RealRHI {
 			return res;
 		}
 
-		outTexture = Ref<VulkanTexture>(texture);
+		outTexture = texture;
 		return Result::Success;
 	}
 

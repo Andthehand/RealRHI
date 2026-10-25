@@ -29,8 +29,5 @@ namespace RealRHI {
 	private:
 		const VulkanDevice* m_Device = nullptr;
 		SDL_Window* m_Window = nullptr;
-
-		uint32_t m_Width = 0;
-		uint32_t m_Height = 0;
 	};
 }

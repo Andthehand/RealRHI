@@ -13,10 +13,7 @@ namespace RealRHI {
 		void IncRefCount() const { m_RefCount++; }
 
 		// Returns true if this was the final reference (count reached zero)
-		bool DecRefCount() const {
-			uint32_t newCount = (--m_RefCount);
-			return newCount == 0;
-		}
+		bool DecRefCount() const { return --m_RefCount == 0; }
 
 		uint32_t GetRefCount() const { return m_RefCount.load(); }
 
@@ -28,17 +25,24 @@ namespace RealRHI {
 	class Ref {
 	public:
 		Ref() = default;
-		Ref(std::nullptr_t n) : m_Instance(nullptr) {}
+		Ref(std::nullptr_t) { }
 
-		Ref(T* instance) : m_Instance(instance) {
+		Ref(T* instance)
+			: m_Instance(instance) {
 			static_assert(std::is_base_of_v<RefCounted, T>, "T must derive from RefCounted");
 
 			IncRef();
 		}
 
-		Ref(const Ref<T>& other) : m_Instance(other.m_Instance) { IncRef(); }
+		Ref(const Ref<T>& other)
+			: m_Instance(other.m_Instance) {
+			IncRef();
+		}
 
-		Ref(Ref<T>&& other) noexcept : m_Instance(other.m_Instance) { other.m_Instance = nullptr; }
+		Ref(Ref<T>&& other) noexcept
+			: m_Instance(other.m_Instance) {
+			other.m_Instance = nullptr;
+		}
 
 		~Ref() { DecRef(); }
 
@@ -57,35 +61,19 @@ namespace RealRHI {
 		}
 
 		Ref& operator=(std::nullptr_t) {
-			DecRef();
-			m_Instance = nullptr;
+			Reset();
 			return *this;
 		}
 
 		Ref& operator=(const Ref<T>& other) {
-			if (m_Instance == other.m_Instance) {
-				return *this;
-			}
-			// Acquire new reference first, then release old
-			// This ensures safety even if they share the same underlying object
-			other.IncRef();
-			DecRef();
-
-			m_Instance = other.m_Instance;
+			Reset(other.m_Instance);
 			return *this;
 		}
 
 		template <typename T2>
 			requires(std::is_convertible_v<T2*, T*>)
 		Ref& operator=(const Ref<T2>& other) {
-			T* newInstance = other.m_Instance;
-			if (m_Instance == newInstance) {
-				return *this;
-			}
-			other.IncRef();
-			DecRef();
-
-			m_Instance = newInstance;
+			Reset(other.m_Instance);
 			return *this;
 		}
 
@@ -111,7 +99,6 @@ namespace RealRHI {
 			return *this;
 		}
 
-		operator bool() { return m_Instance != nullptr; }
 		operator bool() const { return m_Instance != nullptr; }
 
 		T* operator->() { return m_Instance; }
@@ -124,18 +111,14 @@ namespace RealRHI {
 		const T* Raw() const { return m_Instance; }
 
 		// Release this reference, deleting the object if it was the last owner.
-		void Release() {
-			if (m_Instance) {
-				DecRef();
-				m_Instance = nullptr;
-			}
-		}
+		void Release() { Reset(); }
 
 		void Reset(T* instance = nullptr) {
 			if (m_Instance == instance) {
 				return;
 			}
 			if (instance) {
+				// Retain first: releasing the old owner can destroy the incoming object.
 				instance->IncRefCount();
 			}
 			DecRef();
@@ -169,10 +152,8 @@ namespace RealRHI {
 		}
 
 		void DecRef() const {
-			if (m_Instance) {
-				if (m_Instance->DecRefCount()) {
-					delete m_Instance;
-				}
+			if (m_Instance && m_Instance->DecRefCount()) {
+				delete m_Instance;
 			}
 		}
 
@@ -181,6 +162,6 @@ namespace RealRHI {
 		friend class Ref;
 
 	private:
-		mutable T* m_Instance = nullptr;
+		T* m_Instance = nullptr;
 	};
 }

@@ -1,7 +1,7 @@
 #include "VulkanDescriptorManager.h"
 
 #include "VulkanBuffer.h"
-#include "VulkanConvertions.h"
+#include "VulkanConversions.h"
 
 #include <algorithm>
 
@@ -99,17 +99,7 @@ namespace RealRHI {
 
 	void VulkanDescriptorManager::FreeBufferDescriptor(uint32_t index) {
 		std::scoped_lock lock(m_DescriptorMutex);
-		if (index == UINT32_MAX) {
-			return;
-		}
-
-		if (!m_AllocatedBufferDescriptors.erase(index)) {
-			m_Device->SendDebugMessage(
-				DebugSeverity::Error, DebugMessageType::General, "Invalid or duplicate descriptor free.");
-			return;
-		}
-
-		m_FreeBufferDescriptors.push_back(index);
+		FreeDescriptor(index, m_AllocatedBufferDescriptors, m_FreeBufferDescriptors);
 	}
 
 	uint32_t VulkanDescriptorManager::AllocateImageDescriptor(const VkImageViewCreateInfo& viewInfo,
@@ -181,17 +171,7 @@ namespace RealRHI {
 
 	void VulkanDescriptorManager::FreeImageDescriptor(uint32_t index) {
 		std::scoped_lock lock(m_DescriptorMutex);
-		if (index == UINT32_MAX) {
-			return;
-		}
-
-		if (!m_AllocatedImageDescriptors.erase(index)) {
-			m_Device->SendDebugMessage(
-				DebugSeverity::Error, DebugMessageType::General, "Invalid or duplicate descriptor free.");
-			return;
-		}
-
-		m_FreeImageDescriptors.push_back(index);
+		FreeDescriptor(index, m_AllocatedImageDescriptors, m_FreeImageDescriptors);
 	}
 
 	uint32_t VulkanDescriptorManager::AllocateSamplerDescriptor(const VkSamplerCreateInfo& samplerCI,
@@ -249,17 +229,21 @@ namespace RealRHI {
 
 	void VulkanDescriptorManager::FreeSamplerDescriptor(uint32_t index) {
 		std::scoped_lock lock(m_DescriptorMutex);
+		FreeDescriptor(index, m_AllocatedSamplerDescriptors, m_FreeSamplerDescriptors);
+	}
+
+	void VulkanDescriptorManager::FreeDescriptor(uint32_t index,
+		std::unordered_set<uint32_t>& allocatedDescriptors,
+		std::vector<uint32_t>& freeDescriptors) {
 		if (index == UINT32_MAX) {
 			return;
 		}
-
-		if (!m_AllocatedSamplerDescriptors.erase(index)) {
+		if (!allocatedDescriptors.erase(index)) {
 			m_Device->SendDebugMessage(
 				DebugSeverity::Error, DebugMessageType::General, "Invalid or duplicate descriptor free.");
 			return;
 		}
-
-		m_FreeSamplerDescriptors.push_back(index);
+		freeDescriptors.push_back(index);
 	}
 
 	const char* VulkanDescriptorManager::RetainDebugName(const char* name) {

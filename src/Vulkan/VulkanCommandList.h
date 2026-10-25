@@ -52,7 +52,6 @@ namespace RealRHI {
 		void BindVertexBuffer(Buffer* vertexBuffer) override;
 		void BindIndexBuffer(Buffer* indexBuffer) override;
 
-		// Located in VulkanCommandCopy.cpp
 		void CopyBuffer(Buffer* source, Buffer* destination, const BufferCopyRegion& region) override;
 		void CopyBufferToTexture(Buffer* source, Texture* destination, const BufferTextureCopyRegion& region) override;
 		void CopyTextureToBuffer(Texture* source, Buffer* destination, const BufferTextureCopyRegion& region) override;

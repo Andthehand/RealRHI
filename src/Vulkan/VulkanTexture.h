@@ -53,6 +53,7 @@ namespace RealRHI {
 		VkImage GetImage() const { return m_Image; }
 		VkFormat GetFormat() const { return m_Format; }
 		VkExtent3D GetExtent() const { return m_ImageExtent; }
+		VkExtent3D GetMipExtent(uint32_t mipLevel) const;
 		TextureUsage GetUsage() const { return m_Usage; }
 		uint32_t GetMipLevelCount() const { return m_MipLevels; }
 		uint32_t GetArrayLayerCount() const { return m_ArrayLayers; }
