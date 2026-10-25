@@ -1,6 +1,7 @@
 #include "VulkanPipeline.h"
 
 #include "VulkanConvertions.h"
+#include "VulkanCpuTimer.h"
 #include "VulkanShader.h"
 
 namespace RealRHI {
@@ -9,6 +10,9 @@ namespace RealRHI {
 
 	VulkanPipeline::~VulkanPipeline() {
 		vkDestroyPipeline(m_Device->GetDevice(), m_Pipeline, nullptr);
+		if (m_BindPoint != VK_PIPELINE_BIND_POINT_MAX_ENUM) {
+			m_Device->RecordResourceDestroyed(VulkanProfiledResource::Pipeline);
+		}
 	}
 
 	Result VulkanPipeline::CreateGraphics(const VulkanDevice* device,
@@ -38,6 +42,7 @@ namespace RealRHI {
 	}
 
 	Result VulkanPipeline::InitCompute(const ComputePipelineDesc& desc) {
+		const VulkanCpuTimer timer(m_Device);
 		const auto* shader = static_cast<const VulkanShader*>(desc.shader);
 		if (shader == nullptr) {
 			return Result::Failed;
@@ -77,10 +82,18 @@ namespace RealRHI {
 		}
 
 		m_BindPoint = VK_PIPELINE_BIND_POINT_COMPUTE;
+		m_Device->RecordResourceCreated(VulkanProfiledResource::Pipeline);
+		const Result nameResult = m_Device->SetDebugName(VK_OBJECT_TYPE_PIPELINE, m_Pipeline, desc.debugName);
+		if (nameResult != Result::Success) {
+			return nameResult;
+		}
+		timer.Finish(VulkanProfiledOperation::ComputePipeline);
+		
 		return Result::Success;
 	}
 
 	Result VulkanPipeline::InitGraphics(const PipelineDesc& desc) {
+		const VulkanCpuTimer timer(m_Device);
 		const auto* shader = static_cast<const VulkanShader*>(desc.shader);
 		if (shader == nullptr || (desc.rasterState.fillMode == FillMode::Wireframe && !m_Device->SupportsWireframe())) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
@@ -248,6 +261,13 @@ namespace RealRHI {
 		}
 
 		m_BindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		m_Device->RecordResourceCreated(VulkanProfiledResource::Pipeline);
+		const Result nameResult = m_Device->SetDebugName(VK_OBJECT_TYPE_PIPELINE, m_Pipeline, desc.debugName);
+		if (nameResult != Result::Success) {
+			return nameResult;
+		}
+		timer.Finish(VulkanProfiledOperation::GraphicsPipeline);
+		
 		return Result::Success;
 	}
 }

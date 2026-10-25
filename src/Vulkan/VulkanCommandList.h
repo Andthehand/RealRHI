@@ -28,6 +28,13 @@ namespace RealRHI {
 		Result End() override;
 		Result Reset() override;
 
+		void BeginDebugLabel(const char* name) override;
+		void EndDebugLabel() override;
+		void InsertDebugLabel(const char* name) override;
+		bool SupportsTimestamps() const override { return m_TimestampPool != VK_NULL_HANDLE; }
+		void WriteTimestamp(const char* name) override;
+		Result GetTimestampResults(std::vector<GpuTimestamp>& outTimestamps) const override;
+
 		void BeginRendering(const RenderingInfo& renderingInfo) override;
 		void EndRendering() override;
 
@@ -68,10 +75,8 @@ namespace RealRHI {
 			std::scoped_lock lock(m_StateMutex);
 			return m_State;
 		}
-		void SetState(CommandListState state) {
-			std::scoped_lock lock(m_StateMutex);
-			m_State = state;
-		}
+		void SetState(CommandListState state);
+		void PrepareTimestampSubmission();
 
 	protected:
 		friend class VulkanDevice;
@@ -117,6 +122,10 @@ namespace RealRHI {
 		};
 
 	private:
+		Result InitTimestamps();
+		Result ReadTimestamps();
+		bool ValidateDebugLabel(const char* operation, const char* name) const;
+
 		bool ValidateAttachmentView(const VulkanTextureView* view, TextureUsage usage, const Rect& renderArea) const;
 		TextureLayout GetExpectedLayout(const VulkanTexture* texture, uint32_t mip, uint32_t layer) const;
 		// Replay in command order; publish the complete batch only after native submission succeeds.
@@ -179,5 +188,13 @@ namespace RealRHI {
 		LayoutMap m_RecordedLayouts;
 
 		VkCommandBuffer m_CommandBuffer = VK_NULL_HANDLE;
+
+		static constexpr uint32_t s_MaxTimestampCount = 128;
+		VkQueryPool m_TimestampPool = VK_NULL_HANDLE;
+		uint32_t m_TimestampValidBits = 0;
+		float m_TimestampPeriod = 0;
+		std::vector<std::string> m_TimestampNames;
+		std::vector<GpuTimestamp> m_TimestampResults;
+		Result m_TimestampReadResult = Result::NotReady;
 	};
 }

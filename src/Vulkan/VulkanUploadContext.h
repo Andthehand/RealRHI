@@ -74,6 +74,7 @@ namespace RealRHI {
 
 		size_t m_ActiveBatchIndex = SIZE_MAX;
 		bool m_FinalBarriersRecorded = false;
+		uint64_t m_BatchBytes = 0;
 
 		BarrierDesc m_FinalBarriers;
 		BarrierDesc m_AcquireBarriers;

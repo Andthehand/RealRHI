@@ -7,5 +7,6 @@ namespace RealRHI {
 		Failed,
 		InvalidParameter,
 		OutOfMemory,
+		NotReady,
 	};
 }

@@ -70,5 +70,6 @@ namespace RealRHI {
 		bool enableDebug = false;
 		bool enableValidationLayers = false;
 		DebugCallback debugCallback = DefaultDebugCallback;
+		bool enableProfiling = false;
 	};
 }

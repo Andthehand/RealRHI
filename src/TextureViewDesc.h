@@ -25,5 +25,6 @@ namespace RealRHI {
 		// Select descriptor/attachment usage from the texture's creation flags.
 		// None uses all view-compatible texture usages. Storage and attachment views select one mip.
 		TextureUsage usage = TextureUsage::None;
+		const char* debugName = nullptr;
 	};
 }

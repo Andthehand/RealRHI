@@ -51,5 +51,6 @@ namespace RealRHI {
 		TextureFormat format = TextureFormat::Unknown;
 
 		TextureUsage usage = TextureUsage::None;
+		const char* debugName = nullptr;
 	};
 }

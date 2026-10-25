@@ -19,6 +19,9 @@ namespace RealRHI {
 
 		if (!m_IsExternal) {
 			vmaDestroyImage(m_Device->GetAllocator(), m_Image, m_Allocation);
+			if (m_AllocationBytes != 0) {
+				m_Device->RecordResourceDestroyed(VulkanProfiledResource::Texture, m_AllocationBytes);
+			}
 		}
 	}
 
@@ -82,6 +85,15 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
+		VmaAllocationInfo allocationInfo{};
+		vmaGetAllocationInfo(m_Device->GetAllocator(), m_Allocation, &allocationInfo);
+		m_AllocationBytes = allocationInfo.size;
+		m_Device->RecordResourceCreated(VulkanProfiledResource::Texture, m_AllocationBytes);
+		const Result nameResult = m_Device->SetDebugName(VK_OBJECT_TYPE_IMAGE, m_Image, desc.debugName);
+		if (nameResult != Result::Success) {
+			return nameResult;
+		}
+
 		TextureViewType viewType = TextureViewType::View2D;
 		if (desc.depth > 1) {
 			viewType = TextureViewType::View3D;
@@ -98,19 +110,20 @@ namespace RealRHI {
 		}
 
 		m_TextureView = Ref<VulkanTextureView>::Create();
-		const Result viewResult = m_TextureView->Init(m_Device, 
+		const Result viewResult = m_TextureView->Init(m_Device,
 			this,
 			TextureViewDesc{
 				.type = viewType,
 				.mipLevelCount = viewMipCount,
 				.arrayLayerCount = m_ArrayLayers,
+				.debugName = desc.debugName,
 			});
 		if (viewResult != Result::Success) {
 			return viewResult;
 		}
 
 		if (Any(m_Usage & TextureUsage::ShaderResource)) {
-			const Result samplerResult = m_Device->CreateSampler({}, m_DefaultSampler);
+			const Result samplerResult = m_Device->CreateSampler({.debugName = desc.debugName}, m_DefaultSampler);
 			if (samplerResult != Result::Success) {
 				return samplerResult;
 			}

@@ -267,7 +267,7 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
-		return Result::Success;
+		return m_Device->SetDebugName(VK_OBJECT_TYPE_SHADER_MODULE, m_ShaderModule, desc.debugName);
 	}
 
 	Slang::ComPtr<slang::IModule> VulkanShader::LoadModule(const ShaderDesc& desc,

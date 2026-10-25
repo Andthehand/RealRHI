@@ -77,6 +77,7 @@ namespace RealRHI {
 		const VulkanDevice* m_Device = nullptr;
 		VkImage m_Image = VK_NULL_HANDLE;
 		VmaAllocation m_Allocation = VK_NULL_HANDLE;
+		uint64_t m_AllocationBytes = 0;
 
 		// Submission-ordered state; never modified during command recording.
 		std::vector<VulkanTextureState> m_SubresourceStates;

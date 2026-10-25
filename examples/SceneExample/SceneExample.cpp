@@ -5,7 +5,9 @@
 
 #include <SDL3/SDL.h>
 
+#include <iomanip>
 #include <iostream>
+#include <string_view>
 
 namespace {
 	using namespace RealRHI;
@@ -18,13 +20,14 @@ namespace {
 			}
 		}
 
-		bool Init() {
+		bool Init(bool validation) {
 			DeviceDesc deviceDesc{
 				.applicationName = "RealRHI Scene Example",
 				.shaderDirectory = "shaders",
 				.enableDebug = true,
-				.enableValidationLayers = true,
+				.enableValidationLayers = validation,
 				.debugCallback = Examples::CaptureDebugMessage,
+				.enableProfiling = true,
 			};
 			if (Device::Create(deviceDesc, m_Device) != Result::Success) {
 				return false;
@@ -77,10 +80,47 @@ namespace {
 				++framesRendered;
 			}
 
+			m_Device->WaitIdle();
+			PrintStatistics();
 			return frameLimit == 0 || framesRendered == frameLimit;
 		}
 
 	private:
+		void PrintStatistics() const {
+			const auto statistics = m_Device->GetStatistics();
+			std::cout << std::fixed << std::setprecision(4);
+			std::cout << "CPU timings (includes any enabled validation):\n";
+			PrintTiming("Upload staging", statistics.uploadStaging);
+			PrintTiming("Queue submission", statistics.submissions);
+			PrintTiming("Graphics pipeline creation", statistics.graphicsPipelineCreation);
+
+			std::cout << "GPU intervals:\n";
+			for (const auto& interval : statistics.gpuTimings) {
+				std::cout << "  Queue " << interval.queue.familyIndex << ':' << interval.queue.queueIndex << ' ';
+				PrintTiming(interval.name.c_str(), interval.timing);
+			}
+
+			std::cout << "Uploaded " << statistics.submittedUploadBytes << " bytes in " << statistics.uploadBatchCount
+					  << " batches\n";
+			std::cout << "Buffers: " << statistics.buffers.liveCount << " live, " << statistics.buffers.peakBytes
+					  << " peak allocation bytes\n";
+			std::cout << "Textures: " << statistics.textures.liveCount << " live, " << statistics.textures.peakBytes
+					  << " peak allocation bytes\n";
+			std::cout << "Resource descriptors: " << statistics.descriptors.resourceBytes << " live bytes, "
+					  << statistics.descriptors.resourceReservedBytes << " reserved bytes, "
+					  << statistics.descriptors.resourceCapacityBytes << " capacity bytes\n";
+			std::cout << "Samplers: " << statistics.descriptors.samplerCount << " / "
+					  << statistics.descriptors.samplerCapacity << '\n';
+		}
+
+		static void PrintTiming(const char* name, const TimingStatistics& timing) {
+			if (timing.sampleCount != 0) {
+				std::cout << "  " << name << ": " << timing.sampleCount << " samples, "
+						  << timing.totalMilliseconds / timing.sampleCount << " ms average, "
+						  << timing.maximumMilliseconds << " ms maximum\n";
+			}
+		}
+
 		bool DrawFrame(const FrameContext& frame, float rotation) {
 			CommandList* commands = nullptr;
 			if (m_Frames.BeginSlot(frame.frameIndex, commands) != Result::Success ||
@@ -121,6 +161,11 @@ namespace {
 }
 
 int main(int argc, char** argv) {
+	bool validation = true;
+	if (argc > 1 && std::string_view(argv[argc - 1]) == "--no-validation") {
+		validation = false;
+		--argc;
+	}
 	uint32_t frameLimit = 0;
 	if (!RealRHI::Examples::ParseFrameLimit(argc, argv, frameLimit)) {
 		return 1;
@@ -129,7 +174,7 @@ int main(int argc, char** argv) {
 	bool succeeded = false;
 	{
 		SceneApplication application;
-		succeeded = application.Init() && application.Run(frameLimit);
+		succeeded = application.Init(validation) && application.Run(frameLimit);
 	}
 
 	if (!succeeded || RealRHI::Examples::s_ErrorCount != 0) {

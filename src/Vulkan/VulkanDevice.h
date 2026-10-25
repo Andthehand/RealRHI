@@ -12,6 +12,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -21,6 +22,18 @@
 namespace RealRHI {
 	class VulkanDescriptorManager;
 	class VulkanCommandQueue;
+
+	enum class VulkanProfiledResource {
+		Buffer,
+		Texture,
+		Pipeline
+	};
+	enum class VulkanProfiledOperation {
+		UploadStaging,
+		Submission,
+		GraphicsPipeline,
+		ComputePipeline
+	};
 
 	struct QueueFamilyIndices {
 		std::optional<uint32_t> graphicsFamily;
@@ -55,6 +68,33 @@ namespace RealRHI {
 
 		std::filesystem::path GetShaderDirectory() const override { return m_ShaderDirectory; }
 		bool IsDebugEnabled() const override { return m_EnableDebug; }
+		bool IsProfilingEnabled() const override { return m_EnableProfiling; }
+		bool SupportsDebugLabels() const { return m_DebugLabelsEnabled; }
+		bool SupportsHostQueryReset() const { return m_SupportsHostQueryReset; }
+
+		template <typename Handle>
+		Result SetDebugName(VkObjectType type, Handle handle, const char* name) const {
+			if (!m_DebugLabelsEnabled || name == nullptr || name[0] == '\0') {
+				return Result::Success;
+			}
+
+			// Dispatchable handles are pointers; other handles can be integers on 32-bit platforms.
+			uint64_t objectHandle = 0;
+			if constexpr (std::is_pointer_v<Handle>) {
+				objectHandle = reinterpret_cast<uintptr_t>(handle);
+			}
+			else {
+				objectHandle = static_cast<uint64_t>(handle);
+			}
+			return SetDebugObjectName(type, objectHandle, name);
+		}
+
+		DeviceStatistics GetStatistics() const override;
+		void RecordResourceCreated(VulkanProfiledResource type, uint64_t bytes = 0) const;
+		void RecordResourceDestroyed(VulkanProfiledResource type, uint64_t bytes = 0) const;
+		void RecordCpuTiming(VulkanProfiledOperation operation, double milliseconds, uint64_t bytes = 0) const;
+		void RecordGpuTimings(QueueId queue, std::span<const GpuTimestamp> timestamps) const;
+		void RecordUploadBatch(uint64_t bytes) const;
 		void SendDebugMessage(DebugSeverity severity, DebugMessageType type, const char* message) const {
 			m_DebugCallback({.severity = severity, .type = type, .message = message});
 		}
@@ -89,6 +129,7 @@ namespace RealRHI {
 		bool SupportsWireframe() const { return m_SupportsWireframe; }
 
 	private:
+		Result SetDebugObjectName(VkObjectType type, uint64_t handle, const char* name) const;
 		bool CreateInstance(const char* appName, bool enableValidationLayer);
 		bool SetupDebugMessenger();
 		bool SupportsRequiredExtensions(VkPhysicalDevice device) const;
@@ -130,6 +171,12 @@ namespace RealRHI {
 		std::filesystem::path m_ShaderDirectory;
 		DebugCallback m_DebugCallback;
 		bool m_EnableDebug;
+		bool m_EnableProfiling = false;
+		bool m_DebugLabelsEnabled = false;
+		bool m_SupportsHostQueryReset = false;
+
+		mutable std::mutex m_StatisticsMutex;
+		mutable DeviceStatistics m_Statistics;
 
 		static constexpr std::array<const char*, 5> s_DeviceExtensions{
 			VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,

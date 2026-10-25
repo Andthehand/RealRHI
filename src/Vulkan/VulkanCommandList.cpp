@@ -21,6 +21,9 @@ namespace RealRHI {
 
 	VulkanCommandList::~VulkanCommandList() {
 		std::scoped_lock lock(m_StateMutex);
+		if (m_TimestampPool != VK_NULL_HANDLE) {
+			vkDestroyQueryPool(m_Device->GetDevice(), m_TimestampPool, nullptr);
+		}
 
 		if (m_CommandBuffer != VK_NULL_HANDLE && m_State != CommandListState::Pending) {
 			m_Allocator->Free(m_CommandBuffer);
@@ -49,7 +52,7 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
-		return Result::Success;
+		return InitTimestamps();
 	}
 
 	Result VulkanCommandList::Begin() {
@@ -174,6 +177,9 @@ namespace RealRHI {
 		m_ShaderBuffers.clear();
 		m_VertexBuffer = nullptr;
 		m_IndexBuffer = nullptr;
+		m_TimestampNames.clear();
+		m_TimestampResults.clear();
+		m_TimestampReadResult = Result::NotReady;
 		return Result::Success;
 	}
 

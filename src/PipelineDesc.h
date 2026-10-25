@@ -52,6 +52,7 @@ namespace RealRHI {
 
 	struct ComputePipelineDesc {
 		Shader* shader = nullptr;
+		const char* debugName = nullptr;
 	};
 
 	struct PipelineDesc {
@@ -62,5 +63,6 @@ namespace RealRHI {
 		BlendState blendState;
 
 		RenderTargetFormats renderTargetFormats;
+		const char* debugName = nullptr;
 	};
 }

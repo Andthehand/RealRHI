@@ -66,7 +66,14 @@ namespace RealRHI {
 			}
 		}
 
-		return CreateDescriptors(viewInfo);
+		if (m_ImageView != VK_NULL_HANDLE) {
+			const Result nameResult = m_Device->SetDebugName(VK_OBJECT_TYPE_IMAGE_VIEW, m_ImageView, desc.debugName);
+			if (nameResult != Result::Success) {
+				return nameResult;
+			}
+		}
+
+		return CreateDescriptors(viewInfo, desc.debugName);
 	}
 
 	bool VulkanTextureView::ValidateDescription(const TextureViewDesc& desc, TextureUsage allowedUsage) const {
@@ -159,7 +166,7 @@ namespace RealRHI {
 		};
 	}
 
-	Result VulkanTextureView::CreateDescriptors(const VkImageViewCreateInfo& viewInfo) {
+	Result VulkanTextureView::CreateDescriptors(const VkImageViewCreateInfo& viewInfo, const char* debugName) {
 		if (Any(m_Usage & TextureUsage::ShaderResource)) {
 			VkImageViewCreateInfo sampledViewInfo = viewInfo;
 			if ((sampledViewInfo.subresourceRange.aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) {
@@ -173,7 +180,7 @@ namespace RealRHI {
 			}
 
 			m_SampledImageDescriptorIndex = m_Device->GetDescriptorManager()->AllocateImageDescriptor(
-				sampledViewInfo, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, layout);
+				sampledViewInfo, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, layout, debugName);
 			if (m_SampledImageDescriptorIndex == UINT32_MAX) {
 				return Result::Failed;
 			}
@@ -181,7 +188,7 @@ namespace RealRHI {
 
 		if (Any(m_Usage & TextureUsage::Storage)) {
 			m_StorageImageDescriptorIndex = m_Device->GetDescriptorManager()->AllocateImageDescriptor(
-				viewInfo, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL);
+				viewInfo, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_IMAGE_LAYOUT_GENERAL, debugName);
 			if (m_StorageImageDescriptorIndex == UINT32_MAX) {
 				return Result::Failed;
 			}

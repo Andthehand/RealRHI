@@ -44,5 +44,7 @@ namespace RealRHI {
 		// Direct initialization requires CPUToGPU or GPUToCPU memory.
 		// Use an UploadContext batch to initialize GPUOnly buffers.
 		const void* initialData = nullptr;
+		// Optional UTF-8 label; only needs to remain valid for the creation call.
+		const char* debugName = nullptr;
 	};
 }

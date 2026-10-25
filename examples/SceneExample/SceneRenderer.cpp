@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cmath>
+#include <string>
 #include <utility>
 
 namespace RealRHI::Examples {
@@ -111,7 +112,8 @@ namespace RealRHI::Examples {
 
 	Result SceneRenderer::CreatePipelines(TextureFormat outputFormat) {
 		Ref<Shader> sceneShader;
-		Result result = m_Device->CreateShader({.moduleName = "scene"}, sceneShader);
+		Result result =
+			m_Device->CreateShader({.moduleName = "scene", .debugName = "Scene geometry shader"}, sceneShader);
 		if (result != Result::Success) {
 			return result;
 		}
@@ -119,10 +121,12 @@ namespace RealRHI::Examples {
 		PipelineDesc sceneDesc{
 			.shader = sceneShader.Raw(),
 			.rasterState = {.cullMode = CullMode::None},
-			.renderTargetFormats = {
-				.colorFormats = {TextureFormat::RGBA8_UNorm},
-				.depthFormat = TextureFormat::D32_Float,
-			},
+			.renderTargetFormats =
+				{
+					.colorFormats = {TextureFormat::RGBA8_UNorm},
+					.depthFormat = TextureFormat::D32_Float,
+				},
+			.debugName = "Scene opaque pipeline",
 		};
 		result = m_Device->CreateGraphicsPipeline(sceneDesc, m_OpaquePipeline);
 		if (result != Result::Success) {
@@ -131,13 +135,15 @@ namespace RealRHI::Examples {
 
 		sceneDesc.depthState.depthWriteEnable = false;
 		sceneDesc.blendState.enable = true;
+		sceneDesc.debugName = "Scene transparent pipeline";
 		result = m_Device->CreateGraphicsPipeline(sceneDesc, m_TransparentPipeline);
 		if (result != Result::Success) {
 			return result;
 		}
 
 		Ref<Shader> postprocessShader;
-		result = m_Device->CreateShader({.moduleName = "postprocess"}, postprocessShader);
+		result = m_Device->CreateShader(
+			{.moduleName = "postprocess", .debugName = "Scene postprocess shader"}, postprocessShader);
 		if (result != Result::Success) {
 			return result;
 		}
@@ -148,6 +154,7 @@ namespace RealRHI::Examples {
 				.rasterState = {.cullMode = CullMode::None},
 				.depthState = {.depthTestEnable = false, .depthWriteEnable = false},
 				.renderTargetFormats = {.colorFormats = {outputFormat}},
+				.debugName = "Scene postprocess pipeline",
 			},
 			m_PostprocessPipeline);
 	}
@@ -158,13 +165,19 @@ namespace RealRHI::Examples {
 		const uint64_t indexBytes = geometry.indices.size() * sizeof(uint32_t);
 
 		Result result = m_Device->CreateBuffer(
-			{.size = vertexBytes, .usage = BufferUsage::Vertex | BufferUsage::TransferDst}, m_VertexBuffer);
+			{
+				.size = vertexBytes,
+				.usage = BufferUsage::Vertex | BufferUsage::TransferDst,
+				.debugName = "Scene vertices",
+			},
+			m_VertexBuffer);
 		if (result != Result::Success) {
 			return result;
 		}
 
 		result = m_Device->CreateBuffer(
-			{.size = indexBytes, .usage = BufferUsage::Index | BufferUsage::TransferDst}, m_IndexBuffer);
+			{.size = indexBytes, .usage = BufferUsage::Index | BufferUsage::TransferDst, .debugName = "Scene indices"},
+			m_IndexBuffer);
 		if (result != Result::Success) {
 			return result;
 		}
@@ -197,6 +210,7 @@ namespace RealRHI::Examples {
 				.mipLevels = 6,
 				.format = TextureFormat::RGBA8_UNorm,
 				.usage = TextureUsage::ShaderResource | TextureUsage::TransferSrc | TextureUsage::TransferDst,
+				.debugName = "Scene checkerboard",
 			},
 			m_Pattern);
 		if (result != Result::Success) {
@@ -251,7 +265,7 @@ namespace RealRHI::Examples {
 			return result;
 		}
 
-		result = m_Device->CreateSampler({}, m_Sampler);
+		result = m_Device->CreateSampler({.debugName = "Scene linear sampler"}, m_Sampler);
 		if (result != Result::Success) {
 			return result;
 		}
@@ -270,12 +284,15 @@ namespace RealRHI::Examples {
 		}
 
 		FrameTargets targets;
+		const std::string colorName = "Scene color slot " + std::to_string(frameIndex);
+		const std::string depthName = "Scene depth slot " + std::to_string(frameIndex);
 		Result result = m_Device->CreateTexture(
 			{
 				.width = width,
 				.height = height,
 				.format = TextureFormat::RGBA8_UNorm,
 				.usage = TextureUsage::RenderTarget | TextureUsage::ShaderResource,
+				.debugName = colorName.c_str(),
 			},
 			targets.color);
 		if (result != Result::Success) {
@@ -288,6 +305,7 @@ namespace RealRHI::Examples {
 				.height = height,
 				.format = TextureFormat::D32_Float,
 				.usage = TextureUsage::DepthStencil,
+				.debugName = depthName.c_str(),
 			},
 			targets.depth);
 		if (result != Result::Success) {
@@ -422,6 +440,8 @@ namespace RealRHI::Examples {
 		TextureView* output,
 		float rotation,
 		const UploadSubmission& pendingUpload) {
+		commands.BeginDebugLabel("Scene frame");
+		commands.WriteTimestamp("Frame setup");
 		auto& targets = m_Frames[frameIndex];
 		if (pendingUpload.completion.IsValid()) {
 			commands.Barrier(pendingUpload.acquireBarriers);
@@ -433,9 +453,17 @@ namespace RealRHI::Examples {
 			{.width = static_cast<float>(targets.width), .height = static_cast<float>(targets.height)});
 		commands.SetScissor({.width = targets.width, .height = targets.height});
 
+		commands.WriteTimestamp("Scene");
+		commands.BeginDebugLabel("Opaque and transparent geometry");
 		BeginScene(commands, targets);
 		DrawScene(commands, targets, rotation);
+		commands.EndDebugLabel();
+		commands.WriteTimestamp("Postprocess");
+		commands.BeginDebugLabel("Fullscreen postprocess");
 		DrawPostprocess(commands, targets, output);
+		commands.EndDebugLabel();
+		commands.WriteTimestamp("Frame end");
+		commands.EndDebugLabel();
 		targets.initialized = true;
 	}
 }

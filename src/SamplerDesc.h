@@ -38,5 +38,6 @@ namespace RealRHI {
 		bool compareEnable = false;
 		CompareOp compareOp = CompareOp::Always;
 		SamplerBorderColor borderColor = SamplerBorderColor::OpaqueBlack;
+		const char* debugName = nullptr;
 	};
 }

@@ -8,6 +8,9 @@ namespace RealRHI {
 		: m_Device(device) { }
 
 	VulkanBuffer::~VulkanBuffer() {
+		if (m_Buffer != VK_NULL_HANDLE) {
+			m_Device->RecordResourceDestroyed(VulkanProfiledResource::Buffer, m_AllocInfo.size);
+		}
 		if (m_DescriptorIndex != UINT32_MAX) {
 			m_Device->GetDescriptorManager()->FreeBufferDescriptor(m_DescriptorIndex);
 		}
@@ -46,23 +49,30 @@ namespace RealRHI {
 		};
 
 		VmaAllocationCreateInfo vmaAllocCreateInfo = Utils::MemoryUsageToVmaAllocationCreateInfo(desc.memoryUsage);
-        if (vmaCreateBuffer(m_Device->GetAllocator(), &bufferInfo, &vmaAllocCreateInfo, &m_Buffer, &m_BufferMemory, &m_AllocInfo) != VK_SUCCESS) {
-            m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan buffer.");
+		if (vmaCreateBuffer(m_Device->GetAllocator(), &bufferInfo, &vmaAllocCreateInfo, &m_Buffer, &m_BufferMemory, &m_AllocInfo) !=VK_SUCCESS) {
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan buffer.");
 			return Result::Failed;
+		}
+
+		m_Device->RecordResourceCreated(VulkanProfiledResource::Buffer, m_AllocInfo.size);
+		const Result nameResult = m_Device->SetDebugName(VK_OBJECT_TYPE_BUFFER, m_Buffer, desc.debugName);
+		if (nameResult != Result::Success) {
+			return nameResult;
 		}
 
 		if (desc.initialData) {
 			if (m_AllocInfo.pMappedData == nullptr ||
-                vmaCopyMemoryToAllocation(m_Device->GetAllocator(), desc.initialData,
-                    m_BufferMemory, 0, desc.size) != VK_SUCCESS) {
-                m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General,
+				vmaCopyMemoryToAllocation(m_Device->GetAllocator(), desc.initialData, m_BufferMemory, 0, desc.size) !=VK_SUCCESS) {
+				m_Device->SendDebugMessage(DebugSeverity::Error,
+					DebugMessageType::General,
 					"CreateBuffer: Failed to copy and flush initial data to mapped memory.");
 				return Result::Failed;
 			}
 		}
 
 		if (Any(m_Usage & (BufferUsage::Storage | BufferUsage::Uniform))) {
-			m_DescriptorIndex = m_Device->GetDescriptorManager()->AllocateBufferDescriptor(this);
+			m_DescriptorIndex = m_Device->GetDescriptorManager()->AllocateBufferDescriptor(this, desc.debugName);
 			if (m_DescriptorIndex == UINT32_MAX) {
 				return Result::Failed;
 			}
@@ -142,8 +152,8 @@ namespace RealRHI {
 
 	VkDeviceAddress VulkanBuffer::GetBufferDeviceAddress() const {
 		VkBufferDeviceAddressInfo addrInfo{
-			.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, 
-			.buffer = m_Buffer
+			.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+			.buffer = m_Buffer,
 		};
 
 		return vkGetBufferDeviceAddress(m_Device->GetDevice(), &addrInfo);

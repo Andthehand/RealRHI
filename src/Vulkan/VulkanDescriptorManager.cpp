@@ -3,6 +3,8 @@
 #include "VulkanBuffer.h"
 #include "VulkanConvertions.h"
 
+#include <algorithm>
+
 namespace RealRHI {
 	VulkanDescriptorManager::VulkanDescriptorManager(const VulkanDevice* device)
 		: m_Device(device) { }
@@ -39,7 +41,7 @@ namespace RealRHI {
 		m_DescriptorHeaps->BindDescriptorHeaps(commandBuffer);
 	}
 
-	uint32_t VulkanDescriptorManager::AllocateBufferDescriptor(const VulkanBuffer* buffer) {
+	uint32_t VulkanDescriptorManager::AllocateBufferDescriptor(const VulkanBuffer* buffer, const char* debugName) {
 		std::scoped_lock lock(m_DescriptorMutex);
 		uint32_t bufferDescriptorIndex;
 		if (!m_FreeBufferDescriptors.empty()) {
@@ -64,6 +66,15 @@ namespace RealRHI {
 			.type = Utils::BufferUsageToVkDescriptorType(buffer->GetUsage()),
 			.data = {.pAddressRange = &deviceAddressRange},
 		};
+		const VkDebugUtilsObjectNameInfoEXT nameInfo{
+			.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+			.objectType = VK_OBJECT_TYPE_UNKNOWN,
+			.objectHandle = 0,
+			.pObjectName = RetainDebugName(debugName),
+		};
+		if (nameInfo.pObjectName != nullptr) {
+			descriptorInfo.pNext = &nameInfo;
+		}
 
 		std::vector<uint8_t> descriptorMemory(m_BufferDescriptorSize);
 		VkHostAddressRangeEXT hostAddressRange{
@@ -82,6 +93,7 @@ namespace RealRHI {
 		m_DescriptorHeaps->GetResourceHeap().buffer->WriteData(
 			descriptorMemory.data(), m_BufferDescriptorSize, bufferDescriptorIndex * m_BufferDescriptorSize);
 		m_AllocatedBufferDescriptors.insert(bufferDescriptorIndex);
+		UpdateHighWaterMarks();
 		return bufferDescriptorIndex;
 	}
 
@@ -102,7 +114,8 @@ namespace RealRHI {
 
 	uint32_t VulkanDescriptorManager::AllocateImageDescriptor(const VkImageViewCreateInfo& viewInfo,
 		VkDescriptorType descriptorType,
-		VkImageLayout descriptorAccessLayout) {
+		VkImageLayout descriptorAccessLayout,
+		const char* debugName) {
 		std::scoped_lock lock(m_DescriptorMutex);
 		uint32_t imageDescriptorIndex;
 		if (!m_FreeImageDescriptors.empty()) {
@@ -135,6 +148,15 @@ namespace RealRHI {
 				.pImage = &imageDescriptorInfo,
 			},
 		};
+		const VkDebugUtilsObjectNameInfoEXT nameInfo{
+			.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+			.objectType = VK_OBJECT_TYPE_UNKNOWN,
+			.objectHandle = 0,
+			.pObjectName = RetainDebugName(debugName),
+		};
+		if (nameInfo.pObjectName != nullptr) {
+			descriptorInfo.pNext = &nameInfo;
+		}
 
 		std::vector<uint8_t> descriptorMemory(m_ImageDescriptorSize);
 		VkHostAddressRangeEXT hostAddressRange{
@@ -153,6 +175,7 @@ namespace RealRHI {
 		m_DescriptorHeaps->GetResourceHeap().buffer->WriteData(
 			descriptorMemory.data(), m_ImageDescriptorSize, imageDescriptorIndex * m_ImageDescriptorSize);
 		m_AllocatedImageDescriptors.insert(imageDescriptorIndex);
+		UpdateHighWaterMarks();
 		return imageDescriptorIndex;
 	}
 
@@ -171,7 +194,8 @@ namespace RealRHI {
 		m_FreeImageDescriptors.push_back(index);
 	}
 
-	uint32_t VulkanDescriptorManager::AllocateSamplerDescriptor(const VkSamplerCreateInfo& samplerCI) {
+	uint32_t VulkanDescriptorManager::AllocateSamplerDescriptor(const VkSamplerCreateInfo& samplerCI,
+		const char* debugName) {
 		std::scoped_lock lock(m_DescriptorMutex);
 		uint32_t samplerDescriptorIndex;
 		if (!m_FreeSamplerDescriptors.empty()) {
@@ -196,7 +220,19 @@ namespace RealRHI {
 			.size = m_SamplerDescriptorSize,
 		};
 
-		if (vkWriteSamplerDescriptorsEXT(m_Device->GetDevice(), 1, &samplerCI, &hostAddressRange) != VK_SUCCESS) {
+		const VkDebugUtilsObjectNameInfoEXT nameInfo{
+			.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+			.pNext = samplerCI.pNext,
+			.objectType = VK_OBJECT_TYPE_UNKNOWN,
+			.objectHandle = 0,
+			.pObjectName = RetainDebugName(debugName),
+		};
+		VkSamplerCreateInfo namedSampler = samplerCI;
+		if (nameInfo.pObjectName != nullptr) {
+			namedSampler.pNext = &nameInfo;
+		}
+
+		if (vkWriteSamplerDescriptorsEXT(m_Device->GetDevice(), 1, &namedSampler, &hostAddressRange) != VK_SUCCESS) {
 			m_Device->SendDebugMessage(
 				DebugSeverity::Error, DebugMessageType::General, "Failed to write Vulkan sampler descriptor.");
 			m_FreeSamplerDescriptors.push_back(samplerDescriptorIndex);
@@ -207,6 +243,7 @@ namespace RealRHI {
 		m_DescriptorHeaps->GetSamplerHeap().buffer->WriteData(
 			descriptorMemory.data(), m_SamplerDescriptorSize, samplerDescriptorIndex * m_SamplerDescriptorSize);
 		m_AllocatedSamplerDescriptors.insert(samplerDescriptorIndex);
+		UpdateHighWaterMarks();
 		return samplerDescriptorIndex;
 	}
 
@@ -225,4 +262,38 @@ namespace RealRHI {
 		m_FreeSamplerDescriptors.push_back(index);
 	}
 
-};
+	const char* VulkanDescriptorManager::RetainDebugName(const char* name) {
+		if (!m_Device->SupportsDebugLabels() || name == nullptr || name[0] == '\0') {
+			return nullptr;
+		}
+
+		return m_DescriptorDebugNames.emplace(name).first->c_str();
+	}
+
+	void VulkanDescriptorManager::UpdateHighWaterMarks() {
+		const uint64_t bytes = m_AllocatedBufferDescriptors.size() * m_BufferDescriptorSize +
+			m_AllocatedImageDescriptors.size() * m_ImageDescriptorSize;
+		m_PeakResourceBytes = std::max(m_PeakResourceBytes, bytes);
+		m_PeakSamplerCount = std::max(m_PeakSamplerCount, static_cast<uint64_t>(m_AllocatedSamplerDescriptors.size()));
+	}
+
+	DescriptorStatistics VulkanDescriptorManager::GetStatistics() const {
+		std::scoped_lock lock(m_DescriptorMutex);
+		DescriptorStatistics statistics{
+			.bufferCount = m_AllocatedBufferDescriptors.size(),
+			.imageCount = m_AllocatedImageDescriptors.size(),
+			.samplerCount = m_AllocatedSamplerDescriptors.size(),
+			.resourceBytes = m_AllocatedBufferDescriptors.size() * m_BufferDescriptorSize +
+				m_AllocatedImageDescriptors.size() * m_ImageDescriptorSize,
+			.resourceReservedBytes = m_NextBufferDescriptorIndex * m_BufferDescriptorSize +
+				(m_ImageDescriptorCapacity - m_NextImageDescriptorIndex) * m_ImageDescriptorSize,
+			.peakResourceBytes = m_PeakResourceBytes,
+			.peakSamplerCount = m_PeakSamplerCount,
+		};
+		if (m_DescriptorHeaps) {
+			statistics.resourceCapacityBytes = m_DescriptorHeaps->GetResourceHeap().usableSize;
+			statistics.samplerCapacity = m_DescriptorHeaps->GetSamplerHeap().usableSize / m_SamplerDescriptorSize;
+		}
+		return statistics;
+	}
+}

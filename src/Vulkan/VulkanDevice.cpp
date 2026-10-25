@@ -62,6 +62,7 @@ namespace RealRHI {
 
 	Result VulkanDevice::Init(const DeviceDesc& desc) {
 		m_EnableDebug = desc.enableDebug;
+		m_EnableProfiling = desc.enableProfiling;
 		m_ShaderDirectory = desc.shaderDirectory;
 		m_DebugCallback = DefaultDebugCallback;
 		if (desc.debugCallback != nullptr) {
@@ -133,6 +134,22 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
+		return Result::Success;
+	}
+
+	Result VulkanDevice::SetDebugObjectName(VkObjectType type, uint64_t handle, const char* name) const {
+		const VkDebugUtilsObjectNameInfoEXT info{
+			.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+			.objectType = type,
+			.objectHandle = handle,
+			.pObjectName = name,
+		};
+		if (vkSetDebugUtilsObjectNameEXT(m_Device, &info) != VK_SUCCESS) {
+			SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"SetDebugName: Failed to assign the Vulkan debug name.");
+			return Result::Failed;
+		}
 		return Result::Success;
 	}
 
@@ -455,8 +472,31 @@ namespace RealRHI {
 			.pEnabledValidationFeatures = &syncValidation,
 		};
 
+		if (enableValidationLayer || m_EnableDebug || m_EnableProfiling) {
+			uint32_t count = 0;
+			if (vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr) != VK_SUCCESS) {
+				SendDebugMessage(DebugSeverity::Error,
+					DebugMessageType::General,
+					"CreateInstance: Failed to enumerate available extensions for debug labels.");
+				return false;
+			}
+			std::vector<VkExtensionProperties> available(count);
+			if (vkEnumerateInstanceExtensionProperties(nullptr, &count, available.data()) != VK_SUCCESS) {
+				SendDebugMessage(DebugSeverity::Error,
+					DebugMessageType::General,
+					"CreateInstance: Failed to read available extensions for debug labels.");
+				return false;
+			}
+			m_DebugLabelsEnabled = std::any_of(available.begin(), available.end(), [](const auto& extension) {
+				return std::strcmp(extension.extensionName, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0;
+			});
+			if (m_DebugLabelsEnabled || enableValidationLayer) {
+				extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+				m_DebugLabelsEnabled = true;
+			}
+		}
+
 		if (enableValidationLayer) {
-			extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 			layers.push_back("VK_LAYER_KHRONOS_validation");
 
 			uint32_t extensionCount = 0;
@@ -793,12 +833,20 @@ namespace RealRHI {
 			.shaderDrawParameters = VK_TRUE,
 		};
 
-		VkPhysicalDeviceFeatures supportedFeatures{};
-		vkGetPhysicalDeviceFeatures(m_PhysicalDevice, &supportedFeatures);
-		m_SupportsWireframe = supportedFeatures.fillModeNonSolid == VK_TRUE;
+		VkPhysicalDeviceVulkan12Features supportedVk12Features{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+		};
+		VkPhysicalDeviceFeatures2 supportedFeatures{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+			.pNext = &supportedVk12Features,
+		};
+		vkGetPhysicalDeviceFeatures2(m_PhysicalDevice, &supportedFeatures);
+		m_SupportsWireframe = supportedFeatures.features.fillModeNonSolid == VK_TRUE;
+		m_SupportsHostQueryReset = supportedVk12Features.hostQueryReset == VK_TRUE;
+		enabledVk12Features.hostQueryReset = supportedVk12Features.hostQueryReset;
 
 		VkPhysicalDeviceFeatures deviceFeatures{
-			.fillModeNonSolid = supportedFeatures.fillModeNonSolid,
+			.fillModeNonSolid = supportedFeatures.features.fillModeNonSolid,
 		};
 
 		VkDeviceCreateInfo createInfo{

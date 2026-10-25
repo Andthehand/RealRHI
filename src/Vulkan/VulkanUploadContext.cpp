@@ -1,6 +1,7 @@
 #include "VulkanUploadContext.h"
 
 #include "VulkanConvertions.h"
+#include "VulkanCpuTimer.h"
 #include "VulkanTexture.h"
 
 #include <algorithm>
@@ -63,12 +64,14 @@ namespace RealRHI {
 		if (result == Result::Success) {
 			m_ActiveBatchIndex = index;
 			m_FinalBarriersRecorded = false;
+			m_Batches[index].commandList->WriteTimestamp("Upload");
 		}
 
 		return result;
 	}
 
 	Result VulkanUploadContext::UploadBuffer(const BufferUploadDesc& desc, const void* data, uint64_t size) {
+		const VulkanCpuTimer timer(m_Device);
 		Result result = ValidateBufferUpload(desc, data, size);
 		if (result != Result::Success) {
 			return result;
@@ -95,11 +98,13 @@ namespace RealRHI {
 		}
 
 		auto* commandList = m_Batches[m_ActiveBatchIndex].commandList.Raw();
+		commandList->BeginDebugLabel("Upload buffer");
 		commandList->Barrier(before);
 
 		commandList->CopyBuffer(allocation.buffer,
 			destination,
 			{.sourceOffset = allocation.offset, .destinationOffset = desc.destinationOffset, .size = size});
+		commandList->EndDebugLabel();
 
 		const BufferBarrier final{
 			.buffer = destination,
@@ -116,11 +121,14 @@ namespace RealRHI {
 		if (RequiresQueueFamilyTransfer(desc.finalQueue)) {
 			m_AcquireBarriers.buffers.push_back(final);
 		}
+		m_BatchBytes += size;
+		timer.Finish(VulkanProfiledOperation::UploadStaging, size);
 
 		return Result::Success;
 	}
 
 	Result VulkanUploadContext::UploadTexture(const TextureUploadDesc& desc, const void* data, uint64_t size) {
+		const VulkanCpuTimer timer(m_Device);
 		TextureUploadInfo upload;
 		Result result = PrepareTextureUpload(desc, data, size, upload);
 		if (result != Result::Success) {
@@ -149,10 +157,12 @@ namespace RealRHI {
 		}
 
 		auto* commandList = m_Batches[m_ActiveBatchIndex].commandList.Raw();
+		commandList->BeginDebugLabel("Upload texture");
 		commandList->Barrier(before);
 
 		upload.copyRegion.bufferOffset = allocation.offset;
 		commandList->CopyBufferToTexture(allocation.buffer, destination, upload.copyRegion);
+		commandList->EndDebugLabel();
 
 		const TextureBarrier final{
 			.texture = destination,
@@ -170,6 +180,8 @@ namespace RealRHI {
 		if (RequiresQueueFamilyTransfer(desc.finalQueue)) {
 			m_AcquireBarriers.textures.push_back(final);
 		}
+		m_BatchBytes += upload.byteSize;
+		timer.Finish(VulkanProfiledOperation::UploadStaging, upload.byteSize);
 
 		return Result::Success;
 	}
@@ -190,6 +202,7 @@ namespace RealRHI {
 		// End or submission can fail. A retry must not record these barriers twice.
 		if (!m_FinalBarriersRecorded) {
 			batch.commandList->Barrier(m_FinalBarriers);
+			batch.commandList->WriteTimestamp("Upload end");
 			m_FinalBarriersRecorded = true;
 		}
 
@@ -209,6 +222,7 @@ namespace RealRHI {
 		batch.completion = token;
 		outSubmission.completion = token;
 		outSubmission.acquireBarriers = std::move(m_AcquireBarriers);
+		m_Device->RecordUploadBatch(m_BatchBytes);
 
 		ClearActiveBatch();
 		return Result::Success;
@@ -532,6 +546,7 @@ namespace RealRHI {
 	}
 
 	void VulkanUploadContext::ClearActiveBatch() {
+		m_BatchBytes = 0;
 		m_FinalBarriers = {};
 		m_AcquireBarriers = {};
 		m_ActiveBatchIndex = SIZE_MAX;

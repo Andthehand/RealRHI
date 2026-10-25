@@ -7,6 +7,7 @@
 #include "FrameContext.h"
 #include "Pipeline.h"
 #include "PipelineDesc.h"
+#include "Profiling.h"
 #include "Queue.h"
 #include "RefCounted.h"
 #include "Result.h"
@@ -39,7 +40,12 @@ namespace RealRHI {
 
 		virtual std::filesystem::path GetShaderDirectory() const = 0;
 		virtual bool IsDebugEnabled() const = 0;
+		virtual bool IsProfilingEnabled() const = 0;
+		// Snapshot only; poll completion tokens or WaitIdle first to include completed GPU intervals.
+		virtual DeviceStatistics GetStatistics() const = 0;
 
+		// Optional debugName strings need only survive the creation call. Names are ignored
+		// when debug naming is unavailable; textures also pass their name to default views/samplers.
 		virtual Result CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) const = 0;
 		virtual Result CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) const = 0;
 		virtual Result CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) const = 0;

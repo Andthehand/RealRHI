@@ -2,6 +2,7 @@
 #include "BarrierDesc.h"
 #include "Buffer.h"
 #include "Pipeline.h"
+#include "Profiling.h"
 #include "RefCounted.h"
 #include "RenderingInfo.h"
 #include "Result.h"
@@ -69,6 +70,17 @@ namespace RealRHI {
 		virtual Result End() = 0;
 		virtual Result Reset() = 0;
 		virtual CommandListState GetState() const = 0;
+
+		// Labels are optional when debug utils are unavailable. Balance regions in queue submission order.
+		virtual void BeginDebugLabel(const char* name) = 0;
+		virtual void EndDebugLabel() = 0;
+		virtual void InsertDebugLabel(const char* name) = 0;
+
+		virtual bool SupportsTimestamps() const = 0;
+		// Up to 128 markers per recording. Disabled or unsupported timestamps are a no-op.
+		virtual void WriteTimestamp(const char* name) = 0;
+		// Nonblocking; read after submission completion and before Reset/Begin discards the recording.
+		virtual Result GetTimestampResults(std::vector<GpuTimestamp>& outTimestamps) const = 0;
 
 		virtual void BeginRendering(const RenderingInfo& renderingInfo) = 0;
 		virtual void EndRendering() = 0;

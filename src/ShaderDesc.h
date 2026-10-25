@@ -4,5 +4,6 @@
 namespace RealRHI {
 	struct ShaderDesc {
 		const char* moduleName;
+		const char* debugName = nullptr;
 	};
 }

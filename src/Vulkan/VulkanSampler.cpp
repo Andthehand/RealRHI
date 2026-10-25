@@ -102,7 +102,7 @@ namespace RealRHI {
 			samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
 		}
 
-		m_DescriptorIndex = m_Device->GetDescriptorManager()->AllocateSamplerDescriptor(samplerInfo);
+		m_DescriptorIndex = m_Device->GetDescriptorManager()->AllocateSamplerDescriptor(samplerInfo, desc.debugName);
 		if (m_DescriptorIndex == UINT32_MAX) {
 			return Result::Failed;
 		}

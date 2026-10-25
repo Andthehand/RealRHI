@@ -1,6 +1,7 @@
 #include "VulkanCommandQueue.h"
 
 #include "VulkanCommandList.h"
+#include "VulkanCpuTimer.h"
 #include "VulkanDevice.h"
 
 #include <algorithm>
@@ -127,6 +128,8 @@ namespace RealRHI {
 		std::span<CommandList*> trackedLists,
 		VkFence fence,
 		std::span<const SubmissionToken> waitFor) {
+		const VulkanCpuTimer timer(m_Device);
+
 		std::vector<VkSemaphoreSubmitInfo> waitSemaphoreInfos(waitSemaphores.begin(), waitSemaphores.end());
 		std::unordered_map<VulkanCommandQueue*, uint64_t> dependencyValues;
 		for (const SubmissionToken& waitToken : waitFor) {
@@ -217,6 +220,12 @@ namespace RealRHI {
 			.pSignalSemaphoreInfos = signalInfos.data(),
 		};
 
+		if (m_Device->IsProfilingEnabled()) {
+			for (CommandList* commandList : trackedLists) {
+				static_cast<VulkanCommandList*>(commandList)->PrepareTimestampSubmission();
+			}
+		}
+
 		if (vkQueueSubmit2(m_Queue, 1, &submitInfo2, fence) != VK_SUCCESS) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
@@ -239,6 +248,7 @@ namespace RealRHI {
 		}
 
 		submitLock.unlock();
+		timer.Finish(VulkanProfiledOperation::Submission);
 
 		return SubmissionToken{.queue = GetQueueId(), .value = submissionValue};
 	}

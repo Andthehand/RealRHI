@@ -24,6 +24,8 @@ find_library(Slang_LIBRARY NAMES slang slang-compiler HINTS "$ENV{VULKAN_SDK}/li
 find_library(SDL_LIBRARY NAMES SDL3 HINTS "$ENV{VULKAN_SDK}/lib" REQUIRED)
 
 set(REALRHI_HEADERS
+    "src/Profiling.h"
+    "src/Vulkan/VulkanCpuTimer.h"
     "src/Sampler.h"
     "src/SamplerDesc.h"
     "src/Vulkan/VulkanSampler.h"
@@ -74,6 +76,8 @@ set(REALRHI_HEADERS
 )
 
 set(REALRHI_SOURCES
+    "src/Vulkan/VulkanCommandProfiling.cpp"
+    "src/Vulkan/VulkanStatistics.cpp"
     "src/Vulkan/VulkanSampler.cpp"
     "src/Vulkan/VulkanMipGeneration.cpp"
     "src/Vulkan/VulkanUploadContext.cpp"
@@ -111,6 +115,13 @@ target_link_libraries(RealRHI
 target_compile_features(RealRHI PUBLIC cxx_std_20)
 
 if(REALRHI_BUILD_TESTS)
+    add_executable(ProfilingTests tests/ProfilingTests.cpp)
+    target_link_libraries(ProfilingTests PRIVATE RealRHI)
+    target_compile_definitions(ProfilingTests PRIVATE
+        REALRHI_TEST_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/tests/shaders")
+    add_test(NAME ProfilingTests COMMAND ProfilingTests)
+    set_tests_properties(ProfilingTests PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
+
     add_executable(TextureTests tests/TextureTests.cpp)
     target_link_libraries(TextureTests PRIVATE RealRHI)
     target_compile_definitions(TextureTests PRIVATE

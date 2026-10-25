@@ -42,6 +42,6 @@ namespace RealRHI {
 		const VulkanDevice* m_Device = nullptr;
 
 		VkPipeline m_Pipeline = VK_NULL_HANDLE;
-		VkPipelineBindPoint m_BindPoint;
+		VkPipelineBindPoint m_BindPoint = VK_PIPELINE_BIND_POINT_MAX_ENUM;
 	};
 }
