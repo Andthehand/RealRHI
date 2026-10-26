@@ -132,10 +132,7 @@ namespace RealRHI {
 		// Repeated copies must not leave an ever-growing list of equivalent byte ranges.
 		size_t count = 0;
 		for (size_t i = 0; i < ranges.size(); ++i) {
-			if (count > 0 && ranges[count - 1].ownership == ranges[i].ownership &&
-				(ranges[i].ownership.pendingFamily == UINT32_MAX ||
-					(ranges[count - 1].releaseOffset == ranges[i].releaseOffset &&
-						ranges[count - 1].releaseSize == ranges[i].releaseSize))) {
+			if (count > 0 && ranges[count - 1].CanMergeWith(ranges[i])) {
 				ranges[count - 1].size += ranges[i].size;
 			}
 			else {

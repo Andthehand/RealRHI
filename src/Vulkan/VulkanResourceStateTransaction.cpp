@@ -4,6 +4,8 @@
 #include "VulkanCommandQueue.h"
 #include "VulkanTexture.h"
 
+#include <algorithm>
+#include <iterator>
 #include <sstream>
 #include <utility>
 
@@ -76,6 +78,47 @@ namespace RealRHI {
 		return true;
 	}
 
+	size_t VulkanResourceStateTransaction::SplitBufferRange(std::vector<VulkanBufferRangeState>& ranges,
+		uint64_t boundary) {
+		const auto next = std::upper_bound(ranges.begin(), ranges.end(), boundary,
+			[](uint64_t offset, const VulkanBufferRangeState& range) { return offset < range.offset; });
+		const auto current = std::prev(next);
+		if (current->offset == boundary) {
+			return static_cast<size_t>(current - ranges.begin());
+		}
+		const size_t index = static_cast<size_t>(next - ranges.begin());
+		if (boundary < current->offset + current->size) {
+			auto tail = *current;
+			tail.size = current->offset + current->size - boundary;
+			tail.offset = boundary;
+			current->size = boundary - current->offset;
+			ranges.insert(next, tail);
+		}
+		return index;
+	}
+
+	void VulkanResourceStateTransaction::MergeBufferRanges(std::vector<VulkanBufferRangeState>& ranges,
+		size_t first,
+		size_t last) {
+		// Only the changed ranges and their immediate neighbors can become mergeable.
+		if (first > 0) {
+			--first;
+		}
+		if (last < ranges.size()) {
+			++last;
+		}
+		size_t count = first + 1;
+		for (size_t i = first + 1; i < last; ++i) {
+			if (ranges[count - 1].CanMergeWith(ranges[i])) {
+				ranges[count - 1].size += ranges[i].size;
+			}
+			else {
+				ranges[count++] = ranges[i];
+			}
+		}
+		ranges.erase(ranges.begin() + count, ranges.begin() + last);
+	}
+
 	bool VulkanResourceStateTransaction::Validate(std::span<const VulkanResourceOperation> operations) {
 		for (const auto& operation : operations) {
 			// Swapchain layouts/ownership follow acquire/present synchronization, outside
@@ -93,24 +136,10 @@ namespace RealRHI {
 				}
 				auto& ranges = entry->second;
 				const uint64_t end = operation.offset + operation.size;
-				// Split at operation boundaries so disjoint buffer regions can change owners independently.
-				for (uint64_t boundary : {operation.offset, end}) {
-					for (size_t i = 0; i < ranges.size(); ++i) {
-						auto& range = ranges[i];
-						if (boundary > range.offset && boundary < range.offset + range.size) {
-							auto tail = range;
-							tail.size = range.offset + range.size - boundary;
-							tail.offset = boundary;
-							range.size = boundary - range.offset;
-							ranges.insert(ranges.begin() + i + 1, tail);
-							break;
-						}
-					}
-				}
-				for (auto& range : ranges) {
-					if (range.offset < operation.offset || range.offset >= end) {
-						continue;
-					}
+				const size_t first = SplitBufferRange(ranges, operation.offset);
+				const size_t last = SplitBufferRange(ranges, end);
+				for (size_t i = first; i < last; ++i) {
+					auto& range = ranges[i];
 					if (!ValidateOwnership(range.ownership, operation)) {
 						return false;
 					}
@@ -125,6 +154,7 @@ namespace RealRHI {
 						range.releaseSize = operation.size;
 					}
 				}
+				MergeBufferRanges(ranges, first, last);
 				continue;
 			}
 

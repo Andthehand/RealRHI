@@ -129,8 +129,26 @@ namespace RealRHI {
 			return;
 		}
 
-		for (const auto& retained : m_ReferencedResources) {
-			if (retained.Raw() == resource) {
+		if (m_ReferencedResources.size() < s_LinearRetentionLimit) {
+			for (const auto& retained : m_ReferencedResources) {
+				if (retained.Raw() == resource) {
+					return;
+				}
+			}
+		}
+		else {
+			// Rebuild from the owning references when entering the indexed path.
+			// Checking sizes also recovers if an earlier allocation threw mid-insertion.
+			if (m_RetainedResourceIndex.size() != m_ReferencedResources.size()) {
+				m_RetainedResourceIndex.clear();
+				if (m_RetainedResourceIndex.bucket_count() < m_ReferencedResources.size() * 2) {
+					m_RetainedResourceIndex.reserve(m_ReferencedResources.size() * 2);
+				}
+				for (auto& retained : m_ReferencedResources) {
+					m_RetainedResourceIndex.insert(retained.Raw());
+				}
+			}
+			if (!m_RetainedResourceIndex.insert(resource).second) {
 				return;
 			}
 		}
@@ -172,6 +190,7 @@ namespace RealRHI {
 	}
 
 	void VulkanCommandList::ResetRecordingState() {
+		m_RetainedResourceIndex.clear();
 		m_ComputePipelineBound = false;
 		m_GraphicsPipeline = nullptr;
 		m_Rendering = false;

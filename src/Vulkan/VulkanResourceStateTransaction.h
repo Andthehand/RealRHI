@@ -25,6 +25,8 @@ namespace RealRHI {
 
 	private:
 		bool ValidateOwnership(VulkanQueueOwnership& ownership, const VulkanResourceOperation& operation) const;
+		static size_t SplitBufferRange(std::vector<VulkanBufferRangeState>& ranges, uint64_t boundary);
+		static void MergeBufferRanges(std::vector<VulkanBufferRangeState>& ranges, size_t first, size_t last);
 
 	private:
 		const VulkanDevice* m_Device;

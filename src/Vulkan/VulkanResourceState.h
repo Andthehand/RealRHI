@@ -28,5 +28,12 @@ namespace RealRHI {
 		VulkanQueueOwnership ownership{};
 		uint64_t releaseOffset = 0;
 		uint64_t releaseSize = 0;
+
+	public:
+		bool CanMergeWith(const VulkanBufferRangeState& next) const {
+			return offset + size == next.offset && ownership == next.ownership &&
+				(ownership.pendingFamily == UINT32_MAX ||
+					(releaseOffset == next.releaseOffset && releaseSize == next.releaseSize));
+		}
 	};
 }

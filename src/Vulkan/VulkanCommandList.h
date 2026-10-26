@@ -11,8 +11,10 @@
 
 #include <volk.h>
 
+#include <atomic>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace RealRHI {
@@ -85,10 +87,7 @@ namespace RealRHI {
 			uint32_t firstInstance = 0) override;
 
 		QueueId GetQueueId() const override { return m_QueueId; }
-		CommandListState GetState() const override {
-			std::scoped_lock lock(m_StateMutex);
-			return m_State;
-		}
+		CommandListState GetState() const override { return m_State.load(std::memory_order_acquire); }
 
 	protected:
 		friend class VulkanDevice;
@@ -129,7 +128,10 @@ namespace RealRHI {
 		const QueueId m_QueueId{};
 		mutable std::mutex m_StateMutex;
 		std::vector<Ref<RefCounted>> m_ReferencedResources;
-		CommandListState m_State = CommandListState::Initial;
+		// Small recordings avoid allocating a hash table. This index never owns resources.
+		static constexpr size_t s_LinearRetentionLimit = 64;
+		std::unordered_set<RefCounted*> m_RetainedResourceIndex;
+		std::atomic<CommandListState> m_State = CommandListState::Initial;
 		bool m_ComputePipelineBound = false;
 		bool m_Rendering = false;
 		VulkanPipeline* m_GraphicsPipeline = nullptr;

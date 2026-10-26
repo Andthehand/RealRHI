@@ -5,6 +5,7 @@ project(RealRHI VERSION 1.0.0 LANGUAGES CXX)
 option(REALRHI_BUILD_VULKAN "Build the Vulkan backend" ON)
 option(BUILD_EXAMPLES "Build example applications" ${REALRHI_BUILD_VULKAN})
 option(REALRHI_BUILD_TESTS "Build RealRHI tests" ON)
+option(REALRHI_BUILD_BENCHMARKS "Build Vulkan resource-tracking CPU benchmarks" ON)
 
 set(realrhi_gpu_tests_default OFF)
 if(REALRHI_BUILD_VULKAN AND REALRHI_BUILD_TESTS)
@@ -17,6 +18,9 @@ if(REALRHI_BUILD_GPU_TESTS AND (NOT REALRHI_BUILD_VULKAN OR NOT REALRHI_BUILD_TE
 endif()
 if(BUILD_EXAMPLES AND NOT REALRHI_BUILD_VULKAN)
     message(FATAL_ERROR "BUILD_EXAMPLES requires REALRHI_BUILD_VULKAN. Set BUILD_EXAMPLES=OFF for a core-only build.")
+endif()
+if(REALRHI_BUILD_BENCHMARKS AND NOT REALRHI_BUILD_VULKAN)
+    message(FATAL_ERROR "REALRHI_BUILD_BENCHMARKS requires REALRHI_BUILD_VULKAN.")
 endif()
 
 add_library(RealRHICore INTERFACE)
@@ -167,6 +171,11 @@ target_link_libraries(RealRHI
 )
 
 target_compile_features(RealRHI PUBLIC cxx_std_20)
+
+if(REALRHI_BUILD_BENCHMARKS)
+    add_executable(ResourceTrackingBenchmarks benchmarks/ResourceTrackingBenchmarks.cpp)
+    target_link_libraries(ResourceTrackingBenchmarks PRIVATE RealRHI)
+endif()
 
 if(REALRHI_BUILD_TESTS)
     function(realrhi_add_test name)
