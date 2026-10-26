@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <sstream>
 
 namespace RealRHI {
 	namespace {
@@ -22,6 +23,133 @@ namespace RealRHI {
 		void AppendBarriers(BarrierDesc& destination, const BarrierDesc& source) {
 			destination.buffers.insert(destination.buffers.end(), source.buffers.begin(), source.buffers.end());
 			destination.textures.insert(destination.textures.end(), source.textures.begin(), source.textures.end());
+		}
+
+		const char* QueueName(QueueType queue) {
+			switch (queue) {
+				case QueueType::Graphics:
+					return "Graphics";
+				case QueueType::Compute:
+					return "Compute";
+				case QueueType::Transfer:
+					return "Transfer";
+			}
+			return "Unknown";
+		}
+
+		const char* LayoutName(TextureLayout layout) {
+			switch (layout) {
+				case TextureLayout::Undefined:
+					return "Undefined";
+				case TextureLayout::General:
+					return "General";
+				case TextureLayout::ColorAttachment:
+					return "ColorAttachment";
+				case TextureLayout::DepthStencilAttachment:
+					return "DepthStencilAttachment";
+				case TextureLayout::ShaderRead:
+					return "ShaderRead";
+				case TextureLayout::TransferSrc:
+					return "TransferSrc";
+				case TextureLayout::TransferDst:
+					return "TransferDst";
+				case TextureLayout::Present:
+					return "Present";
+				case TextureLayout::DepthStencilReadOnly:
+					return "DepthStencilReadOnly";
+			}
+			return "Unknown";
+		}
+
+		std::string StateName(ResourceState state) {
+			std::string stages;
+			std::string access;
+			auto append = [](std::string& text, const char* name) {
+				if (!text.empty()) {
+					text += "|";
+				}
+				text += name;
+			};
+			for (const auto& [flag, name] : {
+					 std::pair{PipelineStage::AllCommands, "AllCommands"},
+					 std::pair{PipelineStage::VertexShader, "VertexShader"},
+					 std::pair{PipelineStage::FragmentShader, "FragmentShader"},
+					 std::pair{PipelineStage::ComputeShader, "ComputeShader"},
+					 std::pair{PipelineStage::ColorAttachmentOutput, "ColorAttachmentOutput"},
+					 std::pair{PipelineStage::EarlyFragmentTests, "EarlyFragmentTests"},
+					 std::pair{PipelineStage::LateFragmentTests, "LateFragmentTests"},
+					 std::pair{PipelineStage::Transfer, "Transfer"},
+					 std::pair{PipelineStage::DrawIndirect, "DrawIndirect"},
+					 std::pair{PipelineStage::VertexInput, "VertexInput"},
+				 }) {
+				if ((static_cast<uint64_t>(state.stages) & static_cast<uint64_t>(flag)) != 0) {
+					append(stages, name);
+				}
+			}
+			for (const auto& [flag, name] : {
+					 std::pair{ResourceAccess::MemoryRead, "MemoryRead"},
+					 std::pair{ResourceAccess::MemoryWrite, "MemoryWrite"},
+					 std::pair{ResourceAccess::ShaderRead, "ShaderRead"},
+					 std::pair{ResourceAccess::ShaderWrite, "ShaderWrite"},
+					 std::pair{ResourceAccess::ColorAttachmentRead, "ColorAttachmentRead"},
+					 std::pair{ResourceAccess::ColorAttachmentWrite, "ColorAttachmentWrite"},
+					 std::pair{ResourceAccess::DepthStencilRead, "DepthStencilRead"},
+					 std::pair{ResourceAccess::DepthStencilWrite, "DepthStencilWrite"},
+					 std::pair{ResourceAccess::TransferRead, "TransferRead"},
+					 std::pair{ResourceAccess::TransferWrite, "TransferWrite"},
+					 std::pair{ResourceAccess::IndexRead, "IndexRead"},
+					 std::pair{ResourceAccess::VertexAttributeRead, "VertexAttributeRead"},
+					 std::pair{ResourceAccess::IndirectCommandRead, "IndirectCommandRead"},
+				 }) {
+				if ((static_cast<uint64_t>(state.access) & static_cast<uint64_t>(flag)) != 0) {
+					append(access, name);
+				}
+			}
+			if (stages.empty()) {
+				stages = "None";
+			}
+			if (access.empty()) {
+				access = "None";
+			}
+			return stages + " / " + access;
+		}
+
+		void DescribeBarriers(std::ostringstream& text, const BarrierDesc& barriers) {
+			auto describe = [&](const auto& barrier) {
+				text << " [" << StateName(barrier.before) << "] -> [" << StateName(barrier.after) << "]";
+				if (barrier.sourceQueue && barrier.destinationQueue) {
+					text << " ownership " << QueueName(*barrier.sourceQueue) << " -> "
+						 << QueueName(*barrier.destinationQueue);
+				}
+				text << '\n';
+			};
+			for (const auto& barrier : barriers.buffers) {
+				text << "    buffer offset=" << barrier.offset << " size=" << barrier.size;
+				describe(barrier);
+			}
+			for (const auto& barrier : barriers.textures) {
+				text << "    texture mips=" << barrier.subresources.baseMipLevel << "+"
+					 << barrier.subresources.mipLevelCount << " layers=" << barrier.subresources.baseArrayLayer << "+"
+					 << barrier.subresources.arrayLayerCount << " " << LayoutName(barrier.oldLayout) << " -> "
+					 << LayoutName(barrier.newLayout);
+				describe(barrier);
+			}
+		}
+
+		std::string EscapeDot(const std::string& value) {
+			std::string result;
+			for (char character : value) {
+				if (character == '\\' || character == '"') {
+					result += '\\';
+				}
+				if (character == '\n' || character == '\r') {
+					result += "\\n";
+				}
+				else {
+					result += character;
+				}
+			}
+			return result;
 		}
 
 		std::atomic<uint64_t> s_NextGraphId{1};
@@ -69,10 +197,19 @@ namespace RealRHI {
 	}
 
 	void RenderGraph::Invalidate() {
+		m_Compiled = false;
+		m_MultiQueue = false;
+		m_InitialReleases.clear();
+		m_UsedResources.clear();
 		m_Order.clear();
 		m_Prerequisites.clear();
 		m_Plan.clear();
 		m_FinalBarriers = {};
+	}
+
+	void RenderGraph::SetOptions(RenderGraphOptions options) {
+		Invalidate();
+		m_Options = options;
 	}
 
 	void RenderGraph::Reset() {
@@ -147,6 +284,9 @@ namespace RealRHI {
 		std::vector<Ref<Buffer>> buffers(m_Resources.size());
 		for (size_t i = 0; i < m_Resources.size(); ++i) {
 			const auto& resource = m_Resources[i];
+			if (!m_UsedResources[i]) {
+				continue;
+			}
 			const bool usePool = pool && (poolingAllowed.empty() || poolingAllowed[i]);
 			Result result = Result::Success;
 			if (resource.textureDesc) {
@@ -175,7 +315,7 @@ namespace RealRHI {
 			}
 		}
 		for (size_t i = 0; i < m_Resources.size(); ++i) {
-			if (IsCreated(m_Resources[i])) {
+			if (IsCreated(m_Resources[i]) && m_UsedResources[i]) {
 				m_Resources[i].texture = std::move(textures[i]);
 				m_Resources[i].buffer = std::move(buffers[i]);
 				if (pool && (poolingAllowed.empty() || poolingAllowed[i])) {
@@ -466,14 +606,68 @@ namespace RealRHI {
 		return true;
 	}
 
+	void RenderGraph::CullUnusedPasses() {
+		if (m_Options.cullUnusedPasses) {
+			std::vector<bool> live(m_Passes.size());
+			std::vector<uint32_t> pending;
+			std::vector<uint32_t> lastUse(m_Resources.size(), UINT32_MAX);
+			for (uint32_t index : m_Order) {
+				bool root = m_Passes[index].desc.hasSideEffects;
+				for (const auto& use : m_Passes[index].desc.resources) {
+					lastUse[use.resource.index] = index;
+					if (!IsCreated(m_Resources[use.resource.index]) && use.access != RenderGraphAccess::Read) {
+						root = true;
+					}
+				}
+				if (root) {
+					pending.push_back(index);
+				}
+			}
+			for (size_t i = 0; i < m_Resources.size(); ++i) {
+				if (m_Resources[i].hasFinalState && lastUse[i] != UINT32_MAX) {
+					pending.push_back(lastUse[i]);
+				}
+			}
+			while (!pending.empty()) {
+				const auto index = pending.back();
+				pending.pop_back();
+				if (live[index]) {
+					continue;
+				}
+				live[index] = true;
+				pending.insert(pending.end(), m_Prerequisites[index].begin(), m_Prerequisites[index].end());
+			}
+			std::erase_if(m_Order, [&](uint32_t index) {
+				return !live[index];
+			});
+		}
+		m_UsedResources.assign(m_Resources.size(), !m_Options.cullUnusedPasses);
+		for (auto index : m_Order) {
+			for (const auto& use : m_Passes[index].desc.resources) {
+				m_UsedResources[use.resource.index] = 1;
+			}
+		}
+		for (size_t i = 0; i < m_Resources.size(); ++i) {
+			if (m_Resources[i].hasFinalState) {
+				m_UsedResources[i] = 1;
+			}
+		}
+	}
+
 	void RenderGraph::Transition(uint32_t index,
 		ResourceState after,
 		TextureLayout layout,
 		TrackedState& before,
 		BarrierDesc& barriers) {
 		auto& resource = m_Resources[index];
-		if (!before.used || HasAccess(before.state.access, s_WriteAccess) || HasAccess(after.access, s_WriteAccess) ||
-			before.layout != layout) {
+		const bool writes = HasAccess(after.access, s_WriteAccess);
+		const bool layoutChanged = before.layout != layout;
+		const bool visible =
+			std::any_of(before.visibleReads.begin(), before.visibleReads.end(), [&](ResourceState read) {
+				return (static_cast<uint64_t>(after.stages) & ~static_cast<uint64_t>(read.stages)) == 0 &&
+					(static_cast<uint64_t>(after.access) & ~static_cast<uint64_t>(read.access)) == 0;
+			});
+		if (!before.used || writes || layoutChanged || (HasAccess(before.state.access, s_WriteAccess) && !visible)) {
 			if (IsTexture(resource)) {
 				barriers.textures.push_back(
 					{.texture = resource.texture.Raw(),
@@ -493,7 +687,13 @@ namespace RealRHI {
 			}
 		}
 
-		if (HasAccess(after.access, s_WriteAccess)) {
+		if (writes || layoutChanged) {
+			before.visibleReads.clear();
+		}
+		if (!writes && (!visible || layoutChanged)) {
+			before.visibleReads.push_back(after);
+		}
+		if (writes) {
 			before.state = after;
 		}
 		else {
@@ -546,16 +746,207 @@ namespace RealRHI {
 	bool RenderGraph::Compile(std::string& error) {
 		Invalidate();
 		error.clear();
-		if (!ValidateResources(error) || !ValidatePasses(error) || !BuildOrder(error) || !BuildBarriers(error)) {
+		if (!ValidateResources(error) || !ValidatePasses(error) || !BuildOrder(error)) {
 			Invalidate();
 			return false;
 		}
+		CullUnusedPasses();
+		if (!BuildBarriers(error)) {
+			Invalidate();
+			return false;
+		}
+		m_Compiled = true;
 		return true;
+	}
+
+	RenderGraphDiagnostics RenderGraph::GetDiagnostics() const {
+		RenderGraphDiagnostics diagnostics{.compiled = m_Compiled, .multiQueue = m_MultiQueue};
+		if (!m_Compiled) {
+			return diagnostics;
+		}
+		for (uint32_t i = 0; i < m_Passes.size(); ++i) {
+			const auto& pass = m_Passes[i].desc;
+			RenderGraphPassInfo info{.pass = {i, m_Id}, .name = pass.name, .queue = pass.queue};
+			for (auto prerequisite : m_Prerequisites[i]) {
+				info.prerequisites.push_back({prerequisite, m_Id});
+			}
+			diagnostics.passes.push_back(std::move(info));
+		}
+		for (uint32_t i = 0; i < m_Resources.size(); ++i) {
+			const auto& resource = m_Resources[i];
+			diagnostics.resources.push_back(
+				{.resource = {i, m_Id},
+					.name = resource.debugName,
+					.texture = IsTexture(resource),
+					.imported = !IsCreated(resource),
+					.exported = resource.hasFinalState});
+		}
+		for (uint32_t position = 0; position < m_Order.size(); ++position) {
+			const auto index = m_Order[position];
+			diagnostics.passes[index].executionIndex = position;
+			diagnostics.passes[index].nativeQueue = m_Plan[position].nativeQueue;
+			for (const auto& use : m_Passes[index].desc.resources) {
+				auto& resource = diagnostics.resources[use.resource.index];
+				if (resource.firstUse == UINT32_MAX) {
+					resource.firstUse = position;
+				}
+				resource.lastUse = position;
+			}
+		}
+		for (const auto& release : m_InitialReleases) {
+			RenderGraphInitialBarriers info{.queue = release.queue, .barriers = release.barriers};
+			for (auto consumer : release.consumers) {
+				info.consumers.push_back({consumer, m_Id});
+			}
+			diagnostics.initialBarriers.push_back(std::move(info));
+		}
+		return diagnostics;
+	}
+
+	std::string RenderGraph::GetDebugDescription() const {
+		if (!m_Compiled) {
+			return "Render graph is not compiled.\n";
+		}
+		const auto diagnostics = GetDiagnostics();
+		std::ostringstream text;
+		text << "Render graph: " << m_Order.size() << " scheduled, " << m_Passes.size() - m_Order.size() << " culled";
+		if (m_MultiQueue) {
+			text << " (multi-queue)";
+		}
+		text << '\n';
+		for (const auto& release : diagnostics.initialBarriers) {
+			text << "Initial barriers on " << QueueName(release.queue) << " consumers:";
+			for (auto consumer : release.consumers) {
+				text << " p" << consumer.index;
+			}
+			text << '\n';
+			DescribeBarriers(text, release.barriers);
+		}
+		for (const auto& pass : diagnostics.passes) {
+			text << "Pass p" << pass.pass.index << " \"" << pass.name << "\" on " << QueueName(pass.queue);
+			if (pass.executionIndex == UINT32_MAX) {
+				text << " [culled]\n";
+				continue;
+			}
+			if (pass.nativeQueue) {
+				text << " native queue " << pass.nativeQueue->familyIndex << ":" << pass.nativeQueue->queueIndex;
+			}
+			text << " [step " << pass.executionIndex << "]\n  prerequisites:";
+			for (auto prerequisite : pass.prerequisites) {
+				text << " p" << prerequisite.index;
+			}
+			text << '\n';
+			for (const auto& use : m_Passes[pass.pass.index].desc.resources) {
+				const char* access = "read";
+				if (use.access == RenderGraphAccess::Write) {
+					access = "write";
+				}
+				else if (use.access == RenderGraphAccess::ReadWrite) {
+					access = "read/write";
+				}
+				text << "  r" << use.resource.index << " " << access << " [" << StateName(use.state) << "]";
+				if (IsTexture(m_Resources[use.resource.index])) {
+					text << " " << LayoutName(use.layout);
+				}
+				text << '\n';
+			}
+			const auto& step = m_Plan[pass.executionIndex];
+			text << "  barriers before:\n";
+			DescribeBarriers(text, step.barriers);
+			text << "  barriers after:\n";
+			DescribeBarriers(text, step.afterBarriers);
+		}
+		// Multi-queue exports already appear after their last-use passes or in prefix batches.
+		if (!m_MultiQueue) {
+			text << "Final barriers:\n";
+			DescribeBarriers(text, m_FinalBarriers);
+		}
+		text << "Resource lifetimes (schedule positions; not GPU overlap):\n";
+		for (const auto& resource : diagnostics.resources) {
+			text << "  r" << resource.resource.index << " \"" << resource.name << "\" ";
+			if (resource.imported) {
+				text << "imported ";
+			}
+			else {
+				text << "created ";
+			}
+			if (resource.texture) {
+				text << "texture";
+			}
+			else {
+				text << "buffer";
+			}
+			if (resource.exported) {
+				text << " exported";
+			}
+			if (resource.firstUse == UINT32_MAX) {
+				text << " unused";
+			}
+			else {
+				text << " [" << resource.firstUse << ", " << resource.lastUse << "]";
+			}
+			text << '\n';
+		}
+		return text.str();
+	}
+
+	std::string RenderGraph::GetDependencyGraphDot() const {
+		std::ostringstream text;
+		text << "digraph RenderGraph {\n  rankdir=LR;\n";
+		const auto diagnostics = GetDiagnostics();
+		for (size_t i = 0; i < diagnostics.initialBarriers.size(); ++i) {
+			const auto& release = diagnostics.initialBarriers[i];
+			text << "  initial" << i << " [shape=box,label=\"Initial barriers\\n"
+				 << QueueName(release.queue) << "\"];\n";
+			for (auto consumer : release.consumers) {
+				text << "  initial" << i << " -> p" << consumer.index << ";\n";
+			}
+		}
+		for (const auto& pass : diagnostics.passes) {
+			text << "  p" << pass.pass.index << " [label=\"" << EscapeDot(pass.name) << "\\n" << QueueName(pass.queue);
+			if (pass.executionIndex == UINT32_MAX) {
+				text << "\\nculled\",style=dashed];\n";
+			}
+			else {
+				text << "\\nstep " << pass.executionIndex << "\"];\n";
+			}
+			for (auto dependency : pass.prerequisites) {
+				text << "  p" << dependency.index << " -> p" << pass.pass.index << ";\n";
+			}
+		}
+		text << "}\n";
+		return text.str();
 	}
 
 	void RenderGraph::Report(const std::string& error) const {
 		const std::string message = "RenderGraph: " + error;
 		m_Callback({DebugSeverity::Error, DebugMessageType::General, message.c_str()});
+	}
+
+	void RenderGraph::RecordPass(CommandList& commands, size_t position) {
+		const auto& step = m_Plan[position];
+		commands.ClearResourceDeclarations();
+		for (const auto& use : m_Passes[m_Order[position]].desc.resources) {
+			auto& resource = m_Resources[use.resource.index];
+			if (IsTexture(resource)) {
+				commands.RetainResource(resource.texture.Raw());
+			}
+			else {
+				commands.RetainResource(resource.buffer.Raw());
+			}
+		}
+		uint32_t timing = UINT32_MAX;
+		if (m_Options.enableGpuTimings) {
+			const auto name = "RenderGraph: " + step.name;
+			timing = commands.BeginGpuTiming(name.c_str());
+		}
+		commands.Barrier(step.barriers);
+		commands.BeginDebugLabel(step.name.c_str());
+		m_Passes[m_Order[position]].record(commands);
+		commands.EndDebugLabel();
+		commands.ClearResourceDeclarations();
+		commands.Barrier(step.afterBarriers);
+		commands.EndGpuTiming(timing);
 	}
 
 	Result RenderGraph::Execute(Device& device, CommandList& commands, TransientResourcePool* pool) {
@@ -569,12 +960,8 @@ namespace RealRHI {
 			return result;
 		}
 		for (size_t i = 0; i < m_Plan.size(); ++i) {
-			const auto& step = m_Plan[i];
-			commands.ClearResourceDeclarations();
-			commands.Barrier(step.barriers);
-			commands.BeginDebugLabel(step.name.c_str());
-			m_Passes[m_Order[i]].record(commands);
-			commands.EndDebugLabel();
+			m_Plan[i].nativeQueue = commands.GetQueueId();
+			RecordPass(commands, i);
 		}
 		commands.ClearResourceDeclarations();
 		commands.Barrier(m_FinalBarriers);
@@ -619,7 +1006,8 @@ namespace RealRHI {
 			}
 			return (static_cast<uint64_t>(state.stages) & ~static_cast<uint64_t>(allowed)) == 0;
 		};
-		for (const auto& pass : m_Passes) {
+		for (auto index : m_Order) {
+			const auto& pass = m_Passes[index];
 			if (!validRole(pass.desc.queue)) {
 				error = "Pass '" + pass.desc.name + "': select an available queue role.";
 				return false;
@@ -681,6 +1069,7 @@ namespace RealRHI {
 			m_Plan.push_back({.name = pass.name, .queue = pass.queue});
 			auto& step = m_Plan.back();
 			const auto destination = device.GetCommandQueue(pass.queue)->GetQueueId();
+			step.nativeQueue = destination;
 			for (const auto& use : pass.resources) {
 				const uint32_t resourceIndex = use.resource.index;
 				auto& state = states[resourceIndex];
@@ -690,9 +1079,11 @@ namespace RealRHI {
 					sourceRole = m_Plan[previous].queue;
 				}
 				bool transfer = false;
+				bool differentQueue = false;
 				if (sourceRole) {
 					const auto source = device.GetCommandQueue(*sourceRole)->GetQueueId();
 					transfer = source.familyIndex != destination.familyIndex;
+					differentQueue = source != destination;
 					if (previous != UINT32_MAX && source != destination) {
 						// Exclusive resources require ordered ownership even for read/read uses.
 						auto& dependencies = m_Prerequisites[passIndex];
@@ -703,9 +1094,16 @@ namespace RealRHI {
 					}
 				}
 
-				// Each pass has its own list. Even read/read uses need a retained reference
-				// in that list, independent of earlier submissions completing and retiring.
-				state.used = false;
+				// Visibility earned on another queue cannot suppress this queue's acquire.
+				// Resource lifetimes are retained separately by RecordPass.
+				if (differentQueue) {
+					state.visibleReads.clear();
+				}
+				// Image barriers also seed per-list layout knowledge for callback operations
+				// such as GenerateMipmaps, before earlier lists have been submitted.
+				if (differentQueue || IsTexture(m_Resources[resourceIndex])) {
+					state.used = false;
+				}
 				BarrierDesc barriers;
 				Transition(resourceIndex, use.state, use.layout, state, barriers);
 				if (transfer) {
@@ -786,8 +1184,9 @@ namespace RealRHI {
 		if (allocated != Result::Success) {
 			return allocated;
 		}
-		std::vector<InitialRelease> initialReleases;
+		auto& initialReleases = m_InitialReleases;
 		BuildQueuePlan(device, initialReleases);
+		m_MultiQueue = true;
 
 		struct Batch {
 			QueueType queue;
@@ -838,13 +1237,7 @@ namespace RealRHI {
 			}
 			else {
 				const size_t position = i - initialReleases.size();
-				const auto& step = m_Plan[position];
-				commands.Barrier(step.barriers);
-				commands.BeginDebugLabel(step.name.c_str());
-				m_Passes[m_Order[position]].record(commands);
-				commands.EndDebugLabel();
-				commands.ClearResourceDeclarations();
-				commands.Barrier(step.afterBarriers);
+				RecordPass(commands, position);
 			}
 			const auto ended = commands.End();
 			if (ended != Result::Success) {

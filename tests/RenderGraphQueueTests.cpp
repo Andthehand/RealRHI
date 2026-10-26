@@ -177,6 +177,15 @@ namespace {
 		Expect(graph.Submit(device, completion, nullptr, waits) == Result::Success,
 			"Schedule imports, compute, and read/read ownership handoffs");
 		Expect(completion.completions.size() >= 4, "Graph returns completion tokens for all pass submissions");
+		const auto diagnostics = graph.GetDiagnostics();
+		Expect(diagnostics.compiled && diagnostics.multiQueue && diagnostics.passes.size() == 4 &&
+				diagnostics.passes[0].nativeQueue == device.GetCommandQueue(QueueType::Compute)->GetQueueId(),
+			"Submitted graph diagnostics resolve actual native queue assignments");
+		if (device.GetCommandQueue(QueueType::Compute)->GetQueueId().familyIndex != uploaded.queue.familyIndex) {
+			Expect(!diagnostics.initialBarriers.empty() && !diagnostics.initialBarriers[0].consumers.empty(),
+				"Diagnostics expose initial ownership releases and their consumer passes");
+		}
+
 		const auto& plan = graph.GetExecutionPlan();
 		if (device.GetCommandQueue(QueueType::Compute)->GetQueueId().familyIndex !=
 			device.GetGraphicsCommandQueue()->GetQueueId().familyIndex) {
@@ -330,6 +339,7 @@ namespace {
 		auto readback = Readback(device, 16);
 		for (uint32_t frame = 0; frame < 3; ++frame) {
 			RenderGraph graph(Capture);
+			graph.SetOptions({.cullUnusedPasses = true, .enableGpuTimings = true});
 			const auto source = graph.ImportBuffer(upload.Raw(), s_Read);
 			const auto shared =
 				graph.CreateBuffer({.size = 16, .usage = BufferUsage::TransferSrc | BufferUsage::TransferDst});
@@ -352,9 +362,19 @@ namespace {
 				[&](CommandList& list) {
 					list.CopyBuffer(graph.GetBuffer(shared), readback.Raw(), {.size = 16});
 				});
+			graph.AddPass(
+				{.name = "Repeated graphics queue read",
+					.resources =
+						{{shared, s_Read}, {output, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+				[&](CommandList& list) {
+					list.CopyBuffer(graph.GetBuffer(shared), readback.Raw(), {.size = 16});
+				});
 			RenderGraphSubmission completion;
 			Expect(graph.Submit(device, completion, &pool) == Result::Success,
 				"Combine queue scheduling with resource pooling");
+			Expect(graph.GetExecutionPlan()[2].barriers.buffers.size() == 1 &&
+					graph.GetExecutionPlan()[2].barriers.buffers[0].buffer == readback.Raw(),
+				"Same-queue readers omit redundant source barriers across separate command lists");
 			graph.Reset();
 			completion.Wait(device);
 			std::array<uint32_t, 4> values{};
@@ -382,7 +402,8 @@ int main() {
 									   .shaderDirectory = REALRHI_TEST_SHADER_DIRECTORY,
 									   .enableDebug = true,
 									   .enableValidationLayers = true,
-									   .debugCallback = Capture},
+									   .debugCallback = Capture,
+									   .enableProfiling = true},
 			   device) == RealRHI::Result::Success,
 		"Create multi-queue graph test device");
 	TestImportsAndFanOut(*device);

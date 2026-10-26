@@ -33,6 +33,8 @@ namespace RealRHI {
 		void InsertDebugLabel(const char* name) override;
 		bool SupportsTimestamps() const override { return m_TimestampPool != VK_NULL_HANDLE; }
 		void WriteTimestamp(const char* name) override;
+		uint32_t BeginGpuTiming(const char* name) override;
+		void EndGpuTiming(uint32_t timing) override;
 		Result GetTimestampResults(std::vector<GpuTimestamp>& outTimestamps) const override;
 
 		void BeginRendering(const RenderingInfo& renderingInfo) override;
@@ -46,6 +48,7 @@ namespace RealRHI {
 		void UseResource(TextureView* view) override;
 		void UseResource(Sampler* sampler) override;
 		void ClearResourceDeclarations() override;
+		void RetainResource(RefCounted* resource) override;
 
 		void BindPipeline(Pipeline* pipeline) override;
 		void SetPushConstants(const void* data, uint32_t size, uint32_t offset = 0) override;
@@ -95,6 +98,11 @@ namespace RealRHI {
 		VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
 
 	private:
+		struct TimestampInterval {
+			uint32_t begin;
+			uint32_t end = UINT32_MAX;
+		};
+
 		struct SubresourceKey {
 			const VulkanTexture* texture = nullptr;
 			uint32_t mipLevel = 0;
@@ -134,6 +142,7 @@ namespace RealRHI {
 	private:
 		Result InitTimestamps();
 		Result ReadTimestamps();
+		void RecordTimestampTimings() const;
 		bool ValidateDebugLabel(const char* operation, const char* name) const;
 
 		bool ValidateAttachmentView(const VulkanTextureView* view, TextureUsage usage, const Rect& renderArea) const;
@@ -170,9 +179,6 @@ namespace RealRHI {
 			uint32_t& destinationFamily) const;
 
 	private:
-		// Keep recorded resources alive until this list is reset or destroyed.
-		void RetainResource(RefCounted* resource);
-
 		bool HasRecordedLayout(const VulkanTexture* texture,
 			uint32_t mipLevel,
 			uint32_t baseLayer,
@@ -207,6 +213,8 @@ namespace RealRHI {
 		uint32_t m_TimestampValidBits = 0;
 		float m_TimestampPeriod = 0;
 		std::vector<std::string> m_TimestampNames;
+		std::vector<TimestampInterval> m_TimestampIntervals;
+		uint32_t m_ReservedTimestamps = 0;
 		std::vector<GpuTimestamp> m_TimestampResults;
 		Result m_TimestampReadResult = Result::NotReady;
 	};

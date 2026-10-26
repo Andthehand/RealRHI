@@ -102,6 +102,11 @@ namespace RealRHI {
 		virtual bool SupportsTimestamps() const = 0;
 		// Up to 128 markers per recording. Disabled or unsupported timestamps are a no-op.
 		virtual void WriteTimestamp(const char* name) = 0;
+		// Paired intervals remain accurate with nested/manual markers. UINT32_MAX means
+		// unavailable or out of query capacity; EndGpuTiming accepts it as a no-op.
+		// A successful begin reserves its end marker. Results aggregate in DeviceStatistics.
+		virtual uint32_t BeginGpuTiming(const char* name) = 0;
+		virtual void EndGpuTiming(uint32_t timing) = 0;
 		// Nonblocking; read after submission completion and before Reset/Begin discards the recording.
 		virtual Result GetTimestampResults(std::vector<GpuTimestamp>& outTimestamps) const = 0;
 
@@ -123,6 +128,9 @@ namespace RealRHI {
 		// Clear shader-visible buffer/view declarations for subsequent draws/dispatches.
 		// Previously recorded operations and retained resource lifetimes remain intact.
 		virtual void ClearResourceDeclarations() = 0;
+		// Keep an object alive through recording reset, without declaring shader access
+		// or recording synchronization. Requires an active recording and non-null object.
+		virtual void RetainResource(RefCounted* resource) = 0;
 
 		virtual void BindPipeline(Pipeline* pipeline) = 0;
 		virtual void SetPushConstants(const void* data, uint32_t size, uint32_t offset = 0) = 0;

@@ -35,12 +35,23 @@ namespace RealRHI {
 		RenderGraphAccess access = RenderGraphAccess::Read;
 	};
 
+	struct RenderGraphOptions {
+		bool cullUnusedPasses = false;
+		// Best effort paired pass timings, including per-pass barriers. Requires device
+		// profiling; unsupported/full query pools skip timing without skipping work.
+		// DeviceStatistics reports these intervals as "RenderGraph: <pass name>".
+		bool enableGpuTimings = false;
+	};
+
 	struct RenderGraphPassDesc {
 		std::string name;
 		std::vector<RenderGraphUse> resources;
 		std::vector<RenderGraphPass> dependsOn;
 		// Submit honors this preference; Execute uses its caller-owned list.
 		QueueType queue = QueueType::Graphics;
+		// Required when culling is enabled and the callback affects unmanaged resources
+		// or performs other externally observable work. Writes to imports are roots too.
+		bool hasSideEffects = false;
 	};
 
 	struct RenderGraphStep {
@@ -48,6 +59,43 @@ namespace RealRHI {
 		BarrierDesc barriers;
 		QueueType queue = QueueType::Graphics;
 		BarrierDesc afterBarriers;
+		std::optional<QueueId> nativeQueue;
+	};
+
+	struct RenderGraphPassInfo {
+		RenderGraphPass pass;
+		std::string name;
+		QueueType queue = QueueType::Graphics;
+		// UINT32_MAX identifies a culled pass; other indices address GetExecutionPlan().
+		uint32_t executionIndex = UINT32_MAX;
+		std::vector<RenderGraphPass> prerequisites;
+		std::optional<QueueId> nativeQueue;
+	};
+
+	struct RenderGraphResourceInfo {
+		RenderGraphResource resource;
+		std::string name;
+		bool texture = false;
+		bool imported = false;
+		bool exported = false;
+		// Inclusive schedule positions, UINT32_MAX for unused resources. These describe
+		// CPU scheduling order, not GPU time overlap or permission to alias allocations.
+		uint32_t firstUse = UINT32_MAX;
+		uint32_t lastUse = UINT32_MAX;
+	};
+
+	struct RenderGraphInitialBarriers {
+		QueueType queue;
+		BarrierDesc barriers;
+		std::vector<RenderGraphPass> consumers;
+	};
+
+	struct RenderGraphDiagnostics {
+		bool compiled = false;
+		bool multiQueue = false;
+		std::vector<RenderGraphPassInfo> passes;
+		std::vector<RenderGraphResourceInfo> resources;
+		std::vector<RenderGraphInitialBarriers> initialBarriers;
 	};
 
 	struct RenderGraphSubmission {
@@ -110,6 +158,15 @@ namespace RealRHI {
 		// valid until the graph changes; rebuild if external resource states change.
 		// Created-resource barrier pointers resolve during Execute. Compile allocates nothing.
 		bool Compile(std::string& error);
+		// Reset preserves options. Culling keeps exports, writes to imported resources,
+		// side-effect passes, and all their prerequisites. Other callbacks may be skipped.
+		void SetOptions(RenderGraphOptions options);
+		// Snapshots describe the latest compiled/recording plan, including a failed submission. Submit adds
+		// actual queue dependencies and prefix ownership releases. Barrier pointers are
+		// borrowed from the graph; the plan and final barriers expose complete states.
+		RenderGraphDiagnostics GetDiagnostics() const;
+		std::string GetDebugDescription() const;
+		std::string GetDependencyGraphDot() const;
 		const std::vector<RenderGraphStep>& GetExecutionPlan() const { return m_Plan; }
 		const BarrierDesc& GetFinalBarriers() const { return m_FinalBarriers; }
 		// Compile, allocate resources, and record into an active list outside rendering.
@@ -166,6 +223,7 @@ namespace RealRHI {
 			TextureLayout layout = TextureLayout::Undefined;
 			bool used = false;
 			bool initialized = false;
+			std::vector<ResourceState> visibleReads;
 		};
 
 	private:
@@ -181,6 +239,8 @@ namespace RealRHI {
 		bool ValidateResources(std::string& error) const;
 		bool ValidatePasses(std::string& error) const;
 		bool BuildOrder(std::string& error);
+		void CullUnusedPasses();
+		void RecordPass(CommandList& commands, size_t position);
 		bool BuildBarriers(std::string& error);
 		bool ValidateQueues(Device& device, std::string& error) const;
 		void BuildQueuePlan(Device& device, std::vector<InitialRelease>& initialReleases);
@@ -194,6 +254,11 @@ namespace RealRHI {
 
 	private:
 		DebugCallback m_Callback;
+		RenderGraphOptions m_Options;
+		bool m_Compiled = false;
+		bool m_MultiQueue = false;
+		std::vector<uint8_t> m_UsedResources;
+		std::vector<InitialRelease> m_InitialReleases;
 		uint64_t m_Id = 0;
 		std::vector<Resource> m_Resources;
 		std::vector<Pass> m_Passes;

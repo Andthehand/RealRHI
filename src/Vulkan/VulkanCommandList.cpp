@@ -9,6 +9,7 @@
 #include "VulkanTextureView.h"
 
 #include <algorithm>
+#include <array>
 #include <mutex>
 #include <sstream>
 #include <unordered_set>
@@ -127,9 +128,10 @@ namespace RealRHI {
 	}
 
 	void VulkanCommandList::RetainResource(RefCounted* resource) {
-		if (resource == nullptr) {
-			m_Device->SendDebugMessage(
-				DebugSeverity::Error, DebugMessageType::General, "Attempted to retain a null resource.");
+		if (resource == nullptr || GetState() != CommandListState::Recording) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"RetainResource: Requires an active recording and a non-null object.");
 			return;
 		}
 
@@ -179,6 +181,8 @@ namespace RealRHI {
 		m_VertexBuffers.clear();
 		m_IndexBuffer = nullptr;
 		m_TimestampNames.clear();
+		m_TimestampIntervals.clear();
+		m_ReservedTimestamps = 0;
 		m_TimestampResults.clear();
 		m_TimestampReadResult = Result::NotReady;
 		return Result::Success;
@@ -1106,6 +1110,10 @@ namespace RealRHI {
 			return;
 		}
 
+		if (barriers.memory.empty() && barriers.buffers.empty() && barriers.textures.empty()) {
+			return;
+		}
+
 		std::vector<ResourceOperation> operations;
 
 		std::vector<VkMemoryBarrier2> memoryBarriers;
@@ -1555,7 +1563,7 @@ namespace RealRHI {
 			return;
 		}
 		if (GetState() != CommandListState::Recording || name == nullptr || name[0] == '\0' ||
-			m_TimestampNames.size() == s_MaxTimestampCount) {
+			m_TimestampNames.size() + m_ReservedTimestamps >= s_MaxTimestampCount) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
 				"WriteTimestamp: Requires recording, a nonempty name, and fewer than 128 recorded markers.");
@@ -1565,6 +1573,65 @@ namespace RealRHI {
 		const uint32_t query = static_cast<uint32_t>(m_TimestampNames.size());
 		m_TimestampNames.emplace_back(name);
 		vkCmdWriteTimestamp2(m_CommandBuffer, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, m_TimestampPool, query);
+	}
+
+	uint32_t VulkanCommandList::BeginGpuTiming(const char* name) {
+		if (!SupportsTimestamps()) {
+			return UINT32_MAX;
+		}
+		if (GetState() != CommandListState::Recording || !name || !name[0]) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"BeginGpuTiming: Requires an active recording and a nonempty name.");
+			return UINT32_MAX;
+		}
+		if (m_TimestampNames.size() + m_ReservedTimestamps + 2 > s_MaxTimestampCount) {
+			return UINT32_MAX;
+		}
+		const auto timing = static_cast<uint32_t>(m_TimestampIntervals.size());
+		m_TimestampIntervals.push_back({static_cast<uint32_t>(m_TimestampNames.size())});
+		WriteTimestamp(name);
+		++m_ReservedTimestamps;
+		return timing;
+	}
+
+	void VulkanCommandList::EndGpuTiming(uint32_t timing) {
+		if (timing == UINT32_MAX) {
+			return;
+		}
+		if (GetState() != CommandListState::Recording || timing >= m_TimestampIntervals.size() ||
+			m_TimestampIntervals[timing].end != UINT32_MAX) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"EndGpuTiming: Requires an active recording and an open interval from this recording.");
+			return;
+		}
+		--m_ReservedTimestamps;
+		m_TimestampIntervals[timing].end = static_cast<uint32_t>(m_TimestampNames.size());
+		WriteTimestamp("GPU interval end");
+	}
+
+	void VulkanCommandList::RecordTimestampTimings() const {
+		std::vector<bool> paired(m_TimestampResults.size());
+		for (const auto& interval : m_TimestampIntervals) {
+			paired[interval.begin] = true;
+			if (interval.end == UINT32_MAX) {
+				continue;
+			}
+			paired[interval.end] = true;
+			const std::array<GpuTimestamp, 2> endpoints{
+				m_TimestampResults[interval.begin], m_TimestampResults[interval.end]
+			};
+			m_Device->RecordGpuTimings(m_QueueId, endpoints);
+		}
+		// Keep the existing adjacent-marker contract for explicit WriteTimestamp calls.
+		std::vector<GpuTimestamp> markers;
+		for (size_t i = 0; i < m_TimestampResults.size(); ++i) {
+			if (!paired[i]) {
+				markers.push_back(m_TimestampResults[i]);
+			}
+		}
+		m_Device->RecordGpuTimings(m_QueueId, markers);
 	}
 
 	void VulkanCommandList::PrepareTimestampSubmission() {
@@ -1628,7 +1695,7 @@ namespace RealRHI {
 			// Collect before publishing Executable: another thread may immediately recycle this recording.
 			m_TimestampReadResult = ReadTimestamps();
 			if (m_TimestampReadResult == Result::Success) {
-				m_Device->RecordGpuTimings(m_QueueId, m_TimestampResults);
+				RecordTimestampTimings();
 			}
 		}
 		m_State = state;

@@ -123,6 +123,136 @@ namespace {
 		ExpectInvalid(graph, "cycle");
 	}
 
+	void TestDiagnosticsAndCulling(Device& device, Buffer* buffer) {
+		RenderGraph graph(Capture);
+		Expect(!graph.GetDiagnostics().compiled, "Uncompiled graph exposes no stale diagnostics");
+		const auto data = graph.CreateBuffer({.size = 16, .usage = BufferUsage::Storage, .debugName = "Working data"});
+		const auto discarded = graph.CreateTexture(
+			{.width = UINT32_MAX,
+				.height = 4,
+				.format = TextureFormat::RGBA8_UNorm,
+				.usage = TextureUsage::ShaderResource | TextureUsage::RenderTarget,
+				.debugName = "Unused oversized target"});
+		uint32_t callbacks = 0;
+		graph.AddPass({.name = "Unused branch",
+						  .resources =
+							  {{discarded,
+								  {PipelineStage::ColorAttachmentOutput, ResourceAccess::ColorAttachmentWrite},
+								  TextureLayout::ColorAttachment,
+								  RenderGraphAccess::Write}}},
+			[&](CommandList&) {
+				++callbacks;
+			});
+		const auto write = graph.AddPass(
+			{.name = "Write \"data\"\npass",
+				.resources = {{data, s_ComputeWrite, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+			EmptyPass);
+		const auto reader = graph.AddPass({.name = "First read", .resources = {{data, s_ComputeRead}}}, EmptyPass);
+		const auto repeated = graph.AddPass(
+			{.name = "Repeated read", .resources = {{data, s_ComputeRead}}, .dependsOn = {reader}}, EmptyPass);
+		const ResourceState fragment{PipelineStage::FragmentShader, ResourceAccess::ShaderRead};
+		const auto newStage =
+			graph.AddPass({.name = "New stage", .resources = {{data, fragment}}, .dependsOn = {repeated}}, EmptyPass);
+		graph.AddPass(
+			{.name = "Repeated new stage", .resources = {{data, fragment}}, .dependsOn = {newStage}}, EmptyPass);
+		graph.SetFinalState(data, s_TransferRead);
+		const auto output = graph.ImportBuffer(buffer);
+		const auto external = graph.AddPass(
+			{.name = "Imported write",
+				.resources = {{output, s_ComputeWrite, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+			EmptyPass);
+		const auto prerequisite = graph.AddPass({.name = "Required side work"}, EmptyPass);
+		const auto effect = graph.AddPass(
+			{.name = "External side effect", .dependsOn = {prerequisite}, .hasSideEffects = true}, [&](CommandList&) {
+				++callbacks;
+			});
+		graph.AddPass({.name = "Unreferenced callback"}, [&](CommandList&) {
+			callbacks += 100;
+		});
+		graph.SetOptions({.cullUnusedPasses = true, .enableGpuTimings = true});
+		std::string error;
+		Expect(graph.Compile(error), "Compile optional culling with exports, imports, and external effects");
+		const auto info = graph.GetDiagnostics();
+		Expect(info.compiled && !info.multiQueue && info.passes.size() == 10 && graph.GetExecutionPlan().size() == 8,
+			"Diagnostics distinguish all declared passes from scheduled passes");
+		Expect(info.passes[0].executionIndex == UINT32_MAX && info.passes[9].executionIndex == UINT32_MAX &&
+				info.passes[external.index].executionIndex != UINT32_MAX &&
+				info.passes[effect.index].prerequisites[0].index == prerequisite.index,
+			"Culling keeps observable roots and explicit prerequisites");
+		Expect(info.resources[data.index].name == "Working data" && info.resources[data.index].firstUse == 0 &&
+				info.resources[data.index].lastUse == 4 && info.resources[data.index].exported &&
+				info.resources[discarded.index].firstUse == UINT32_MAX && info.resources[output.index].imported,
+			"Resource diagnostics describe names, surviving lifetimes, unused branches, and imports");
+		const auto& plan = graph.GetExecutionPlan();
+		Expect(plan[1].barriers.buffers.size() == 1 && plan[2].barriers.buffers.empty() &&
+				plan[3].barriers.buffers.size() == 1 && plan[4].barriers.buffers.empty(),
+			"Repeated readers reuse established visibility while new reader stages still synchronize");
+		const auto description = graph.GetDebugDescription();
+		const auto dot = graph.GetDependencyGraphDot();
+		Expect(description.find("2 culled") != std::string::npos &&
+				description.find("Working data") != std::string::npos &&
+				description.find("ShaderWrite") != std::string::npos &&
+				description.find("prerequisites:") != std::string::npos &&
+				dot.find(R"(Write \"data\"\npass)") != std::string::npos && dot.find("p1 -> p2") != std::string::npos,
+			"Human-readable and DOT reports expose barriers and escaped dependency names");
+		Ref<CommandAllocator> allocator;
+		Ref<CommandList> commands;
+		Expect(device.CreateCommandAllocator(QueueType::Graphics, allocator) == Result::Success &&
+				device.CreateCommandList(allocator.Raw(), commands) == Result::Success &&
+				commands->Begin() == Result::Success,
+			"Begin culled graph execution");
+		Expect(graph.Execute(device, *commands) == Result::Success && callbacks == 1,
+			"Culled callbacks and oversized dead allocations are skipped");
+		Expect(commands->End() == Result::Success, "End culled graph execution");
+		auto completion = device.GetGraphicsCommandQueue()->Submit(*commands);
+		Expect(completion.IsValid(), "Submit optimized graph");
+		device.GetGraphicsCommandQueue()->Wait(completion);
+		if (commands->SupportsTimestamps()) {
+			bool measured = false;
+			for (const auto& timing : device.GetStatistics().gpuTimings) {
+				if (timing.name == "RenderGraph: Imported write") {
+					measured = timing.timing.sampleCount == 1 && timing.queue == commands->GetQueueId();
+				}
+			}
+			Expect(measured, "Completed graph passes publish named GPU timing statistics");
+		}
+		Expect(graph.GetDiagnostics().passes[write.index].nativeQueue == commands->GetQueueId(),
+			"Execute diagnostics identify the actual caller queue");
+		graph.AddDependency(write, effect);
+		Expect(!graph.GetDiagnostics().compiled && graph.GetDiagnostics().passes.empty(),
+			"Mutation invalidates diagnostic snapshots");
+		graph.Reset();
+		graph.AddPass({.name = "Still optional"}, EmptyPass);
+		Expect(graph.Compile(error) && graph.GetExecutionPlan().empty(), "Reset preserves culling options");
+		graph.SetOptions({});
+		Expect(graph.Compile(error) && graph.GetExecutionPlan().size() == 1,
+			"Culling can be disabled without losing passes");
+		graph.SetOptions({.cullUnusedPasses = true});
+		const auto other = graph.AddPass({.name = "Cycle"}, EmptyPass);
+		graph.AddDependency(other, other);
+		ExpectInvalid(graph, "cycle");
+		Expect(!graph.GetDiagnostics().compiled, "Even culled branches cannot hide dependency cycles");
+		graph.Reset();
+		graph.SetOptions({.enableGpuTimings = true});
+		callbacks = 0;
+		for (uint32_t i = 0; i < 70; ++i) {
+			graph.AddPass({.name = "Capacity pass " + std::to_string(i)}, [&](CommandList&) {
+				++callbacks;
+			});
+		}
+		Expect(commands->Begin() == Result::Success && graph.Execute(device, *commands) == Result::Success &&
+				callbacks == 70 && commands->End() == Result::Success,
+			"Profiling capacity never prevents graph callbacks from executing");
+		completion = device.GetGraphicsCommandQueue()->Submit(*commands);
+		Expect(completion.IsValid(), "Submit graph larger than timestamp capacity");
+		device.GetGraphicsCommandQueue()->Wait(completion);
+		if (commands->SupportsTimestamps()) {
+			std::vector<GpuTimestamp> timestamps;
+			Expect(commands->GetTimestampResults(timestamps) == Result::Success && timestamps.size() == 128,
+				"Large graph profiles complete pairs without overflowing the timestamp pool");
+		}
+	}
+
 	void TestInvalidGraphs(Buffer* buffer, Texture* texture) {
 		RenderGraph graph(Capture);
 		graph.ImportBuffer(nullptr);
@@ -488,6 +618,14 @@ namespace {
 					order.push_back("Snapshot");
 					list.CopyBuffer(graph.GetBuffer(working), snapshot.Raw(), {.size = sizeof(initial)});
 				});
+			graph.AddPass({.name = "Repeated snapshot",
+							  .resources =
+								  {{working, s_TransferRead},
+									  {original, s_TransferWrite, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+				[&](CommandList& list) {
+					order.push_back("Repeated snapshot");
+					list.CopyBuffer(graph.GetBuffer(working), snapshot.Raw(), {.size = sizeof(initial)});
+				});
 			for (uint32_t i = 0; i < 2; ++i) {
 				graph.AddPass({.name = "Compute",
 								  .resources =
@@ -514,7 +652,13 @@ namespace {
 					list.CopyBuffer(graph.GetBuffer(working), readback.Raw(), {.size = sizeof(initial)});
 				});
 			Expect(graph.Execute(device, *commands) == Result::Success, "Allocate and record graph working buffer");
-			Expect(order == std::vector<std::string>{"Upload", "Snapshot", "Compute", "Compute", "Readback"},
+			Expect(graph.GetExecutionPlan()[2].barriers.buffers.size() == 1 &&
+					graph.GetExecutionPlan()[2].barriers.buffers[0].buffer == snapshot.Raw(),
+				"A repeated copy synchronizes its destination without a redundant source read barrier");
+			Expect(order ==
+					std::vector<std::string>{
+						"Upload", "Snapshot", "Repeated snapshot", "Compute", "Compute", "Readback"
+					},
 				"Read/write hazards preserve callback ordering");
 		}
 		upload.Reset();
@@ -542,7 +686,8 @@ int main() {
 									   .shaderDirectory = REALRHI_TEST_SHADER_DIRECTORY,
 									   .enableDebug = true,
 									   .enableValidationLayers = true,
-									   .debugCallback = Capture},
+									   .debugCallback = Capture,
+									   .enableProfiling = true},
 			   device) == RealRHI::Result::Success,
 		"Create render graph test device");
 	{
@@ -561,6 +706,7 @@ int main() {
 				texture) == RealRHI::Result::Success,
 			"Create planning texture");
 		TestPlanning(buffer.Raw(), texture.Raw());
+		TestDiagnosticsAndCulling(*device, buffer.Raw());
 		TestInvalidGraphs(buffer.Raw(), texture.Raw());
 		TestExecution(*device);
 		TestTexturePasses(*device);

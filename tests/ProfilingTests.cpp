@@ -621,6 +621,88 @@ namespace {
 		return true;
 	}
 
+	void TestGpuIntervals(Device& device) {
+		Ref<CommandAllocator> allocator;
+		Ref<CommandList> commands;
+		Expect(device.CreateCommandAllocator(QueueType::Graphics, allocator) == Result::Success &&
+				device.CreateCommandList(allocator.Raw(), commands) == Result::Success,
+			"Create paired timing recording");
+		if (!commands->SupportsTimestamps()) {
+			Expect(commands->BeginGpuTiming(nullptr) == UINT32_MAX, "Unsupported intervals are no-ops");
+			commands->EndGpuTiming(UINT32_MAX);
+			return;
+		}
+		ExpectRejected(
+			[&] {
+				commands->BeginGpuTiming("Before begin");
+			},
+			"BeginGpuTiming:");
+		Expect(commands->Begin() == Result::Success, "Begin paired timing recording");
+		ExpectRejected(
+			[&] {
+				commands->RetainResource(nullptr);
+			},
+			"RetainResource:");
+		commands->WriteTimestamp("Manual outside");
+		const auto outer = commands->BeginGpuTiming("Outer interval");
+		commands->WriteTimestamp("Manual inside");
+		const auto inner = commands->BeginGpuTiming("Inner interval");
+		commands->EndGpuTiming(inner);
+		commands->EndGpuTiming(outer);
+		commands->WriteTimestamp("Manual finish");
+		ExpectRejected(
+			[&] {
+				commands->EndGpuTiming(outer);
+			},
+			"EndGpuTiming:");
+		Expect(commands->End() == Result::Success, "Invalid interval calls do not poison recording");
+		const auto before = device.GetStatistics();
+		auto* queue = device.GetGraphicsCommandQueue();
+		const auto completion = queue->Submit(*commands);
+		Expect(completion.IsValid(), "Submit nested paired timings");
+		queue->Wait(completion);
+		std::vector<GpuTimestamp> timestamps;
+		Expect(commands->GetTimestampResults(timestamps) == Result::Success && timestamps.size() == 7,
+			"Paired intervals share the marker timeline with manual timestamps");
+		auto check = [&](const char* name, size_t begin, size_t end) {
+			double previous = 0;
+			uint64_t samples = 0;
+			for (const auto& timing : before.gpuTimings) {
+				if (timing.name == name && timing.queue == completion.queue) {
+					previous = timing.timing.totalMilliseconds;
+					samples = timing.timing.sampleCount;
+				}
+			}
+			bool found = false;
+			for (const auto& timing : device.GetStatistics().gpuTimings) {
+				if (timing.name == name && timing.queue == completion.queue) {
+					found = timing.timing.sampleCount == samples + 1 &&
+						std::abs(timing.timing.totalMilliseconds - previous -
+							(timestamps[end].milliseconds - timestamps[begin].milliseconds)) < 1e-9;
+				}
+			}
+			Expect(found, "Paired intervals use their actual endpoints despite nested or manual markers");
+		};
+		check("Outer interval", 1, 5);
+		check("Inner interval", 3, 4);
+		check("Manual outside", 0, 2);
+		check("Manual inside", 2, 6);
+
+		Expect(commands->Begin() == Result::Success, "Reset paired query reservations");
+		const auto reserved = commands->BeginGpuTiming("Capacity interval");
+		for (uint32_t i = 0; i < 126; ++i) {
+			commands->WriteTimestamp("Capacity manual");
+		}
+		Expect(commands->BeginGpuTiming("No room") == UINT32_MAX, "Automatic intervals skip exhausted query capacity");
+		commands->EndGpuTiming(reserved);
+		Expect(commands->End() == Result::Success, "Closing an interval uses its reserved end marker");
+		const auto full = queue->Submit(*commands);
+		Expect(full.IsValid(), "Submit capacity-limited interval");
+		queue->Wait(full);
+		Expect(commands->GetTimestampResults(timestamps) == Result::Success && timestamps.size() == 128,
+			"Reserved end markers remain valid at full capacity");
+	}
+
 	void TestUploads(Device& device, bool supportsTimestamps) {
 		const auto before = device.GetStatistics();
 		{
@@ -692,6 +774,7 @@ namespace {
 
 		TestResourceNames(*device);
 		TestUsageCounters(*device);
+		TestGpuIntervals(*device);
 		const bool graphicsTimestamps = TestQueueTimestamps(*device, QueueType::Graphics);
 		TestQueueTimestamps(*device, QueueType::Compute);
 		const bool transferTimestamps = TestQueueTimestamps(*device, QueueType::Transfer);

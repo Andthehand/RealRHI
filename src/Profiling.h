@@ -60,7 +60,8 @@ namespace RealRHI {
 		uint64_t submittedUploadBytes = 0;
 		uint64_t uploadBatchCount = 0;
 
-		// Each adjacent pair of markers contributes an interval named after its first marker.
+		// Explicit WriteTimestamp markers contribute adjacent intervals. Paired GPU timings
+		// contribute their complete begin/end duration, independently of intervening markers.
 		std::vector<GpuTimingStatistics> gpuTimings;
 	};
 }

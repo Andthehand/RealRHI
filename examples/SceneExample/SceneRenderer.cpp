@@ -482,6 +482,7 @@ namespace RealRHI::Examples {
 			ResourceAccess::DepthStencilRead | ResourceAccess::DepthStencilWrite
 		};
 		RenderGraph graph;
+		graph.SetOptions({.cullUnusedPasses = true, .enableGpuTimings = true});
 		const auto color = graph.CreateTexture(
 			{.width = size.width,
 				.height = size.height,
@@ -516,7 +517,6 @@ namespace RealRHI::Examples {
 		const auto indices = graph.ImportBuffer(m_IndexBuffer.Raw(), indexState);
 
 		const auto setup = graph.AddPass({.name = "Frame setup"}, [&](CommandList& list) {
-			list.WriteTimestamp("Frame setup");
 			if (pendingUpload.completion.IsValid()) {
 				list.Barrier(pendingUpload.acquireBarriers);
 				list.GenerateMipmaps(m_Pattern.Raw(), {.finalState = sampled});
@@ -535,7 +535,6 @@ namespace RealRHI::Examples {
 				.dependsOn = {setup}},
 			[&](CommandList& list) {
 				auto targets = resolveTargets();
-				list.WriteTimestamp("Shadows");
 				DrawShadowMap(list, targets, rotation, shadowsEnabled);
 			});
 
@@ -552,7 +551,6 @@ namespace RealRHI::Examples {
 					}},
 			[&](CommandList& list) {
 				auto targets = resolveTargets();
-				list.WriteTimestamp("Scene");
 				list.SetViewport({.width = static_cast<float>(size.width), .height = static_cast<float>(size.height)});
 				list.SetScissor({.width = size.width, .height = size.height});
 				BeginScene(list, targets);
@@ -564,17 +562,14 @@ namespace RealRHI::Examples {
 						  .resources =
 							  {
 								  {color, sampled, TextureLayout::ShaderRead},
-							  }},
+							  },
+						  .hasSideEffects = true},
 			[&](CommandList& list) {
 				auto targets = resolveTargets();
-				list.WriteTimestamp("Postprocess");
 				DrawPostprocess(list, targets, output);
 			});
 		commands.BeginDebugLabel("Scene frame");
 		const Result result = graph.Execute(*m_Device, commands, m_TransientResources.get());
-		if (result == Result::Success) {
-			commands.WriteTimestamp("Frame end");
-		}
 		commands.EndDebugLabel();
 		return result;
 	}
