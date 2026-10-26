@@ -433,3 +433,7 @@ install_manifest.txt
 # CodeQL
 _codeql_detected_source_root
 _codeql_build_dir/
+
+# Shared build helpers and local preset overrides
+!cmake/*.cmake
+CMakeUserPresets.json
