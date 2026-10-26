@@ -3,6 +3,7 @@
 #include "VulkanCommandList.h"
 #include "VulkanCpuTimer.h"
 #include "VulkanDevice.h"
+#include "VulkanResourceStateTransaction.h"
 #include "VulkanSwapchain.h"
 
 #include <algorithm>
@@ -194,10 +195,9 @@ namespace RealRHI {
 		std::scoped_lock stateLock(m_Device->GetStateTrackingMutex());
 		const uint64_t submissionValue = m_NextFrameValue;
 		const SubmissionToken submission{.queue = GetQueueId(), .value = submissionValue};
-		VulkanCommandList::SubmissionState predicted;
+		VulkanResourceStateTransaction transaction(m_Device, submission, waitSemaphoreInfos);
 		for (CommandList* commandList : trackedLists) {
-			if (!static_cast<VulkanCommandList*>(commandList)
-					->ValidateSubmissionState(predicted, submission, waitSemaphoreInfos)) {
+			if (!static_cast<VulkanCommandList*>(commandList)->ReplayResources(transaction)) {
 				return {};
 			}
 		}
@@ -220,7 +220,7 @@ namespace RealRHI {
 
 		if (m_Device->IsProfilingEnabled()) {
 			for (CommandList* commandList : trackedLists) {
-				static_cast<VulkanCommandList*>(commandList)->PrepareTimestampSubmission();
+				static_cast<VulkanCommandList*>(commandList)->PrepareSubmission();
 			}
 		}
 
@@ -231,7 +231,7 @@ namespace RealRHI {
 			return {};
 		}
 
-		VulkanCommandList::CommitSubmissionState(predicted);
+		transaction.Commit();
 		++m_NextFrameValue;
 		m_PendingSubmissions.push_back({
 			.value = submissionValue,
@@ -240,7 +240,7 @@ namespace RealRHI {
 		});
 
 		for (CommandList* commandList : trackedLists) {
-			static_cast<VulkanCommandList*>(commandList)->SetState(CommandListState::Pending);
+			static_cast<VulkanCommandList*>(commandList)->OnSubmitted();
 		}
 
 		submitLock.unlock();
@@ -340,7 +340,7 @@ namespace RealRHI {
 			while (!m_PendingSubmissions.empty() && m_PendingSubmissions.front().value <= completedValue) {
 				auto& submission = m_PendingSubmissions.front();
 				for (auto& commandList : submission.commandLists) {
-					static_cast<VulkanCommandList*>(commandList.Raw())->SetState(CommandListState::Executable);
+					static_cast<VulkanCommandList*>(commandList.Raw())->OnCompleted();
 				}
 
 				completedSubmissions.push_back(std::move(submission));

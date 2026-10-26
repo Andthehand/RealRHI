@@ -2,6 +2,8 @@
 #include "CommandList.h"
 #include "VulkanBuffer.h"
 #include "VulkanCommandAllocator.h"
+#include "VulkanCommandResourceTracker.h"
+#include "VulkanCommandTimestamps.h"
 #include "VulkanDevice.h"
 #include "VulkanPipeline.h"
 #include "VulkanResourceState.h"
@@ -9,7 +11,6 @@
 
 #include <volk.h>
 
-#include <functional>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
@@ -31,7 +32,7 @@ namespace RealRHI {
 		void BeginDebugLabel(const char* name) override;
 		void EndDebugLabel() override;
 		void InsertDebugLabel(const char* name) override;
-		bool SupportsTimestamps() const override { return m_TimestampPool != VK_NULL_HANDLE; }
+		bool SupportsTimestamps() const override { return m_Timestamps.IsSupported(); }
 		void WriteTimestamp(const char* name) override;
 		uint32_t BeginGpuTiming(const char* name) override;
 		void EndGpuTiming(uint32_t timing) override;
@@ -88,8 +89,6 @@ namespace RealRHI {
 			std::scoped_lock lock(m_StateMutex);
 			return m_State;
 		}
-		void SetState(CommandListState state);
-		void PrepareTimestampSubmission();
 
 	protected:
 		friend class VulkanDevice;
@@ -98,65 +97,16 @@ namespace RealRHI {
 		VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
 
 	private:
-		struct TimestampInterval {
-			uint32_t begin;
-			uint32_t end = UINT32_MAX;
-		};
-
-		struct SubresourceKey {
-			const VulkanTexture* texture = nullptr;
-			uint32_t mipLevel = 0;
-			uint32_t arrayLayer = 0;
-
-		public:
-			bool operator==(const SubresourceKey&) const = default;
-		};
-
-		struct SubresourceKeyHash {
-			size_t operator()(const SubresourceKey& key) const {
-				return std::hash<const VulkanTexture*>{}(key.texture) ^ (static_cast<size_t>(key.mipLevel) << 16) ^
-					static_cast<size_t>(key.arrayLayer);
-			}
-		};
-		using LayoutMap = std::unordered_map<SubresourceKey, TextureLayout, SubresourceKeyHash>;
-
-		struct ResourceOperation {
-			const char* name = nullptr;
-			VulkanBuffer* buffer = nullptr;
-			VulkanTexture* texture = nullptr;
-			uint64_t offset = 0;
-			uint64_t size = 0;
-			TextureSubresourceRange subresources{};
-			TextureLayout oldLayout = TextureLayout::Undefined;
-			TextureLayout newLayout = TextureLayout::Undefined;
-			uint32_t sourceFamily = UINT32_MAX;
-			uint32_t destinationFamily = UINT32_MAX;
-			bool barrier = false;
-		};
-
-		struct SubmissionState {
-			std::unordered_map<SubresourceKey, VulkanTextureState, SubresourceKeyHash> textures;
-			std::unordered_map<VulkanBuffer*, std::vector<VulkanBufferRangeState>> buffers;
-		};
-
-	private:
-		Result InitTimestamps();
-		Result ReadTimestamps();
-		void RecordTimestampTimings() const;
+		void PrepareSubmission();
+		void OnSubmitted();
+		void OnCompleted();
+		void ResetRecordingState();
 		bool ValidateDebugLabel(const char* operation, const char* name) const;
 
 		bool ValidateGraphicsState(const char* operation) const;
 		bool ValidateAttachmentView(const VulkanTextureView* view, TextureUsage usage, const Rect& renderArea) const;
 		TextureLayout GetExpectedLayout(const VulkanTexture* texture, uint32_t mip, uint32_t layer) const;
-		// Replay in command order; publish the complete batch only after native submission succeeds.
-		bool ValidateSubmissionState(SubmissionState& predicted,
-			SubmissionToken submission,
-			std::span<const VkSemaphoreSubmitInfo> waits) const;
-		static void CommitSubmissionState(SubmissionState& predicted);
-		bool ValidateOwnership(VulkanQueueOwnership& ownership,
-			const ResourceOperation& operation,
-			SubmissionToken submission,
-			std::span<const VkSemaphoreSubmitInfo> waits) const;
+		bool ReplayResources(VulkanResourceStateTransaction& transaction) const;
 		bool ValidateIndirectArguments(const VulkanBuffer* buffer,
 			uint64_t offset,
 			uint32_t count,
@@ -165,11 +115,6 @@ namespace RealRHI {
 			const char* operation) const;
 		bool RecordVertexBuffers(const char* operation);
 
-		void RecordBufferUse(VulkanBuffer* buffer, uint64_t offset, uint64_t size, const char* operation);
-		void RecordTextureUse(VulkanTexture* texture,
-			TextureSubresourceRange subresources,
-			TextureLayout layout,
-			const char* operation);
 		void RecordShaderResources(const char* operation);
 		bool ValidateMipGeneration(VulkanTexture* texture,
 			const MipGenerationDesc& desc,
@@ -178,13 +123,6 @@ namespace RealRHI {
 			std::optional<QueueType> destination,
 			uint32_t& sourceFamily,
 			uint32_t& destinationFamily) const;
-
-	private:
-		bool HasRecordedLayout(const VulkanTexture* texture,
-			uint32_t mipLevel,
-			uint32_t baseLayer,
-			uint32_t layerCount,
-			TextureLayout expected) const;
 
 	private:
 		const VulkanDevice* m_Device;
@@ -202,25 +140,15 @@ namespace RealRHI {
 		bool m_ReadOnlyDepth = false;
 		bool m_ReadOnlyStencil = false;
 
-		std::vector<ResourceOperation> m_ResourceOperations;
+		VulkanCommandResourceTracker m_ResourceTracker;
 		std::vector<VulkanTextureView*> m_ShaderViews;
 		std::vector<VulkanBuffer*> m_ShaderBuffers;
 		std::unordered_map<uint32_t, VulkanBuffer*> m_VertexBuffers;
 		std::vector<uint32_t> m_ActiveVertexBindings;
 		VulkanBuffer* m_IndexBuffer = nullptr;
-		// Local layouts check recording consistency without predicting other queues' submissions.
-		LayoutMap m_RecordedLayouts;
 
 		VkCommandBuffer m_CommandBuffer = VK_NULL_HANDLE;
 
-		static constexpr uint32_t s_MaxTimestampCount = 128;
-		VkQueryPool m_TimestampPool = VK_NULL_HANDLE;
-		uint32_t m_TimestampValidBits = 0;
-		float m_TimestampPeriod = 0;
-		std::vector<std::string> m_TimestampNames;
-		std::vector<TimestampInterval> m_TimestampIntervals;
-		uint32_t m_ReservedTimestamps = 0;
-		std::vector<GpuTimestamp> m_TimestampResults;
-		Result m_TimestampReadResult = Result::NotReady;
+		VulkanCommandTimestamps m_Timestamps;
 	};
 }

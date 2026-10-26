@@ -51,6 +51,8 @@ namespace RealRHI {
 		friend class VulkanSwapchain;
 		friend class VulkanTextureView;
 		friend class VulkanCommandList;
+		friend class VulkanCommandResourceTracker;
+		friend class VulkanResourceStateTransaction;
 		friend class VulkanUploadContext;
 
 		VkImage GetImage() const { return m_Image; }

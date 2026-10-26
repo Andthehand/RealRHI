@@ -32,6 +32,59 @@ namespace {
 			std::exit(1);
 		}
 	}
+
+	void TestRejectedBarrierBatch(RealRHI::Device& device, RealRHI::CommandAllocator& allocator) {
+		using namespace RealRHI;
+		Ref<Texture> texture;
+		Ref<Buffer> buffer;
+		Ref<CommandList> commands;
+		Expect(device.CreateTexture({.width = 4,
+										.height = 4,
+										.format = TextureFormat::RGBA8_UNorm,
+										.usage = TextureUsage::TransferSrc | TextureUsage::TransferDst},
+				   texture) == Result::Success,
+			"Create barrier rollback texture");
+		Expect(device.CreateBuffer({.size = 64, .usage = BufferUsage::TransferDst}, buffer) == Result::Success,
+			"Create barrier rollback buffer");
+		Expect(device.CreateCommandList(&allocator, commands) == Result::Success, "Create barrier rollback recording");
+		const auto textureReferences = texture->GetRefCount();
+		const auto bufferReferences = buffer->GetRefCount();
+		Expect(commands->Begin() == Result::Success, "Begin barrier rollback recording");
+		BarrierDesc initialize;
+		initialize.textures.push_back(
+			{.texture = texture.Raw(),
+				.after = {PipelineStage::Transfer, ResourceAccess::TransferWrite},
+				.oldLayout = TextureLayout::Undefined,
+				.newLayout = TextureLayout::TransferDst});
+		commands->Barrier(initialize);
+		BarrierDesc transition;
+		transition.textures.push_back(
+			{.texture = texture.Raw(),
+				.before = {PipelineStage::Transfer, ResourceAccess::TransferWrite},
+				.after = {PipelineStage::Transfer, ResourceAccess::TransferRead},
+				.oldLayout = TextureLayout::TransferDst,
+				.newLayout = TextureLayout::TransferSrc});
+		BarrierDesc rejected = transition;
+		rejected.textures.push_back(transition.textures.front());
+		rejected.buffers.push_back(
+			{.buffer = buffer.Raw(),
+				.after = {PipelineStage::Transfer, ResourceAccess::TransferWrite},
+				.size = buffer->GetSize()});
+		const auto errorsBefore = g_ProgrammerErrors;
+		commands->Barrier(rejected);
+		Expect(g_ProgrammerErrors == errorsBefore + 1, "Reject an overlapping barrier batch once");
+		Expect(buffer->GetRefCount() == bufferReferences, "Rejected barrier batch retains no new resources");
+		commands->Barrier(transition);
+		Expect(g_ProgrammerErrors == errorsBefore + 1, "Rejected batch preserves recording-local layouts");
+		Expect(commands->End() == Result::Success, "End recording after a rejected barrier batch");
+		auto* queue = device.GetGraphicsCommandQueue();
+		const auto token = queue->Submit(*commands);
+		Expect(token.IsValid(), "Rejected batch leaves no partial operations in the submission log");
+		queue->Wait(token);
+		Expect(commands->Reset() == Result::Success && texture->GetRefCount() == textureReferences &&
+				buffer->GetRefCount() == bufferReferences,
+			"Reset releases resources after the corrected barrier batch completes");
+	}
 }
 
 int main() {
@@ -92,6 +145,7 @@ int main() {
 	graphicsQueue->Wait(combinedToken);
 	Expect(listA->Reset() == RealRHI::Result::Success, "Reset list A after combined completion");
 	Expect(listB->Reset() == RealRHI::Result::Success, "Reset list B after combined completion");
+	TestRejectedBarrierBatch(*device, *allocator);
 
 	// Every submission form uses the same validation and rolls back retained refs.
 	{

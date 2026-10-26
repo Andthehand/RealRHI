@@ -29,6 +29,7 @@ namespace RealRHI {
 
 	protected:
 		friend class VulkanCommandList;
+		friend class VulkanResourceStateTransaction;
 		friend class VulkanUploadContext;
 		friend class VulkanTexture;
 		friend class VulkanDescriptorHeaps;

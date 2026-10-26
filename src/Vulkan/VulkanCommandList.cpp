@@ -9,23 +9,20 @@
 #include "VulkanTextureView.h"
 
 #include <algorithm>
-#include <array>
 #include <mutex>
-#include <sstream>
 #include <unordered_set>
 #include <utility>
 
 namespace RealRHI {
 
 	VulkanCommandList::VulkanCommandList(const VulkanDevice* device, Ref<VulkanCommandAllocator> allocator)
-		: m_Device(device), m_Allocator(std::move(allocator)), m_QueueId{m_Allocator->GetQueueFamilyIndex(), 0} { }
+		: m_Device(device),
+		  m_Allocator(std::move(allocator)),
+		  m_QueueId{m_Allocator->GetQueueFamilyIndex(), 0},
+		  m_Timestamps(device, m_QueueId) { }
 
 	VulkanCommandList::~VulkanCommandList() {
 		std::scoped_lock lock(m_StateMutex);
-		if (m_TimestampPool != VK_NULL_HANDLE) {
-			vkDestroyQueryPool(m_Device->GetDevice(), m_TimestampPool, nullptr);
-		}
-
 		if (m_CommandBuffer != VK_NULL_HANDLE && m_State != CommandListState::Pending) {
 			m_Allocator->Free(m_CommandBuffer);
 			m_CommandBuffer = VK_NULL_HANDLE;
@@ -53,7 +50,7 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
-		return InitTimestamps();
+		return m_Timestamps.Init();
 	}
 
 	Result VulkanCommandList::Begin() {
@@ -87,10 +84,6 @@ namespace RealRHI {
 				return Result::Failed;
 			}
 			m_State = CommandListState::Recording;
-			m_ComputePipelineBound = false;
-			m_GraphicsPipeline = nullptr;
-			m_ActiveVertexBindings.clear();
-			m_Rendering = false;
 		}
 
 		return Result::Success;
@@ -173,21 +166,25 @@ namespace RealRHI {
 		// Release outside the state mutex (destructors may invoke other locks).
 		std::vector<Ref<RefCounted>> released;
 		released.swap(m_ReferencedResources);
+		ResetRecordingState();
+		return Result::Success;
+	}
+
+	void VulkanCommandList::ResetRecordingState() {
 		m_ComputePipelineBound = false;
 		m_GraphicsPipeline = nullptr;
+		m_Rendering = false;
+		m_RenderTargetFormats = {};
+		m_RenderingSampleCount = 0;
+		m_ReadOnlyDepth = false;
+		m_ReadOnlyStencil = false;
 		m_ActiveVertexBindings.clear();
-		m_RecordedLayouts.clear();
-		m_ResourceOperations.clear();
+		m_ResourceTracker.Reset();
 		m_ShaderViews.clear();
 		m_ShaderBuffers.clear();
 		m_VertexBuffers.clear();
 		m_IndexBuffer = nullptr;
-		m_TimestampNames.clear();
-		m_TimestampIntervals.clear();
-		m_ReservedTimestamps = 0;
-		m_TimestampResults.clear();
-		m_TimestampReadResult = Result::NotReady;
-		return Result::Success;
+		m_Timestamps.Reset();
 	}
 
 	bool VulkanCommandList::ValidateAttachmentView(const VulkanTextureView* view,
@@ -437,7 +434,7 @@ namespace RealRHI {
 		for (const auto& use : uses) {
 			RetainResource(use.view);
 			RetainResource(const_cast<VulkanTexture*>(use.view->GetTexture()));
-			RecordTextureUse(const_cast<VulkanTexture*>(use.view->GetTexture()),
+			m_ResourceTracker.RecordTextureUse(const_cast<VulkanTexture*>(use.view->GetTexture()),
 				use.view->GetSubresources(),
 				use.layout,
 				"BeginRendering");
@@ -672,33 +669,14 @@ namespace RealRHI {
 		}
 		for (uint32_t binding : m_ActiveVertexBindings) {
 			auto* buffer = m_VertexBuffers.at(binding);
-			RecordBufferUse(buffer, 0, buffer->GetSize(), operation);
+			m_ResourceTracker.RecordBufferUse(buffer, 0, buffer->GetSize(), operation);
 		}
 		return true;
 	}
 
-	void VulkanCommandList::RecordBufferUse(VulkanBuffer* buffer,
-		uint64_t offset,
-		uint64_t size,
-		const char* operation) {
-		m_ResourceOperations.push_back({.name = operation, .buffer = buffer, .offset = offset, .size = size});
-	}
-
-	void VulkanCommandList::RecordTextureUse(VulkanTexture* texture,
-		TextureSubresourceRange subresources,
-		TextureLayout layout,
-		const char* operation) {
-		// Swapchain ownership/layouts are managed by frame submission rather than the
-		// ordinary resource tracker. Graph barriers still record native transitions.
-		if (!texture->IsExternal()) {
-			m_ResourceOperations.push_back(
-				{.name = operation, .texture = texture, .subresources = subresources, .oldLayout = layout});
-		}
-	}
-
 	void VulkanCommandList::RecordShaderResources(const char* operation) {
 		for (auto* buffer : m_ShaderBuffers) {
-			RecordBufferUse(buffer, 0, buffer->GetSize(), operation);
+			m_ResourceTracker.RecordBufferUse(buffer, 0, buffer->GetSize(), operation);
 		}
 		for (auto* view : m_ShaderViews) {
 			TextureLayout layout = TextureLayout::ShaderRead;
@@ -706,7 +684,7 @@ namespace RealRHI {
 				layout = TextureLayout::General;
 			}
 
-			RecordTextureUse(
+			m_ResourceTracker.RecordTextureUse(
 				const_cast<VulkanTexture*>(view->GetTexture()), view->GetSubresources(), layout, operation);
 		}
 	}
@@ -748,7 +726,7 @@ namespace RealRHI {
 		if (!RecordVertexBuffers("DrawIndexed vertex buffer")) {
 			return;
 		}
-		RecordBufferUse(m_IndexBuffer, 0, m_IndexBuffer->GetSize(), "DrawIndexed index buffer");
+		m_ResourceTracker.RecordBufferUse(m_IndexBuffer, 0, m_IndexBuffer->GetSize(), "DrawIndexed index buffer");
 		vkCmdDrawIndexed(m_CommandBuffer, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
 	}
 
@@ -801,7 +779,7 @@ namespace RealRHI {
 			return;
 		}
 		RetainResource(buffer);
-		RecordBufferUse(buffer, offset, sizeof(DispatchIndirectArguments), "DispatchComputeIndirect");
+		m_ResourceTracker.RecordBufferUse(buffer, offset, sizeof(DispatchIndirectArguments), "DispatchComputeIndirect");
 		RecordShaderResources("DispatchComputeIndirect");
 		vkCmdDispatchIndirect(m_CommandBuffer, buffer->GetBuffer(), offset);
 	}
@@ -819,7 +797,7 @@ namespace RealRHI {
 			return;
 		}
 		RetainResource(buffer);
-		RecordBufferUse(
+		m_ResourceTracker.RecordBufferUse(
 			buffer, offset, uint64_t(drawCount - 1) * stride + sizeof(DrawIndirectArguments), "DrawIndirect");
 		RecordShaderResources("DrawIndirect");
 		vkCmdDrawIndirect(m_CommandBuffer, buffer->GetBuffer(), offset, drawCount, stride);
@@ -848,11 +826,12 @@ namespace RealRHI {
 			return;
 		}
 		RetainResource(buffer);
-		RecordBufferUse(buffer,
+		m_ResourceTracker.RecordBufferUse(buffer,
 			offset,
 			uint64_t(drawCount - 1) * stride + sizeof(DrawIndexedIndirectArguments),
 			"DrawIndexedIndirect");
-		RecordBufferUse(m_IndexBuffer, 0, m_IndexBuffer->GetSize(), "DrawIndexedIndirect index buffer");
+		m_ResourceTracker.RecordBufferUse(
+			m_IndexBuffer, 0, m_IndexBuffer->GetSize(), "DrawIndexedIndirect index buffer");
 		RecordShaderResources("DrawIndexedIndirect");
 		vkCmdDrawIndexedIndirect(m_CommandBuffer, buffer->GetBuffer(), offset, drawCount, stride);
 	}
@@ -892,8 +871,9 @@ namespace RealRHI {
 
 		RetainResource(sourceBuffer);
 		RetainResource(destinationBuffer);
-		RecordBufferUse(sourceBuffer, region.sourceOffset, region.size, "CopyBuffer source");
-		RecordBufferUse(destinationBuffer, region.destinationOffset, region.size, "CopyBuffer destination");
+		m_ResourceTracker.RecordBufferUse(sourceBuffer, region.sourceOffset, region.size, "CopyBuffer source");
+		m_ResourceTracker.RecordBufferUse(
+			destinationBuffer, region.destinationOffset, region.size, "CopyBuffer destination");
 
 		VkBufferCopy copyRegion{
 			.srcOffset = region.sourceOffset,
@@ -962,13 +942,13 @@ namespace RealRHI {
 			return;
 		}
 
-		RecordTextureUse(destinationTexture,
+		m_ResourceTracker.RecordTextureUse(destinationTexture,
 			{region.mipLevel, 1, region.baseArrayLayer, region.layerCount},
 			TextureLayout::TransferDst,
 			"CopyBufferToTexture");
 		RetainResource(sourceBuffer);
 		RetainResource(destinationTexture);
-		RecordBufferUse(sourceBuffer,
+		m_ResourceTracker.RecordBufferUse(sourceBuffer,
 			region.bufferOffset,
 			static_cast<uint64_t>(region.width) * region.height * region.depth * region.layerCount * texelSize,
 			"CopyBufferToTexture");
@@ -1018,7 +998,7 @@ namespace RealRHI {
 			region.mipLevel >= texture->GetMipLevelCount() || region.baseArrayLayer >= texture->GetArrayLayerCount() ||
 			region.layerCount > texture->GetArrayLayerCount() - region.baseArrayLayer ||
 			region.bufferOffset >= buffer->GetSize() ||
-			!HasRecordedLayout(
+			!m_ResourceTracker.HasRecordedLayout(
 				texture, region.mipLevel, region.baseArrayLayer, region.layerCount, TextureLayout::TransferSrc)) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
@@ -1046,13 +1026,13 @@ namespace RealRHI {
 			return;
 		}
 
-		RecordTextureUse(texture,
+		m_ResourceTracker.RecordTextureUse(texture,
 			{region.mipLevel, 1, region.baseArrayLayer, region.layerCount},
 			TextureLayout::TransferSrc,
 			"CopyTextureToBuffer");
 		RetainResource(texture);
 		RetainResource(buffer);
-		RecordBufferUse(buffer,
+		m_ResourceTracker.RecordBufferUse(buffer,
 			region.bufferOffset,
 			static_cast<uint64_t>(region.width) * region.height * region.depth * region.layerCount * 4,
 			"CopyTextureToBuffer");
@@ -1107,12 +1087,12 @@ namespace RealRHI {
 			region.destinationBaseArrayLayer >= destinationTexture->GetArrayLayerCount() ||
 			region.layerCount > sourceTexture->GetArrayLayerCount() - region.sourceBaseArrayLayer ||
 			region.layerCount > destinationTexture->GetArrayLayerCount() - region.destinationBaseArrayLayer ||
-			!HasRecordedLayout(sourceTexture,
+			!m_ResourceTracker.HasRecordedLayout(sourceTexture,
 				region.sourceMipLevel,
 				region.sourceBaseArrayLayer,
 				region.layerCount,
 				TextureLayout::TransferSrc) ||
-			!HasRecordedLayout(destinationTexture,
+			!m_ResourceTracker.HasRecordedLayout(destinationTexture,
 				region.destinationMipLevel,
 				region.destinationBaseArrayLayer,
 				region.layerCount,
@@ -1134,11 +1114,11 @@ namespace RealRHI {
 			return;
 		}
 
-		RecordTextureUse(sourceTexture,
+		m_ResourceTracker.RecordTextureUse(sourceTexture,
 			{region.sourceMipLevel, 1, region.sourceBaseArrayLayer, region.layerCount},
 			TextureLayout::TransferSrc,
 			"CopyTexture source");
-		RecordTextureUse(destinationTexture,
+		m_ResourceTracker.RecordTextureUse(destinationTexture,
 			{region.destinationMipLevel, 1, region.destinationBaseArrayLayer, region.layerCount},
 			TextureLayout::TransferDst,
 			"CopyTexture destination");
@@ -1216,7 +1196,7 @@ namespace RealRHI {
 			return;
 		}
 
-		std::vector<ResourceOperation> operations;
+		std::vector<VulkanResourceOperation> operations;
 
 		std::vector<VkMemoryBarrier2> memoryBarriers;
 		std::vector<VkBufferMemoryBarrier2> bufferBarriers;
@@ -1324,7 +1304,7 @@ namespace RealRHI {
 				mip < barrier.subresources.baseMipLevel + barrier.subresources.mipLevelCount;
 				++mip) {
 				if (!acquire &&
-					!HasRecordedLayout(texture,
+					!m_ResourceTracker.HasRecordedLayout(texture,
 						mip,
 						barrier.subresources.baseArrayLayer,
 						barrier.subresources.arrayLayerCount,
@@ -1389,7 +1369,7 @@ namespace RealRHI {
 				}
 			}
 		}
-		std::unordered_set<SubresourceKey, SubresourceKeyHash> touched;
+		std::unordered_set<VulkanSubresourceKey, VulkanSubresourceKeyHash> touched;
 		for (const TextureBarrier& barrier : barriers.textures) {
 			auto* texture = static_cast<VulkanTexture*>(barrier.texture);
 			for (uint32_t mip = barrier.subresources.baseMipLevel;
@@ -1408,28 +1388,13 @@ namespace RealRHI {
 			}
 		}
 
-		// Update the command list's layout knowledge only after all barriers validate.
-		for (const TextureBarrier& barrier : barriers.textures) {
-			auto* texture = static_cast<VulkanTexture*>(barrier.texture);
-			for (uint32_t mip = barrier.subresources.baseMipLevel;
-				mip < barrier.subresources.baseMipLevel + barrier.subresources.mipLevelCount;
-				++mip) {
-				for (uint32_t layer = barrier.subresources.baseArrayLayer;
-					layer < barrier.subresources.baseArrayLayer + barrier.subresources.arrayLayerCount;
-					++layer) {
-					const SubresourceKey key{texture, mip, layer};
-					m_RecordedLayouts[key] = barrier.newLayout;
-				}
-			}
-		}
-
 		for (const BufferBarrier& barrier : barriers.buffers) {
 			RetainResource(barrier.buffer);
 		}
 		for (const TextureBarrier& barrier : barriers.textures) {
 			RetainResource(barrier.texture);
 		}
-		m_ResourceOperations.insert(m_ResourceOperations.end(), operations.begin(), operations.end());
+		m_ResourceTracker.RecordBarriers(operations);
 
 		VkDependencyInfo dependencyInfo{
 			.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
@@ -1443,387 +1408,76 @@ namespace RealRHI {
 		vkCmdPipelineBarrier2(m_CommandBuffer, &dependencyInfo);
 	}
 
-	TextureLayout VulkanCommandList::GetExpectedLayout(const VulkanTexture* texture,
-		uint32_t mip,
-		uint32_t layer) const {
-		const auto it = m_RecordedLayouts.find({texture, mip, layer});
-		if (it != m_RecordedLayouts.end()) {
-			return it->second;
-		}
-
-		return texture->GetSubmittedState(mip, layer).layout;
-	}
-
-	bool VulkanCommandList::ValidateOwnership(VulkanQueueOwnership& ownership,
-		const ResourceOperation& operation,
-		SubmissionToken submission,
-		std::span<const VkSemaphoreSubmitInfo> waits) const {
-		auto reject = [&](const char* cause) {
-			std::ostringstream message;
-			message << "Submit: " << operation.name << ": " << cause << "; family=" << m_QueueId.familyIndex
-					<< ", owner=" << ownership.family << ", pending destination=" << ownership.pendingFamily;
-			if (operation.buffer) {
-				message << ", buffer=" << operation.buffer << ", offset=" << operation.offset
-						<< ", size=" << operation.size;
-			}
-			else {
-				message << ", texture=" << operation.texture << ", base mip=" << operation.subresources.baseMipLevel
-						<< ", base layer=" << operation.subresources.baseArrayLayer;
-			}
-			if (ownership.release.IsValid()) {
-				message << ", release token=" << ownership.release.queue.familyIndex << ":"
-						<< ownership.release.queue.queueIndex << "/" << ownership.release.value;
-			}
-			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, message.str().c_str());
-			return false;
-		};
-
-		const bool transfer =
-			operation.sourceFamily != UINT32_MAX && operation.sourceFamily != operation.destinationFamily;
-		const bool acquire = transfer && m_QueueId.familyIndex == operation.destinationFamily;
-		if (acquire) {
-			if (ownership.family != operation.sourceFamily || ownership.pendingFamily != operation.destinationFamily ||
-				!ownership.release.IsValid()) {
-				return reject("acquire requires a matching release from the source family");
-			}
-			auto* sourceQueue = m_Device->GetCommandQueue(ownership.release.queue);
-			bool waited = false;
-			for (const auto& wait : waits) {
-				if (sourceQueue && wait.semaphore == sourceQueue->GetTimelineSemaphore() &&
-					wait.value >= ownership.release.value &&
-					(wait.stageMask & VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT) != 0) {
-					waited = true;
-					break;
-				}
-			}
-			if (!waited) {
-				return reject("acquire must waitFor the release submission token (or a later token on that queue)");
-			}
-			ownership.family = operation.destinationFamily;
-			ownership.pendingFamily = UINT32_MAX;
-			ownership.release = {};
-			return true;
-		}
-
-		if (ownership.pendingFamily != UINT32_MAX) {
-			return reject("resource was released; record a matching acquire before using or releasing it again");
-		}
-		if (ownership.family != UINT32_MAX && ownership.family != m_QueueId.familyIndex) {
-			return reject("resource belongs to another family; release there and acquire on this family");
-		}
-		ownership.family = m_QueueId.familyIndex;
-		if (transfer) {
-			ownership.pendingFamily = operation.destinationFamily;
-			ownership.release = submission;
-		}
-		return true;
-	}
-
-	bool VulkanCommandList::ValidateSubmissionState(SubmissionState& predicted,
-		SubmissionToken submission,
-		std::span<const VkSemaphoreSubmitInfo> waits) const {
-		for (const auto& operation : m_ResourceOperations) {
-			// Swapchain layouts/ownership follow acquire/present synchronization, outside
-			// the ordinary queue timeline ownership tracker (as with attachment uses).
-			if (operation.texture && operation.texture->IsExternal()) {
-				continue;
-			}
-			const bool transfer =
-				operation.sourceFamily != UINT32_MAX && operation.sourceFamily != operation.destinationFamily;
-			const bool acquire = transfer && m_QueueId.familyIndex == operation.destinationFamily;
-			if (operation.buffer) {
-				auto [entry, inserted] = predicted.buffers.try_emplace(operation.buffer);
-				if (inserted) {
-					entry->second = operation.buffer->GetSubmittedRanges();
-				}
-				auto& ranges = entry->second;
-				const uint64_t end = operation.offset + operation.size;
-				// Split at operation boundaries so disjoint buffer regions can change owners independently.
-				for (uint64_t boundary : {operation.offset, end}) {
-					for (size_t i = 0; i < ranges.size(); ++i) {
-						auto& range = ranges[i];
-						if (boundary > range.offset && boundary < range.offset + range.size) {
-							auto tail = range;
-							tail.size = range.offset + range.size - boundary;
-							tail.offset = boundary;
-							range.size = boundary - range.offset;
-							ranges.insert(ranges.begin() + i + 1, tail);
-							break;
-						}
-					}
-				}
-				for (auto& range : ranges) {
-					if (range.offset < operation.offset || range.offset >= end) {
-						continue;
-					}
-					if (!ValidateOwnership(range.ownership, operation, submission, waits)) {
-						return false;
-					}
-					if (acquire && (range.releaseOffset != operation.offset || range.releaseSize != operation.size)) {
-						m_Device->SendDebugMessage(DebugSeverity::Error,
-							DebugMessageType::General,
-							"Submit: Buffer acquire offset and size must exactly match the release barrier.");
-						return false;
-					}
-					if (transfer && !acquire) {
-						range.releaseOffset = operation.offset;
-						range.releaseSize = operation.size;
-					}
-				}
-				continue;
-			}
-
-			const auto& subresources = operation.subresources;
-			for (uint32_t mip = subresources.baseMipLevel; mip < subresources.baseMipLevel + subresources.mipLevelCount;
-				++mip) {
-				for (uint32_t layer = subresources.baseArrayLayer;
-					layer < subresources.baseArrayLayer + subresources.arrayLayerCount;
-					++layer) {
-					const SubresourceKey key{operation.texture, mip, layer};
-					auto [entry, inserted] = predicted.textures.try_emplace(key);
-					if (inserted) {
-						entry->second = operation.texture->GetSubmittedState(mip, layer);
-					}
-					auto& state = entry->second;
-					if (!ValidateOwnership(state.ownership, operation, submission, waits)) {
-						return false;
-					}
-					if (acquire) {
-						const auto& released = state.releaseRange;
-						if (state.releaseOldLayout != operation.oldLayout ||
-							state.releaseNewLayout != operation.newLayout ||
-							released.baseMipLevel != subresources.baseMipLevel ||
-							released.mipLevelCount != subresources.mipLevelCount ||
-							released.baseArrayLayer != subresources.baseArrayLayer ||
-							released.arrayLayerCount != subresources.arrayLayerCount) {
-							m_Device->SendDebugMessage(DebugSeverity::Error,
-								DebugMessageType::General,
-								"Submit: Texture acquire old/new layouts and mip/layer range must exactly match the "
-								"release barrier.");
-							return false;
-						}
-					}
-					else if (operation.oldLayout != TextureLayout::Undefined && state.layout != operation.oldLayout) {
-						std::ostringstream message;
-						message << "Submit: " << operation.name << ": texture=" << operation.texture << ", mip=" << mip
-								<< ", layer=" << layer << ": layout differs from the recorded requirement; expected="
-								<< static_cast<uint32_t>(operation.oldLayout)
-								<< ", submitted=" << static_cast<uint32_t>(state.layout);
-						m_Device->SendDebugMessage(
-							DebugSeverity::Error, DebugMessageType::General, message.str().c_str());
-						return false;
-					}
-					if (transfer && !acquire) {
-						state.releaseOldLayout = operation.oldLayout;
-						state.releaseNewLayout = operation.newLayout;
-						state.releaseRange = subresources;
-					}
-					if (operation.barrier) {
-						state.layout = operation.newLayout;
-					}
-				}
-			}
-		}
-		return true;
-	}
-
-	void VulkanCommandList::CommitSubmissionState(SubmissionState& predicted) {
-		for (auto& [buffer, ranges] : predicted.buffers) {
-			buffer->CommitSubmittedRanges(std::move(ranges));
-		}
-		for (const auto& [key, state] : predicted.textures) {
-			const_cast<VulkanTexture*>(key.texture)->CommitSubmittedState(key.mipLevel, key.arrayLayer, state);
-		}
-	}
-
-	bool VulkanCommandList::HasRecordedLayout(const VulkanTexture* texture,
-		uint32_t mipLevel,
-		uint32_t baseLayer,
-		uint32_t layerCount,
-		TextureLayout expected) const {
-		for (uint32_t layer = baseLayer; layer < baseLayer + layerCount; ++layer) {
-			const auto recorded = m_RecordedLayouts.find({texture, mipLevel, layer});
-			if (expected != TextureLayout::Undefined && recorded != m_RecordedLayouts.end() &&
-				recorded->second != expected) {
-				return false;
-			}
-		}
-		return true;
-	}
-
-	Result VulkanCommandList::InitTimestamps() {
-		if (!m_Device->IsProfilingEnabled() || !m_Device->SupportsHostQueryReset()) {
-			return Result::Success;
-		}
-
-		uint32_t familyCount = 0;
-		vkGetPhysicalDeviceQueueFamilyProperties(m_Device->GetPhysicalDevice(), &familyCount, nullptr);
-		std::vector<VkQueueFamilyProperties> families(familyCount);
-		vkGetPhysicalDeviceQueueFamilyProperties(m_Device->GetPhysicalDevice(), &familyCount, families.data());
-		m_TimestampValidBits = families[m_QueueId.familyIndex].timestampValidBits;
-		if (m_TimestampValidBits == 0) {
-			return Result::Success;
-		}
-
-		VkPhysicalDeviceProperties properties{};
-		vkGetPhysicalDeviceProperties(m_Device->GetPhysicalDevice(), &properties);
-		m_TimestampPeriod = properties.limits.timestampPeriod;
-
-		const VkQueryPoolCreateInfo info{
-			.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
-			.queryType = VK_QUERY_TYPE_TIMESTAMP,
-			.queryCount = s_MaxTimestampCount,
-		};
-		if (vkCreateQueryPool(m_Device->GetDevice(), &info, nullptr, &m_TimestampPool) != VK_SUCCESS) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"CreateCommandList: Failed to allocate the profiling timestamp query pool.");
-			return Result::Failed;
-		}
-		return Result::Success;
-	}
-
 	void VulkanCommandList::WriteTimestamp(const char* name) {
 		if (!SupportsTimestamps()) {
 			return;
 		}
-		if (GetState() != CommandListState::Recording || name == nullptr || name[0] == '\0' ||
-			m_TimestampNames.size() + m_ReservedTimestamps >= s_MaxTimestampCount) {
+		if (GetState() != CommandListState::Recording) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
 				"WriteTimestamp: Requires recording, a nonempty name, and fewer than 128 recorded markers.");
 			return;
 		}
-
-		const uint32_t query = static_cast<uint32_t>(m_TimestampNames.size());
-		m_TimestampNames.emplace_back(name);
-		vkCmdWriteTimestamp2(m_CommandBuffer, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, m_TimestampPool, query);
+		m_Timestamps.WriteTimestamp(m_CommandBuffer, name);
 	}
 
 	uint32_t VulkanCommandList::BeginGpuTiming(const char* name) {
 		if (!SupportsTimestamps()) {
 			return UINT32_MAX;
 		}
-		if (GetState() != CommandListState::Recording || !name || !name[0]) {
+		if (GetState() != CommandListState::Recording) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
 				"BeginGpuTiming: Requires an active recording and a nonempty name.");
 			return UINT32_MAX;
 		}
-		if (m_TimestampNames.size() + m_ReservedTimestamps + 2 > s_MaxTimestampCount) {
-			return UINT32_MAX;
-		}
-		const auto timing = static_cast<uint32_t>(m_TimestampIntervals.size());
-		m_TimestampIntervals.push_back({static_cast<uint32_t>(m_TimestampNames.size())});
-		WriteTimestamp(name);
-		++m_ReservedTimestamps;
-		return timing;
+		return m_Timestamps.BeginGpuTiming(m_CommandBuffer, name);
 	}
 
 	void VulkanCommandList::EndGpuTiming(uint32_t timing) {
 		if (timing == UINT32_MAX) {
 			return;
 		}
-		if (GetState() != CommandListState::Recording || timing >= m_TimestampIntervals.size() ||
-			m_TimestampIntervals[timing].end != UINT32_MAX) {
+		if (GetState() != CommandListState::Recording) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
 				"EndGpuTiming: Requires an active recording and an open interval from this recording.");
 			return;
 		}
-		--m_ReservedTimestamps;
-		m_TimestampIntervals[timing].end = static_cast<uint32_t>(m_TimestampNames.size());
-		WriteTimestamp("GPU interval end");
+		m_Timestamps.EndGpuTiming(m_CommandBuffer, timing);
 	}
 
-	void VulkanCommandList::RecordTimestampTimings() const {
-		std::vector<bool> paired(m_TimestampResults.size());
-		for (const auto& interval : m_TimestampIntervals) {
-			paired[interval.begin] = true;
-			if (interval.end == UINT32_MAX) {
-				continue;
-			}
-			paired[interval.end] = true;
-			const std::array<GpuTimestamp, 2> endpoints{
-				m_TimestampResults[interval.begin], m_TimestampResults[interval.end]
-			};
-			m_Device->RecordGpuTimings(m_QueueId, endpoints);
-		}
-		// Keep the existing adjacent-marker contract for explicit WriteTimestamp calls.
-		std::vector<GpuTimestamp> markers;
-		for (size_t i = 0; i < m_TimestampResults.size(); ++i) {
-			if (!paired[i]) {
-				markers.push_back(m_TimestampResults[i]);
-			}
-		}
-		m_Device->RecordGpuTimings(m_QueueId, markers);
+	bool VulkanCommandList::ReplayResources(VulkanResourceStateTransaction& transaction) const {
+		return m_ResourceTracker.Replay(transaction);
 	}
 
-	void VulkanCommandList::PrepareTimestampSubmission() {
+	TextureLayout VulkanCommandList::GetExpectedLayout(const VulkanTexture* texture,
+		uint32_t mip,
+		uint32_t layer) const {
+		return m_ResourceTracker.GetExpectedLayout(texture, mip, layer);
+	}
+
+	void VulkanCommandList::PrepareSubmission() {
 		std::scoped_lock lock(m_StateMutex);
-		if (!m_TimestampNames.empty()) {
-			// Command-buffer query resets are unavailable on transfer-only queues. Reset on the host
-			// immediately before every submission, including replays of an executable recording.
-			vkResetQueryPool(m_Device->GetDevice(), m_TimestampPool, 0, static_cast<uint32_t>(m_TimestampNames.size()));
-		}
+		m_Timestamps.PrepareSubmission();
 	}
 
-	Result VulkanCommandList::ReadTimestamps() {
-		if (m_TimestampNames.empty()) {
-			return Result::Success;
-		}
-
-		std::vector<uint64_t> ticks(m_TimestampNames.size());
-		const VkResult result = vkGetQueryPoolResults(m_Device->GetDevice(),
-			m_TimestampPool,
-			0,
-			static_cast<uint32_t>(ticks.size()),
-			ticks.size() * sizeof(uint64_t),
-			ticks.data(),
-			sizeof(uint64_t),
-			VK_QUERY_RESULT_64_BIT);
-		if (result == VK_NOT_READY) {
-			return Result::NotReady;
-		}
-		if (result != VK_SUCCESS) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"GetTimestampResults: Failed to read completed GPU timestamp queries.");
-			return Result::Failed;
-		}
-
-		uint64_t mask = UINT64_MAX;
-		if (m_TimestampValidBits < 64) {
-			mask = (uint64_t{1} << m_TimestampValidBits) - 1;
-		}
-		uint64_t elapsedTicks = 0;
-		for (size_t index = 0; index < ticks.size(); ++index) {
-			if (index != 0) {
-				elapsedTicks += (ticks[index] - ticks[index - 1]) & mask;
-			}
-			m_TimestampResults.push_back({
-				.name = m_TimestampNames[index],
-				.milliseconds = static_cast<double>(elapsedTicks) * m_TimestampPeriod / 1'000'000.0,
-			});
-		}
-		return Result::Success;
-	}
-
-	void VulkanCommandList::SetState(CommandListState state) {
+	void VulkanCommandList::OnSubmitted() {
 		std::scoped_lock lock(m_StateMutex);
-		if (state == CommandListState::Pending) {
-			m_TimestampResults.clear();
-			m_TimestampReadResult = Result::NotReady;
+		m_Timestamps.OnSubmitted();
+		m_State = CommandListState::Pending;
+	}
+
+	void VulkanCommandList::OnCompleted() {
+		std::scoped_lock lock(m_StateMutex);
+		if (m_State != CommandListState::Pending) {
+			return;
 		}
-		if (m_Device->IsProfilingEnabled() && m_State == CommandListState::Pending &&
-			state == CommandListState::Executable) {
+		if (m_Device->IsProfilingEnabled()) {
 			// Collect before publishing Executable: another thread may immediately recycle this recording.
-			m_TimestampReadResult = ReadTimestamps();
-			if (m_TimestampReadResult == Result::Success) {
-				RecordTimestampTimings();
-			}
+			m_Timestamps.OnCompleted();
 		}
-		m_State = state;
+		m_State = CommandListState::Executable;
 	}
 
 	Result VulkanCommandList::GetTimestampResults(std::vector<GpuTimestamp>& outTimestamps) const {
@@ -1835,11 +1489,7 @@ namespace RealRHI {
 		if (m_State != CommandListState::Executable) {
 			return Result::NotReady;
 		}
-		if (m_TimestampReadResult != Result::Success) {
-			return m_TimestampReadResult;
-		}
-		outTimestamps = m_TimestampResults;
-		return Result::Success;
+		return m_Timestamps.GetResults(outTimestamps);
 	}
 
 	bool VulkanCommandList::ValidateDebugLabel(const char* operation, const char* name) const {
@@ -1991,7 +1641,7 @@ namespace RealRHI {
 		}
 
 		for (uint32_t layer = range.baseArrayLayer; layer < range.baseArrayLayer + range.arrayLayerCount; ++layer) {
-			if (GetExpectedLayout(texture, range.baseMipLevel, layer) == TextureLayout::Undefined) {
+			if (m_ResourceTracker.GetExpectedLayout(texture, range.baseMipLevel, layer) == TextureLayout::Undefined) {
 				m_Device->SendDebugMessage(DebugSeverity::Error,
 					DebugMessageType::General,
 					"GenerateMipmaps: Initialize the source mip before generating its descendants.");
@@ -2019,7 +1669,7 @@ namespace RealRHI {
 					.texture = texture,
 					.before = {PipelineStage::AllCommands, ResourceAccess::MemoryRead | ResourceAccess::MemoryWrite},
 					.after = after,
-					.oldLayout = GetExpectedLayout(vulkanTexture, mip, layer),
+					.oldLayout = m_ResourceTracker.GetExpectedLayout(vulkanTexture, mip, layer),
 					.newLayout = layout,
 					.subresources = {mip, 1, layer, 1},
 				});
@@ -2058,11 +1708,11 @@ namespace RealRHI {
 				.dstOffsets = {{0, 0, 0}, destinationEnd},
 			};
 
-			RecordTextureUse(vulkanTexture,
+			m_ResourceTracker.RecordTextureUse(vulkanTexture,
 				{mip - 1, 1, range.baseArrayLayer, range.arrayLayerCount},
 				TextureLayout::TransferSrc,
 				"GenerateMipmaps source");
-			RecordTextureUse(vulkanTexture,
+			m_ResourceTracker.RecordTextureUse(vulkanTexture,
 				{mip, 1, range.baseArrayLayer, range.arrayLayerCount},
 				TextureLayout::TransferDst,
 				"GenerateMipmaps destination");
