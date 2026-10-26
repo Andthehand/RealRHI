@@ -34,6 +34,295 @@ namespace {
 			"Command list exposes its recording queue");
 	}
 
+	void TestBudget(Device& device) {
+		TransientResourcePool pool(device);
+		Ref<CommandAllocator> allocator;
+		Ref<CommandList> commands;
+		CreateCommands(device, QueueType::Graphics, allocator, commands);
+		uint64_t bufferBytes = 0;
+		uint64_t textureBytes = 0;
+		Ref<Buffer> retained;
+		auto buffer = [&](uint64_t size, bool keep) {
+			Expect(commands->Begin() == Result::Success, "Begin budget buffer recording");
+			{
+				RenderGraph graph(Capture);
+				const auto data = graph.CreateBuffer({.size = size, .usage = BufferUsage::TransferDst});
+				graph.AddPass({.name = "Budget buffer",
+								  .resources = {{data, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+					[&](CommandList&) {
+						bufferBytes = graph.GetBuffer(data)->GetAllocationSize();
+						if (keep) {
+							retained = graph.GetBuffer(data);
+						}
+					});
+				Expect(graph.Execute(device, *commands, &pool) == Result::Success, "Allocate budget buffer");
+			}
+			Expect(commands->End() == Result::Success, "End budget buffer recording");
+			if (!keep) {
+				Expect(commands->Reset() == Result::Success, "Release idle budget buffer recording");
+			}
+		};
+		buffer(64, false);
+		Expect(commands->Begin() == Result::Success, "Begin budget texture recording");
+		{
+			RenderGraph graph(Capture);
+			const auto image = graph.CreateTexture(
+				{.width = 4, .height = 4, .format = TextureFormat::RGBA8_UNorm, .usage = TextureUsage::TransferDst});
+			graph.AddPass({.name = "Budget texture",
+							  .resources = {{image, s_Write, TextureLayout::TransferDst, RenderGraphAccess::Write}}},
+				[&](CommandList&) {
+					textureBytes = graph.GetTexture(image)->GetAllocationSize();
+				});
+			Expect(graph.Execute(device, *commands, &pool) == Result::Success, "Allocate budget texture");
+		}
+		Expect(commands->End() == Result::Success && commands->Reset() == Result::Success,
+			"Release idle texture recording");
+		buffer(128, false);
+		buffer(64, false);
+		const auto initial = pool.GetStatistics();
+		Expect(initial.residentBytes == initial.idleBytes && initial.residentBytes > textureBytes &&
+				initial.textureCount == 1 && initial.bufferCount == 2 && initial.bufferReuses == 1,
+			"Pool accounts for actual allocation bytes and refreshes reuse recency");
+		pool.SetBudget(initial.residentBytes - textureBytes);
+		const auto reduced = pool.GetStatistics();
+		Expect(reduced.residentBytes == reduced.budgetBytes && reduced.textureCount == 0 && reduced.bufferCount == 2 &&
+				reduced.evictions == 1,
+			"Budget eviction chooses the oldest idle entry across resource types");
+		buffer(64, true);
+		const auto completion = device.GetGraphicsCommandQueue()->Submit(*commands);
+		Expect(completion.IsValid(), "Submit a budget-protected resource");
+		pool.SetBudget(0);
+		Expect(pool.GetStatistics().residentBytes == retained->GetAllocationSize() &&
+				pool.GetStatistics().bufferCount == 1,
+			"A zero budget evicts idle resources without touching a submitted recording or retained output");
+		device.GetGraphicsCommandQueue()->Wait(completion);
+		pool.Collect();
+		Expect(pool.GetStatistics().residentBytes == bufferBytes,
+			"Completed executable recordings still pin budget allocations");
+		Expect(commands->Reset() == Result::Success, "Release completed budget recording");
+		pool.Collect();
+		Expect(pool.GetStatistics().residentBytes == bufferBytes,
+			"Exported refs pin allocations independently of recordings");
+		retained.Reset();
+		pool.Collect();
+		Expect(pool.GetStatistics().residentBytes == 0 && pool.GetStatistics().evictions == 3 &&
+				pool.GetStatistics().peakResidentBytes >= initial.residentBytes,
+			"Collect returns idle memory to the budget without GPU waits");
+	}
+
+	void TestAliasing(Device& device, bool submit, bool aliasing, bool usePool = true) {
+		TransientResourcePool pool(device);
+		TransientResourcePool* activePool = nullptr;
+		if (usePool) {
+			activePool = &pool;
+		}
+		const std::array<uint32_t, 8> initial{11, 13, 17, 19, 23, 29, 31, 37};
+		Ref<Buffer> upload;
+		Ref<Buffer> readback;
+		Expect(device.CreateBuffer({.size = sizeof(initial),
+									   .usage = BufferUsage::TransferSrc,
+									   .memoryUsage = MemoryUsage::CPUToGPU,
+									   .initialData = initial.data()},
+				   upload) == Result::Success &&
+				device.CreateBuffer(
+					{.size = 64, .usage = BufferUsage::TransferDst, .memoryUsage = MemoryUsage::GPUToCPU}, readback) ==
+					Result::Success,
+			"Create aliasing input and readback");
+		Ref<CommandAllocator> allocator;
+		Ref<CommandList> commands;
+		RenderGraphSubmission completion;
+		if (!submit) {
+			CreateCommands(device, QueueType::Graphics, allocator, commands);
+			Expect(commands->Begin() == Result::Success, "Begin aliasing execution");
+		}
+		{
+			RenderGraph graph(Capture);
+			graph.SetOptions({.enableAliasing = aliasing});
+			const BufferDesc bufferDesc{.size = 16, .usage = BufferUsage::TransferSrc | BufferUsage::TransferDst};
+			const TextureDesc textureDesc{
+				.width = 4,
+				.height = 1,
+				.format = TextureFormat::RGBA8_UNorm,
+				.usage = TextureUsage::TransferSrc | TextureUsage::TransferDst
+			};
+			// Allocation order differs from lifetime order, including the physical roots.
+			const auto b = graph.CreateBuffer(bufferDesc);
+			const auto a = graph.CreateBuffer(bufferDesc);
+			const auto imageB = graph.CreateTexture(textureDesc);
+			const auto imageA = graph.CreateTexture(textureDesc);
+			const auto source = graph.ImportBuffer(upload.Raw());
+			const auto output = graph.ImportBuffer(readback.Raw());
+			for (uint32_t phase = 0; phase < 2; ++phase) {
+				const auto data = phase == 0 ? a : b;
+				const auto image = phase == 0 ? imageA : imageB;
+				graph.AddPass({.name = "Initialize transient " + std::to_string(phase),
+								  .resources =
+									  {{source, s_Read},
+										  {data, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write},
+										  {image, s_Write, TextureLayout::TransferDst, RenderGraphAccess::Write}}},
+					[&, data, image, phase](CommandList& list) {
+						list.CopyBuffer(upload.Raw(), graph.GetBuffer(data), {.sourceOffset = phase * 16, .size = 16});
+						list.CopyBufferToTexture(upload.Raw(),
+							graph.GetTexture(image),
+							{.width = 4, .height = 1, .bufferOffset = phase * 16});
+					});
+				graph.AddPass({.name = "Snapshot transient " + std::to_string(phase),
+								  .resources =
+									  {{data, s_Read},
+										  {image, s_Read, TextureLayout::TransferSrc},
+										  {output, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+					[&, data, image, phase](CommandList& list) {
+						list.CopyBuffer(
+							graph.GetBuffer(data), readback.Raw(), {.destinationOffset = phase * 32, .size = 16});
+						list.CopyTextureToBuffer(graph.GetTexture(image),
+							readback.Raw(),
+							{.width = 4, .height = 1, .bufferOffset = phase * 32 + 16});
+					});
+			}
+			Result result;
+			if (submit) {
+				result = graph.Submit(device, completion, activePool);
+			}
+			else {
+				result = graph.Execute(device, *commands, activePool);
+			}
+			Expect(result == Result::Success, "Allocate and record aliased transient resources");
+			Expect((graph.GetBuffer(a) == graph.GetBuffer(b)) == aliasing &&
+					(graph.GetTexture(imageA) == graph.GetTexture(imageB)) == aliasing,
+				"Disjoint matching lifetimes share physical resources only when enabled");
+			const auto diagnostics = graph.GetDiagnostics();
+			Expect(diagnostics.resources[b.index].aliasOf.has_value() == aliasing &&
+					(diagnostics.aliasSavedBytes > 0) == aliasing &&
+					(!usePool || diagnostics.transientBytes == pool.GetStatistics().residentBytes),
+				"Diagnostics expose allocation groups and actual bytes saved");
+			if (aliasing) {
+				Expect(diagnostics.resources[b.index].aliasOf->index == a.index &&
+						diagnostics.resources[imageB.index].aliasOf->index == imageA.index &&
+						diagnostics.aliasSavedBytes == diagnostics.transientBytes,
+					"Aliasing handles roots created after their logical aliases");
+			}
+			std::string error;
+			Expect(graph.Compile(error), "Aliased created resources are not mistaken for overlapping imports");
+		}
+		pool.SetBudget(0);
+		Expect(!usePool || pool.GetStatistics().residentBytes > 0,
+			"Aliased allocations remain alive through recorded work");
+		if (submit) {
+			completion.Wait(device);
+		}
+		else {
+			Expect(commands->End() == Result::Success, "End aliased execution");
+			const auto token = device.GetGraphicsCommandQueue()->Submit(*commands);
+			Expect(token.IsValid(), "Submit aliased execution");
+			device.GetGraphicsCommandQueue()->Wait(token);
+			Expect(commands->Reset() == Result::Success, "Release alias recording");
+		}
+		std::array<uint32_t, 16> values{};
+		Expect(readback->ReadData(values.data(), sizeof(values)) == Result::Success, "Read aliased snapshots");
+		for (uint32_t i = 0; i < values.size(); ++i) {
+			Expect(values[i] == initial[(i / 8) * 4 + i % 4],
+				"Alias boundaries preserve old snapshots and initialize new buffer/image contents");
+		}
+		pool.Collect();
+		Expect(pool.GetStatistics().residentBytes == 0,
+			"Budget collection frees completed physical alias groups exactly once");
+	}
+
+	void TestAliasExclusions(Device& device) {
+		Ref<CommandAllocator> allocator;
+		Ref<CommandList> commands;
+		CreateCommands(device, QueueType::Graphics, allocator, commands);
+		for (uint32_t variant = 0; variant < 5; ++variant) {
+			Expect(commands->Begin() == Result::Success, "Begin alias exclusion recording");
+			{
+				RenderGraph graph(Capture);
+				graph.SetOptions({.enableAliasing = true});
+				BufferDesc desc{.size = 16, .usage = BufferUsage::TransferSrc | BufferUsage::TransferDst};
+				if (variant == 3) {
+					desc.memoryUsage = MemoryUsage::CPUToGPU;
+				}
+				Ref<Buffer> imported;
+				RenderGraphResource a;
+				if (variant == 4) {
+					Expect(
+						device.CreateBuffer(desc, imported) == Result::Success, "Create import excluded from aliasing");
+					a = graph.ImportBuffer(imported.Raw());
+				}
+				else {
+					a = graph.CreateBuffer(desc);
+				}
+				if (variant == 2) {
+					desc.size = 32;
+				}
+				const auto b = graph.CreateBuffer(desc);
+				graph.AddPass({.name = "Write first",
+								  .resources = {{a, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+					[](CommandList&) { });
+				if (variant == 0) {
+					graph.AddPass(
+						{.name = "Overlapping lifetimes",
+							.resources =
+								{{a, s_Read}, {b, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+						[](CommandList&) { });
+				}
+				else {
+					graph.AddPass({.name = "Read first", .resources = {{a, s_Read}}}, [](CommandList&) { });
+					graph.AddPass({.name = "Write second",
+									  .resources = {{b, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+						[](CommandList&) { });
+				}
+				graph.AddPass({.name = "Read second", .resources = {{b, s_Read}}}, [](CommandList&) { });
+				if (variant == 1) {
+					graph.SetFinalState(a, s_Read);
+				}
+				Expect(graph.Execute(device, *commands) == Result::Success &&
+						graph.GetBuffer(a) != graph.GetBuffer(b) && graph.GetDiagnostics().aliasSavedBytes == 0,
+					"Overlaps, exports, incompatible descriptions, host-visible memory, and imports never alias");
+			}
+			Expect(commands->End() == Result::Success && commands->Reset() == Result::Success,
+				"Release exclusion recording");
+		}
+
+		const auto graphics = device.GetGraphicsCommandQueue()->GetQueueId();
+		auto other = QueueType::Graphics;
+		for (auto role : {QueueType::Transfer, QueueType::Compute}) {
+			if (device.GetCommandQueue(role)->GetQueueId() != graphics) {
+				other = role;
+				break;
+			}
+		}
+		const bool sameQueue = device.GetCommandQueue(other)->GetQueueId() == graphics;
+		for (bool crossesQueues : {false, true}) {
+			RenderGraph graph(Capture);
+			graph.SetOptions({.enableAliasing = true});
+			const BufferDesc desc{.size = 16, .usage = BufferUsage::TransferSrc | BufferUsage::TransferDst};
+			const auto a = graph.CreateBuffer(desc);
+			const auto b = graph.CreateBuffer(desc);
+			graph.AddPass({.name = "Graphics lifetime",
+							  .resources = {{a, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+				[](CommandList&) { });
+			if (crossesQueues) {
+				graph.AddPass(
+					{.name = "Ownership handoff", .resources = {{a, s_Read}}, .queue = other}, [](CommandList&) { });
+				graph.AddPass({.name = "Next graphics lifetime",
+								  .resources = {{b, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+					[](CommandList&) { });
+			}
+			else {
+				graph.AddPass({.name = "Independent foreign lifetime",
+								  .resources = {{b, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}},
+								  .queue = other},
+					[](CommandList&) { });
+			}
+			RenderGraphSubmission completion;
+			Expect(graph.Submit(device, completion) == Result::Success &&
+					(graph.GetBuffer(a) == graph.GetBuffer(b)) == sameQueue,
+				"CPU schedule positions cannot justify aliasing different native queues or resources with handoffs");
+			graph.Reset();
+			completion.Wait(device);
+		}
+	}
+
 	void TestGpuReuse(Device& device) {
 		TransientResourcePool pool(device);
 		std::array<uint32_t, 4> initial;
@@ -311,6 +600,14 @@ int main() {
 									   .debugCallback = Capture},
 			   device) == RealRHI::Result::Success,
 		"Create pool test device");
+	TestBudget(*device);
+	TestAliasing(*device, false, false);
+	TestAliasing(*device, false, true);
+	TestAliasing(*device, true, false);
+	TestAliasing(*device, true, true);
+	TestAliasing(*device, false, true, false);
+	TestAliasing(*device, true, true, false);
+	TestAliasExclusions(*device);
 	TestGpuReuse(*device);
 	TestRetainedOutputs(*device);
 	TestMatchingAndQueues(*device);

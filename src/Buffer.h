@@ -7,6 +7,9 @@ namespace RealRHI {
 	public:
 		virtual ~Buffer() = default;
 
+		// Native allocation size in bytes, including alignment.
+		virtual uint64_t GetAllocationSize() const = 0;
+
 		virtual uint64_t GetSize() const = 0;
 		virtual uint32_t GetDescriptorIndex() const = 0;
 

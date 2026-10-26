@@ -26,6 +26,8 @@ namespace RealRHI {
 
 		Result UploadData(const void* data, uint32_t size);
 
+		uint64_t GetAllocationSize() const override { return m_AllocationBytes; }
+
 		TextureView* GetTextureView() override { return m_TextureView.Raw(); }
 
 		const TextureView* GetTextureView() const override { return m_TextureView.Raw(); }

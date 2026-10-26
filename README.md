@@ -68,6 +68,22 @@ Pop-Location
 
 The other example directories are `TriangleExample`, `TextureExample`, and `ComputeExample`.
 
+## Transient memory
+
+The transient pool defaults to a **256 MiB soft budget**, measured using native buffer/image allocation sizes. Set a different budget at construction or with `SetBudget(bytes)`:
+
+```cpp
+TransientResourcePool pool(*device, 128ull * 1024 * 1024);
+graph.SetOptions({.enableAliasing = true});
+// Record or submit the graph with &pool.
+```
+
+Pool acquisitions and `Collect()` evict idle allocations in least-recently-acquired order. Active recordings, pending submissions, retained outputs, and retained texture views stay valid and can temporarily exceed the budget. Call `Collect()` after releasing completed recordings, graphs, and output references to enforce the budget. `Trim()` releases all idle entries; a zero budget retains no idle allocations after collection.
+
+Aliasing is opt-in and also works without a pool. Identical graph-created resources with disjoint lifetimes on the same native queue can reuse one physical buffer or image. Imports, exports declared with `SetFinalState`, host-visible buffers, overlapping lifetimes, and resources used across native queues stay separate. A retained `Ref` keeps the physical allocation alive but does not preserve transient contents after its last declared use; export a resource when its contents must survive. Different resource descriptions do not share memory in this implementation.
+
+`pool.GetStatistics()` reports resident, idle, peak, and budget bytes plus eviction counts. `graph.GetDiagnostics()` identifies physical alias groups, actual transient allocation bytes, and bytes saved by aliasing.
+
 ## Configuration options
 
 | Option | Default | Purpose |

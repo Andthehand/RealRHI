@@ -20,6 +20,7 @@ namespace RealRHI {
 		Result Init(const BufferDesc& desc);
 
 		BufferUsage GetUsage() const { return m_Usage; }
+		uint64_t GetAllocationSize() const override { return m_AllocInfo.size; }
 		uint64_t GetSize() const override { return m_Size; }
 		uint32_t GetDescriptorIndex() const override { return m_DescriptorIndex; }
 

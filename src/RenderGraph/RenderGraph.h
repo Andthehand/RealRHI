@@ -41,6 +41,11 @@ namespace RealRHI {
 		// profiling; unsupported/full query pools skip timing without skipping work.
 		// DeviceStatistics reports these intervals as "RenderGraph: <pass name>".
 		bool enableGpuTimings = false;
+		// Reuse an identical physical resource for disjoint logical lifetimes on one
+		// native queue. Exports, imports, host-visible buffers, and cross-queue resources
+		// stay distinct. A retained Ref preserves allocation lifetime, not old contents:
+		// use SetFinalState to export resources that must survive their last declared use.
+		bool enableAliasing = false;
 	};
 
 	struct RenderGraphPassDesc {
@@ -86,6 +91,8 @@ namespace RealRHI {
 		// CPU scheduling order, not GPU time overlap or permission to alias allocations.
 		uint32_t firstUse = UINT32_MAX;
 		uint32_t lastUse = UINT32_MAX;
+		std::optional<RenderGraphResource> aliasOf;
+		uint64_t allocationBytes = 0;
 	};
 
 	struct RenderGraphInitialBarriers {
@@ -112,6 +119,8 @@ namespace RealRHI {
 		std::vector<RenderGraphResourceInfo> resources;
 		std::vector<RenderGraphInitialBarriers> initialBarriers;
 		std::vector<RenderGraphBatchInfo> batches;
+		uint64_t transientBytes = 0;
+		uint64_t aliasSavedBytes = 0;
 	};
 
 	struct RenderGraphSubmission {
@@ -217,6 +226,7 @@ namespace RealRHI {
 			TextureSubresourceRange subresources;
 			uint64_t offset = 0;
 			uint64_t size = 0;
+			uint32_t aliasSource = UINT32_MAX;
 			ResourceState initialState;
 			TextureLayout initialLayout = TextureLayout::Undefined;
 			std::optional<QueueType> initialQueue;
@@ -249,6 +259,7 @@ namespace RealRHI {
 		static bool IsTexture(const Resource& resource);
 		static bool IsCreated(const Resource& resource);
 		void ReleaseCreatedResources();
+		void BuildAliasPlan(std::span<const QueueId> queues, std::span<const uint8_t> poolingAllowed);
 		Result AllocateResources(Device& device,
 			std::span<const QueueId> queues,
 			TransientResourcePool* pool,
@@ -278,6 +289,7 @@ namespace RealRHI {
 		bool m_Compiled = false;
 		bool m_MultiQueue = false;
 		std::vector<uint8_t> m_UsedResources;
+		std::vector<uint32_t> m_AliasSources;
 		std::vector<InitialRelease> m_InitialReleases;
 		std::vector<RenderGraphBatchInfo> m_Batches;
 		uint64_t m_Id = 0;

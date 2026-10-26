@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <numeric>
 #include <sstream>
 
 namespace RealRHI {
@@ -202,6 +203,7 @@ namespace RealRHI {
 		m_InitialReleases.clear();
 		m_Batches.clear();
 		m_UsedResources.clear();
+		m_AliasSources.clear();
 		m_Order.clear();
 		m_Prerequisites.clear();
 		m_Plan.clear();
@@ -263,6 +265,63 @@ namespace RealRHI {
 				resource.texture.Reset();
 				resource.buffer.Reset();
 				resource.initialState = {};
+				resource.aliasSource = UINT32_MAX;
+			}
+		}
+	}
+
+	void RenderGraph::BuildAliasPlan(std::span<const QueueId> queues, std::span<const uint8_t> poolingAllowed) {
+		m_AliasSources.resize(m_Resources.size());
+		std::iota(m_AliasSources.begin(), m_AliasSources.end(), 0u);
+		if (!m_Options.enableAliasing) {
+			return;
+		}
+		std::vector<uint32_t> firstUse(m_Resources.size(), UINT32_MAX);
+		std::vector<uint32_t> lastUse(m_Resources.size(), UINT32_MAX);
+		for (uint32_t position = 0; position < m_Order.size(); ++position) {
+			for (const auto& use : m_Passes[m_Order[position]].desc.resources) {
+				const auto index = use.resource.index;
+				if (firstUse[index] == UINT32_MAX) {
+					firstUse[index] = position;
+				}
+				lastUse[index] = position;
+			}
+		}
+		std::vector<uint32_t> ordered(m_Resources.size());
+		std::iota(ordered.begin(), ordered.end(), 0u);
+		std::stable_sort(ordered.begin(), ordered.end(), [&](uint32_t left, uint32_t right) {
+			return firstUse[left] < firstUse[right];
+		});
+		std::vector<uint32_t> occupants;
+		for (uint32_t index : ordered) {
+			const auto& resource = m_Resources[index];
+			if (!IsCreated(resource) || resource.hasFinalState || firstUse[index] == UINT32_MAX ||
+				(!poolingAllowed.empty() && !poolingAllowed[index]) ||
+				(resource.bufferDesc && resource.bufferDesc->memoryUsage != MemoryUsage::GPUOnly)) {
+				continue;
+			}
+			bool shared = false;
+			for (auto& occupant : occupants) {
+				const auto& previous = m_Resources[occupant];
+				if (lastUse[occupant] >= firstUse[index] || queues[occupant] != queues[index]) {
+					continue;
+				}
+				bool matches = false;
+				if (resource.textureDesc && previous.textureDesc) {
+					matches = TransientResourcePool::Matches(*resource.textureDesc, *previous.textureDesc);
+				}
+				else if (resource.bufferDesc && previous.bufferDesc) {
+					matches = TransientResourcePool::Matches(*resource.bufferDesc, *previous.bufferDesc);
+				}
+				if (matches) {
+					m_AliasSources[index] = m_AliasSources[occupant];
+					occupant = index;
+					shared = true;
+					break;
+				}
+			}
+			if (!shared) {
+				occupants.push_back(index);
 			}
 		}
 	}
@@ -279,13 +338,15 @@ namespace RealRHI {
 			return Result::InvalidParameter;
 		}
 
+		BuildAliasPlan(queues, poolingAllowed);
+
 		// Commit only after the entire allocation batch succeeds. In-flight executions
 		// retain their old resources through CommandList, independently of this graph.
 		std::vector<Ref<Texture>> textures(m_Resources.size());
 		std::vector<Ref<Buffer>> buffers(m_Resources.size());
 		for (size_t i = 0; i < m_Resources.size(); ++i) {
 			const auto& resource = m_Resources[i];
-			if (!m_UsedResources[i]) {
+			if (!m_UsedResources[i] || m_AliasSources[i] != i) {
 				continue;
 			}
 			const bool usePool = pool && (poolingAllowed.empty() || poolingAllowed[i]);
@@ -316,10 +377,19 @@ namespace RealRHI {
 			}
 		}
 		for (size_t i = 0; i < m_Resources.size(); ++i) {
+			if (m_AliasSources[i] != i) {
+				textures[i] = textures[m_AliasSources[i]];
+				buffers[i] = buffers[m_AliasSources[i]];
+			}
+		}
+		for (size_t i = 0; i < m_Resources.size(); ++i) {
 			if (IsCreated(m_Resources[i]) && m_UsedResources[i]) {
 				m_Resources[i].texture = std::move(textures[i]);
 				m_Resources[i].buffer = std::move(buffers[i]);
-				if (pool && (poolingAllowed.empty() || poolingAllowed[i])) {
+				if (m_AliasSources[i] != i) {
+					m_Resources[i].aliasSource = m_AliasSources[i];
+				}
+				if (m_AliasSources[i] != i || (pool && (poolingAllowed.empty() || poolingAllowed[i]))) {
 					// Reused allocations stay on the same queue. Order previous accesses
 					// before initialization, including image layout metadata writes.
 					m_Resources[i].initialState = {
@@ -472,11 +542,12 @@ namespace RealRHI {
 			for (size_t j = 0; j < i; ++j) {
 				const auto& other = m_Resources[j];
 				bool overlaps = false;
-				if (resource.buffer && resource.buffer == other.buffer) {
+				if (!IsCreated(resource) && !IsCreated(other) && resource.buffer && resource.buffer == other.buffer) {
 					overlaps =
 						resource.offset < other.offset + other.size && other.offset < resource.offset + resource.size;
 				}
-				if (resource.texture && resource.texture == other.texture) {
+				if (!IsCreated(resource) && !IsCreated(other) && resource.texture &&
+					resource.texture == other.texture) {
 					const auto& otherRange = other.subresources;
 					overlaps = Overlaps(range.baseMipLevel,
 								   range.mipLevelCount,
@@ -782,6 +853,23 @@ namespace RealRHI {
 					.imported = !IsCreated(resource),
 					.exported = resource.hasFinalState});
 		}
+		for (uint32_t i = 0; i < m_Resources.size(); ++i) {
+			const auto& resource = m_Resources[i];
+			auto& info = diagnostics.resources[i];
+			if (resource.texture) {
+				info.allocationBytes = resource.texture->GetAllocationSize();
+			}
+			else if (resource.buffer) {
+				info.allocationBytes = resource.buffer->GetAllocationSize();
+			}
+			if (resource.aliasSource != UINT32_MAX) {
+				info.aliasOf = RenderGraphResource{resource.aliasSource, m_Id};
+				diagnostics.aliasSavedBytes += info.allocationBytes;
+			}
+			else if (IsCreated(resource)) {
+				diagnostics.transientBytes += info.allocationBytes;
+			}
+		}
 		for (uint32_t position = 0; position < m_Order.size(); ++position) {
 			const auto index = m_Order[position];
 			diagnostics.passes[index].executionIndex = position;
@@ -884,6 +972,8 @@ namespace RealRHI {
 			text << "Final barriers:\n";
 			DescribeBarriers(text, m_FinalBarriers);
 		}
+		text << "Transient allocation bytes: " << diagnostics.transientBytes
+			 << ", saved by aliasing: " << diagnostics.aliasSavedBytes << '\n';
 		text << "Resource lifetimes (schedule positions; not GPU overlap):\n";
 		for (const auto& resource : diagnostics.resources) {
 			text << "  r" << resource.resource.index << " \"" << resource.name << "\" ";
@@ -901,6 +991,9 @@ namespace RealRHI {
 			}
 			if (resource.exported) {
 				text << " exported";
+			}
+			if (resource.aliasOf) {
+				text << " aliases r" << resource.aliasOf->index;
 			}
 			if (resource.firstUse == UINT32_MAX) {
 				text << " unused";
