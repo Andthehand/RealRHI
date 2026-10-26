@@ -145,7 +145,7 @@ namespace RealRHI {
 		void RecordTimestampTimings() const;
 		bool ValidateDebugLabel(const char* operation, const char* name) const;
 
-		bool ValidateGraphicsAttachments(const char* operation) const;
+		bool ValidateGraphicsState(const char* operation) const;
 		bool ValidateAttachmentView(const VulkanTextureView* view, TextureUsage usage, const Rect& renderArea) const;
 		TextureLayout GetExpectedLayout(const VulkanTexture* texture, uint32_t mip, uint32_t layer) const;
 		// Replay in command order; publish the complete batch only after native submission succeeds.
@@ -195,7 +195,6 @@ namespace RealRHI {
 		std::vector<Ref<RefCounted>> m_ReferencedResources;
 		CommandListState m_State = CommandListState::Initial;
 		bool m_ComputePipelineBound = false;
-		bool m_GraphicsPipelineBound = false;
 		bool m_Rendering = false;
 		VulkanPipeline* m_GraphicsPipeline = nullptr;
 		RenderTargetFormats m_RenderTargetFormats;

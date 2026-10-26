@@ -24,7 +24,7 @@ namespace RealRHI {
 		uint64_t GetSize() const override { return m_Size; }
 		uint32_t GetDescriptorIndex() const override { return m_DescriptorIndex; }
 
-		void WriteData(const void* data, uint64_t size, uint64_t offset = 0) override;
+		Result WriteData(const void* data, uint64_t size, uint64_t offset = 0) override;
 		Result ReadData(void* data, uint64_t size, uint64_t offset = 0) const override;
 
 	protected:
@@ -36,7 +36,6 @@ namespace RealRHI {
 		VkBuffer GetBuffer() const { return m_Buffer; }
 
 		VkDeviceAddress GetBufferDeviceAddress() const;
-		Result CopyToMappedMemory(const void* data, uint64_t size, uint64_t offset);
 		std::vector<VulkanBufferRangeState> GetSubmittedRanges() const;
 		void CommitSubmittedRanges(std::vector<VulkanBufferRangeState> ranges);
 

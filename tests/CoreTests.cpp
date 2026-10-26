@@ -14,6 +14,24 @@ namespace {
 	};
 	struct Derived : Base { };
 	struct Unrelated : RealRHI::RefCounted { };
+	struct Node : RealRHI::RefCounted {
+		RealRHI::Ref<Node> child;
+		bool* detachedAtDestruction = nullptr;
+
+		~Node() override {
+			if (detachedAtDestruction) {
+				*detachedAtDestruction = !child;
+			}
+		}
+	};
+	struct Owner : Base {
+		RealRHI::Ref<Derived> child;
+		bool* detachedAtDestruction = nullptr;
+
+		~Owner() override {
+			*detachedAtDestruction = !child;
+		}
+	};
 
 	void Expect(bool condition, const char* message) {
 		if (!condition) {
@@ -91,6 +109,41 @@ int main() {
 			return true;
 		});
 		Expect(destroyed == 1 && deletions.PendingCount() == 0, "Deletion runs exactly once");
+	}
+	{
+		bool detached = false;
+		auto parent = RealRHI::Ref<Node>::Create();
+		auto child = RealRHI::Ref<Node>::Create();
+		parent->child = child;
+		parent->detachedAtDestruction = &detached;
+		parent = std::move(parent->child);
+		Expect(detached && parent == child && child->GetRefCount() == 2,
+			"Move detaches an owned member before destroying its containing object");
+	}
+	{
+		bool detached = false;
+		auto child = RealRHI::Ref<Derived>::Create();
+		auto owner = RealRHI::Ref<Owner>::Create();
+		owner->child = child;
+		owner->detachedAtDestruction = &detached;
+		RealRHI::Ref<Base> parent = std::move(owner);
+		parent = std::move(static_cast<Owner*>(parent.Raw())->child);
+		Expect(detached && parent.Raw() == child.Raw() && child->GetRefCount() == 2,
+			"Converting member move preserves the transferred reference during owner destruction");
+	}
+	{
+		RealRHI::DeferredDeletionQueue deletions;
+		const RealRHI::SubmissionToken token{.value = 1};
+		uint32_t destroyed = 0;
+		deletions.Enqueue({token}, [&] { ++destroyed; });
+		deletions.Process([&](const auto&) {
+			deletions.Enqueue({}, [&] { ++destroyed; });
+			return true;
+		});
+		Expect(destroyed == 1 && deletions.PendingCount() == 1,
+			"Completion queries can enqueue cleanup without deadlocking or processing new entries");
+		deletions.Process([](const auto&) { return true; });
+		Expect(destroyed == 2 && deletions.PendingCount() == 0, "Reentrant cleanup runs exactly once");
 	}
 	std::cout << "CoreTests passed\n";
 }

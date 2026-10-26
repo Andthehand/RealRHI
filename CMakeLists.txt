@@ -23,15 +23,28 @@ add_library(RealRHICore INTERFACE)
 target_include_directories(RealRHICore INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(RealRHICore INTERFACE cxx_std_20)
 
+# Graph compilation and resource pooling depend only on the RHI interfaces.
+add_library(RealRHIGraph
+    src/RenderGraph/RenderGraph.h
+    src/RenderGraph/RenderGraph.cpp
+    src/RenderGraph/TransientResourcePool.h
+    src/RenderGraph/TransientResourcePool.cpp)
+target_link_libraries(RealRHIGraph PUBLIC RealRHICore)
+
 if(REALRHI_BUILD_TESTS)
     enable_testing()
     add_executable(CoreTests tests/CoreTests.cpp)
     target_link_libraries(CoreTests PRIVATE RealRHICore)
     add_test(NAME CoreTests COMMAND CoreTests)
     set_tests_properties(CoreTests PROPERTIES LABELS "cpu;unit" TIMEOUT 30)
+
+    add_executable(RenderGraphPlanningTests tests/RenderGraphPlanningTests.cpp)
+    target_link_libraries(RenderGraphPlanningTests PRIVATE RealRHIGraph)
+    add_test(NAME RenderGraphPlanningTests COMMAND RenderGraphPlanningTests)
+    set_tests_properties(RenderGraphPlanningTests PROPERTIES LABELS "cpu;unit" TIMEOUT 30)
 endif()
 
-# Core tests need neither external dependencies nor a network connection.
+# Core and graph tests need neither external dependencies nor a network connection.
 if(NOT REALRHI_BUILD_VULKAN)
     return()
 endif()
@@ -48,8 +61,6 @@ FetchContent_Declare(volk
 FetchContent_MakeAvailable(volk)
 
 set(REALRHI_HEADERS
-    "src/RenderGraph/RenderGraph.h"
-    "src/RenderGraph/TransientResourcePool.h"
     "src/DeviceCapabilities.h"
     "src/VertexLayout.h"
     "src/Slang/SlangShaderCompiler.h"
@@ -106,8 +117,6 @@ set(REALRHI_HEADERS
 )
 
 set(REALRHI_SOURCES
-    "src/RenderGraph/RenderGraph.cpp"
-    "src/RenderGraph/TransientResourcePool.cpp"
     "src/Slang/SlangShaderCompiler.cpp"
     "src/Slang/SlangShaderReflection.cpp"
     "src/Vulkan/VulkanSampler.cpp"
@@ -142,7 +151,7 @@ target_include_directories(RealRHI SYSTEM PUBLIC
     "${VMA_INCLUDE_DIR}" "${SPIRV_INCLUDE_DIR}")
 
 target_link_libraries(RealRHI
-    RealRHICore
+    RealRHIGraph
     volk
     ${SDL_LIBRARY}
     ${Slang_LIBRARY}

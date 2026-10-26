@@ -81,11 +81,7 @@ namespace RealRHI {
 		return Result::Success;
 	}
 
-	void VulkanBuffer::WriteData(const void* data, uint64_t size, uint64_t offset) {
-		CopyToMappedMemory(data, size, offset);
-	}
-
-	Result VulkanBuffer::CopyToMappedMemory(const void* data, uint64_t size, uint64_t offset) {
+	Result VulkanBuffer::WriteData(const void* data, uint64_t size, uint64_t offset) {
 		if (data == nullptr || m_AllocInfo.pMappedData == nullptr || offset > m_Size || size > m_Size - offset) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,

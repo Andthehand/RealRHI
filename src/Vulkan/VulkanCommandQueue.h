@@ -25,18 +25,8 @@ namespace RealRHI {
 			VkQueue queue,
 			std::unique_ptr<VulkanCommandQueue>& outQueue);
 
-		SubmissionToken Submit(CommandList& cmd) override;
-		SubmissionToken Submit(std::span<CommandList*> commandLists) override;
+		using CommandQueue::Submit;
 		SubmissionToken Submit(const SubmitInfo& submitInfo) override;
-
-		// Internal submission function that allows for tracking of command lists for lifecycle management.
-		SubmissionToken SubmitTracked(std::span<const VkCommandBufferSubmitInfo> commandBuffers,
-			std::span<const VkSemaphoreSubmitInfo> waitSemaphores,
-			std::span<const VkSemaphoreSubmitInfo> signalSemaphores,
-			std::span<CommandList*> trackedLists = {},
-			VkFence fence = VK_NULL_HANDLE,
-			std::span<const SubmissionToken> waitFor = {},
-			Swapchain* retainedSwapchain = nullptr);
 
 		bool IsComplete(const SubmissionToken& token) override;
 		void Wait(const SubmissionToken& token) override;
@@ -55,6 +45,17 @@ namespace RealRHI {
 		};
 
 	private:
+		friend class VulkanDevice;
+		// Validate, retain, and submit the same lists. Legacy frame submission can
+		// bracket them with swapchain-owned layout transition buffers.
+		SubmissionToken SubmitTracked(std::span<CommandList* const> trackedLists,
+			std::span<const VkSemaphoreSubmitInfo> waitSemaphores,
+			std::span<const VkSemaphoreSubmitInfo> signalSemaphores,
+			std::span<const SubmissionToken> waitFor = {},
+			Swapchain* retainedSwapchain = nullptr,
+			VkCommandBuffer preTransition = VK_NULL_HANDLE,
+			VkCommandBuffer postTransition = VK_NULL_HANDLE);
+
 		VulkanCommandQueue(const VulkanDevice* device, uint32_t familyIndex, uint32_t queueIndex, VkQueue queue);
 		Result Init();
 		void FinalizeCompleted(uint64_t completedValue);

@@ -68,8 +68,6 @@ namespace RealRHI {
 		VulkanCommandQueue* GetCommandQueue(const QueueId& queueId) const;
 		std::recursive_mutex& GetStateTrackingMutex() const { return m_StateTrackingMutex; }
 
-		SlangShaderCompiler& GetShaderCompiler() const { return *m_ShaderCompiler; }
-
 		VmaAllocator GetAllocator() const { return m_Allocator; }
 		VulkanDescriptorManager* GetDescriptorManager() const { return m_DescriptorManager.get(); }
 

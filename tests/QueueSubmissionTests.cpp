@@ -93,6 +93,30 @@ int main() {
 	Expect(listA->Reset() == RealRHI::Result::Success, "Reset list A after combined completion");
 	Expect(listB->Reset() == RealRHI::Result::Success, "Reset list B after combined completion");
 
+	// Every submission form uses the same validation and rolls back retained refs.
+	{
+		Expect(listA->Begin() == RealRHI::Result::Success && listA->End() == RealRHI::Result::Success,
+			"Record submission validation list");
+		const auto references = listA->GetRefCount();
+		const std::array<RealRHI::CommandList*, 2> withNull{listA.Raw(), nullptr};
+		const std::array<RealRHI::CommandList*, 2> duplicates{listA.Raw(), listA.Raw()};
+		const std::array<RealRHI::CommandList*, 2> withInitial{listA.Raw(), listB.Raw()};
+		for (const auto& invalid : {withNull, duplicates, withInitial}) {
+			const auto errorsBefore = g_ProgrammerErrors;
+			Expect(!graphicsQueue->Submit(invalid).IsValid(), "Reject invalid const submission arrays");
+			Expect(g_ProgrammerErrors == errorsBefore + 1, "Submission validation reports one error");
+			Expect(listA->GetRefCount() == references &&
+					listA->GetState() == RealRHI::CommandListState::Executable,
+				"Rejected batch preserves list ownership and executable state");
+		}
+		const std::array<RealRHI::CommandList*, 1> valid{listA.Raw()};
+		auto* nativeQueue = static_cast<RealRHI::VulkanCommandQueue*>(graphicsQueue);
+		const auto token = nativeQueue->Submit(valid);
+		Expect(token.IsValid(), "Backend exposes inherited convenience submission for const arrays");
+		graphicsQueue->Wait(token);
+		Expect(listA->Reset() == RealRHI::Result::Success, "Reuse list after validation failures");
+	}
+
 	// Two independent execution slots, reused only after their GPU tokens complete.
 	{
 		RealRHI::FrameResources frames;

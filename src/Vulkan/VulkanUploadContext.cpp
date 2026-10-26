@@ -543,7 +543,7 @@ namespace RealRHI {
 			return result;
 		}
 
-		return out.buffer->CopyToMappedMemory(data, size, out.offset);
+		return out.buffer->WriteData(data, size, out.offset);
 	}
 
 	void VulkanUploadContext::ClearActiveBatch() {

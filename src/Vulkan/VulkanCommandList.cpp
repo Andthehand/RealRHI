@@ -88,7 +88,6 @@ namespace RealRHI {
 			}
 			m_State = CommandListState::Recording;
 			m_ComputePipelineBound = false;
-			m_GraphicsPipelineBound = false;
 			m_GraphicsPipeline = nullptr;
 			m_ActiveVertexBindings.clear();
 			m_Rendering = false;
@@ -175,6 +174,8 @@ namespace RealRHI {
 		std::vector<Ref<RefCounted>> released;
 		released.swap(m_ReferencedResources);
 		m_ComputePipelineBound = false;
+		m_GraphicsPipeline = nullptr;
+		m_ActiveVertexBindings.clear();
 		m_RecordedLayouts.clear();
 		m_ResourceOperations.clear();
 		m_ShaderViews.clear();
@@ -219,14 +220,14 @@ namespace RealRHI {
 		return true;
 	}
 
-	bool VulkanCommandList::ValidateGraphicsAttachments(const char* operation) const {
+	bool VulkanCommandList::ValidateGraphicsState(const char* operation) const {
 		auto reject = [&](const char* reason) {
 			m_Device->SendDebugMessage(
 				DebugSeverity::Error, DebugMessageType::General, (std::string(operation) + ": " + reason).c_str());
 			return false;
 		};
-		if (m_GraphicsPipeline == nullptr) {
-			return reject("Bind a graphics pipeline before drawing.");
+		if (GetState() != CommandListState::Recording || !m_Rendering || m_GraphicsPipeline == nullptr) {
+			return reject("Requires an active rendering scope and a bound graphics pipeline.");
 		}
 
 		const auto& formats = m_GraphicsPipeline->GetRenderTargetFormats();
@@ -584,7 +585,6 @@ namespace RealRHI {
 			m_ComputePipelineBound = true;
 		}
 		else {
-			m_GraphicsPipelineBound = true;
 			m_GraphicsPipeline = vulkanPipeline;
 			m_ActiveVertexBindings = vulkanPipeline->GetVertexBindings();
 		}
@@ -715,13 +715,7 @@ namespace RealRHI {
 		uint32_t instanceCount,
 		uint32_t firstVertex,
 		uint32_t firstInstance) {
-		if (GetState() != CommandListState::Recording || !m_Rendering || !m_GraphicsPipelineBound) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"Draw: Requires an active rendering scope and a bound graphics pipeline.");
-			return;
-		}
-		if (!ValidateGraphicsAttachments("Draw")) {
+		if (!ValidateGraphicsState("Draw")) {
 			return;
 		}
 
@@ -737,13 +731,7 @@ namespace RealRHI {
 		uint32_t firstIndex,
 		int32_t vertexOffset,
 		uint32_t firstInstance) {
-		if (GetState() != CommandListState::Recording || !m_Rendering || !m_GraphicsPipelineBound) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"DrawIndexed: Requires an active rendering scope and a bound graphics pipeline.");
-			return;
-		}
-		if (!ValidateGraphicsAttachments("DrawIndexed")) {
+		if (!ValidateGraphicsState("DrawIndexed")) {
 			return;
 		}
 
@@ -820,13 +808,7 @@ namespace RealRHI {
 
 	void VulkanCommandList::DrawIndirect(Buffer* arguments, uint64_t offset, uint32_t drawCount, uint32_t stride) {
 		static_assert(sizeof(DrawIndirectArguments) == sizeof(VkDrawIndirectCommand));
-		if (GetState() != CommandListState::Recording || !m_Rendering || !m_GraphicsPipelineBound) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"DrawIndirect: Requires an active rendering scope and a bound graphics pipeline.");
-			return;
-		}
-		if (!ValidateGraphicsAttachments("DrawIndirect")) {
+		if (!ValidateGraphicsState("DrawIndirect")) {
 			return;
 		}
 
@@ -848,13 +830,7 @@ namespace RealRHI {
 		uint32_t drawCount,
 		uint32_t stride) {
 		static_assert(sizeof(DrawIndexedIndirectArguments) == sizeof(VkDrawIndexedIndirectCommand));
-		if (GetState() != CommandListState::Recording || !m_Rendering || !m_GraphicsPipelineBound) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"DrawIndexedIndirect: Requires an active rendering scope and a bound graphics pipeline.");
-			return;
-		}
-		if (!ValidateGraphicsAttachments("DrawIndexedIndirect")) {
+		if (!ValidateGraphicsState("DrawIndexedIndirect")) {
 			return;
 		}
 

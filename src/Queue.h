@@ -44,7 +44,7 @@ namespace RealRHI {
 	};
 
 	struct SubmitInfo {
-		std::span<CommandList*> commandLists{};
+		std::span<CommandList* const> commandLists{};
 		// Acquiring ownership from another family requires its release submission token
 		// (or a later token on that queue). A CPU Wait does not replace this dependency.
 		std::span<const SubmissionToken> waitFor{};
@@ -56,8 +56,14 @@ namespace RealRHI {
 	public:
 		virtual ~CommandQueue() = default;
 
-		virtual SubmissionToken Submit(CommandList& cmd) = 0;
-		virtual SubmissionToken Submit(std::span<CommandList*> commandLists) = 0;
+		// Backends implement SubmitInfo once; convenience forms share that path.
+		virtual SubmissionToken Submit(CommandList& cmd) {
+			CommandList* commandLists[] = {&cmd};
+			return Submit(SubmitInfo{.commandLists = commandLists});
+		}
+		virtual SubmissionToken Submit(std::span<CommandList* const> commandLists) {
+			return Submit(SubmitInfo{.commandLists = commandLists});
+		}
 		virtual SubmissionToken Submit(const SubmitInfo& submitInfo) = 0;
 		virtual QueueId GetQueueId() const = 0;
 		// A completed token also retires its command lists so they can be reset.

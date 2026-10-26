@@ -97,20 +97,24 @@ int main() {
 		Expect(device->CreateBuffer(bufferDesc, buffer) == Result::Success, "Create mapped buffer");
 		Expect(buffer->GetSize() == initial.size(), "GetSize returns logical size rather than allocation padding");
 		const uint8_t value = 73;
-		buffer->WriteData(&value, 1, 63);
+		Expect(buffer->WriteData(&value, 1, 63) == Result::Success, "Valid mapped write reports success");
+		Expect(buffer->WriteData(&value, 0, 64) == Result::Success, "Empty write at the end is valid");
 		ExpectRejected(
 			[&] {
-				buffer->WriteData(&value, 1, 64);
+				Expect(buffer->WriteData(&value, 1, 64) == Result::InvalidParameter,
+					"Out-of-bounds write reports failure to its caller");
 			},
 			"Reject write beyond logical end");
 		ExpectRejected(
 			[&] {
-				buffer->WriteData(&value, UINT64_MAX, 1);
+				Expect(buffer->WriteData(&value, UINT64_MAX, 1) == Result::InvalidParameter,
+					"Overflowing write reports failure to its caller");
 			},
 			"Reject overflowing write range");
 		ExpectRejected(
 			[&] {
-				buffer->WriteData(nullptr, 1);
+				Expect(buffer->WriteData(nullptr, 1) == Result::InvalidParameter,
+					"Null write reports failure to its caller");
 			},
 			"Reject null write data");
 		std::array<uint8_t, 64> actual{};
@@ -127,7 +131,8 @@ int main() {
 		// GPU-only buffers may reside in host-visible heaps, but are never mapped by this API.
 		ExpectRejected(
 			[&] {
-				gpuOnly->WriteData(&value, 1);
+				Expect(gpuOnly->WriteData(&value, 1) == Result::InvalidParameter,
+					"Unmapped write reports failure to its caller");
 			},
 			"Reject write to an unmapped buffer");
 		bufferDesc.initialData = initial.data();

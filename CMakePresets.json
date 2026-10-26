@@ -19,7 +19,7 @@
     {
       "name": "cpu",
       "inherits": "base",
-      "displayName": "Core tests without the Vulkan SDK",
+      "displayName": "Core and render graph tests without the Vulkan SDK",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "REALRHI_BUILD_VULKAN": false,

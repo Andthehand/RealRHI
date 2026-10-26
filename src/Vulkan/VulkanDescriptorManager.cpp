@@ -90,8 +90,12 @@ namespace RealRHI {
 			return UINT32_MAX;
 		}
 
-		m_DescriptorHeaps->GetResourceHeap().buffer->WriteData(
-			descriptorMemory.data(), m_BufferDescriptorSize, bufferDescriptorIndex * m_BufferDescriptorSize);
+		if (m_DescriptorHeaps->GetResourceHeap().buffer->WriteData(
+				descriptorMemory.data(), m_BufferDescriptorSize, bufferDescriptorIndex * m_BufferDescriptorSize) !=
+			Result::Success) {
+			m_FreeBufferDescriptors.push_back(bufferDescriptorIndex);
+			return UINT32_MAX;
+		}
 		m_AllocatedBufferDescriptors.insert(bufferDescriptorIndex);
 		UpdateHighWaterMarks();
 		return bufferDescriptorIndex;
@@ -162,8 +166,12 @@ namespace RealRHI {
 			return UINT32_MAX;
 		}
 
-		m_DescriptorHeaps->GetResourceHeap().buffer->WriteData(
-			descriptorMemory.data(), m_ImageDescriptorSize, imageDescriptorIndex * m_ImageDescriptorSize);
+		if (m_DescriptorHeaps->GetResourceHeap().buffer->WriteData(
+				descriptorMemory.data(), m_ImageDescriptorSize, imageDescriptorIndex * m_ImageDescriptorSize) !=
+			Result::Success) {
+			m_FreeImageDescriptors.push_back(imageDescriptorIndex);
+			return UINT32_MAX;
+		}
 		m_AllocatedImageDescriptors.insert(imageDescriptorIndex);
 		UpdateHighWaterMarks();
 		return imageDescriptorIndex;
@@ -220,8 +228,12 @@ namespace RealRHI {
 			return UINT32_MAX;
 		}
 
-		m_DescriptorHeaps->GetSamplerHeap().buffer->WriteData(
-			descriptorMemory.data(), m_SamplerDescriptorSize, samplerDescriptorIndex * m_SamplerDescriptorSize);
+		if (m_DescriptorHeaps->GetSamplerHeap().buffer->WriteData(
+				descriptorMemory.data(), m_SamplerDescriptorSize, samplerDescriptorIndex * m_SamplerDescriptorSize) !=
+			Result::Success) {
+			m_FreeSamplerDescriptors.push_back(samplerDescriptorIndex);
+			return UINT32_MAX;
+		}
 		m_AllocatedSamplerDescriptors.insert(samplerDescriptorIndex);
 		UpdateHighWaterMarks();
 		return samplerDescriptorIndex;

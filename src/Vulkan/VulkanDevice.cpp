@@ -672,7 +672,6 @@ namespace RealRHI {
 		}
 
 		auto* vulkanSwapchain = static_cast<VulkanSwapchain*>(swapchain);
-		auto* vulkanCommandList = static_cast<VulkanCommandList*>(commandList);
 		if (!vulkanSwapchain->IsFrameValid(frame)) {
 			SendDebugMessage(
 				DebugSeverity::Error, DebugMessageType::General, "Submit: Frame must match the swapchain.");
@@ -687,21 +686,6 @@ namespace RealRHI {
 
 		VkCommandBuffer preTransition = vulkanSwapchain->RecordPreTransitionCmd(frame.frameIndex, frame.imageIndex);
 		VkCommandBuffer postTransition = vulkanSwapchain->RecordPostTransitionCmd(frame.frameIndex, frame.imageIndex);
-
-		std::array<VkCommandBufferSubmitInfo, 3> commandBufferInfos = {
-			VkCommandBufferSubmitInfo{
-				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-				.commandBuffer = preTransition,
-			},
-			VkCommandBufferSubmitInfo{
-				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-				.commandBuffer = vulkanCommandList->GetCommandBuffer(),
-			},
-			VkCommandBufferSubmitInfo{
-				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-				.commandBuffer = postTransition,
-			},
-		};
 
 		VkSemaphoreSubmitInfo waitInfo{
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
@@ -720,13 +704,13 @@ namespace RealRHI {
 		std::array<CommandList*, 1> tracked = {commandList};
 
 		const SubmissionToken token =
-			m_GraphicsCommandQueue->SubmitTracked({commandBufferInfos.data(), commandBufferInfos.size()},
+			m_GraphicsCommandQueue->SubmitTracked(tracked,
 				{&waitInfo, 1},
 				{&signalInfo, 1},
-				tracked,
-				VK_NULL_HANDLE,
 				waitFor,
-				swapchain);
+				swapchain,
+				preTransition,
+				postTransition);
 		vulkanSwapchain->FinishFrameSubmission(frame.frameIndex, token);
 		if (!token.IsValid()) {
 			return Result::Failed;

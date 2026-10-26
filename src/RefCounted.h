@@ -81,21 +81,21 @@ namespace RealRHI {
 			if (this == &other) {
 				return *this;
 			}
+			// The source may be a member of the object released below.
+			T* newInstance = std::exchange(other.m_Instance, nullptr);
 			DecRef();
 
-			m_Instance = other.m_Instance;
-			other.m_Instance = nullptr;
+			m_Instance = newInstance;
 			return *this;
 		}
 
 		template <typename T2>
 			requires(std::is_convertible_v<T2*, T*>)
 		Ref& operator=(Ref<T2>&& other) noexcept {
-			T* newInstance = other.m_Instance;
+			T* newInstance = std::exchange(other.m_Instance, nullptr);
 			DecRef();
 
 			m_Instance = newInstance;
-			other.m_Instance = nullptr;
 			return *this;
 		}
 

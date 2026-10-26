@@ -67,61 +67,13 @@ namespace RealRHI {
 		m_PendingSubmissions.clear();
 	}
 
-	SubmissionToken VulkanCommandQueue::Submit(CommandList& cmd) {
-		CommandList* commandLists[] = {&cmd};
-		return Submit(std::span<CommandList*>(commandLists, 1));
-	}
-
-	SubmissionToken VulkanCommandQueue::Submit(std::span<CommandList*> commandLists) {
-		return Submit(SubmitInfo{.commandLists = commandLists, .waitFor = {}});
-	}
-
 	SubmissionToken VulkanCommandQueue::Submit(const SubmitInfo& submitInfo) {
 		if (submitInfo.commandLists.empty()) {
 			return {};
 		}
 
-		std::vector<VkCommandBufferSubmitInfo> commandBufferInfos;
-		commandBufferInfos.reserve(submitInfo.commandLists.size());
-
-		std::vector<CommandList*> trackedLists;
-		trackedLists.reserve(submitInfo.commandLists.size());
-
-		std::unordered_set<CommandList*> duplicateListTracker;
-		duplicateListTracker.reserve(submitInfo.commandLists.size());
-
-		for (CommandList* commandList : submitInfo.commandLists) {
-			auto* vkCommandList = static_cast<VulkanCommandList*>(commandList);
-			if (vkCommandList == nullptr || vkCommandList->GetQueueId() != GetQueueId()) {
-				m_Device->SendDebugMessage(DebugSeverity::Error,
-					DebugMessageType::General,
-					"Command list was created for a different queue family or index.");
-				return {};
-			}
-
-			if (commandList->GetState() != CommandListState::Executable) {
-				m_Device->SendDebugMessage(DebugSeverity::Error,
-					DebugMessageType::General,
-					"Cannot submit a command list that is not in the Executable state.");
-				return {};
-			}
-
-			if (!duplicateListTracker.insert(commandList).second) {
-				m_Device->SendDebugMessage(DebugSeverity::Error,
-					DebugMessageType::General,
-					"Duplicate command lists are not allowed in a single submission.");
-				return {};
-			}
-
-			trackedLists.push_back(commandList);
-			commandBufferInfos.push_back({
-				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-				.commandBuffer = vkCommandList->GetCommandBuffer(),
-			});
-		}
-
 		if (!submitInfo.swapchain) {
-			return SubmitTracked(commandBufferInfos, {}, {}, trackedLists, VK_NULL_HANDLE, submitInfo.waitFor);
+			return SubmitTracked(submitInfo.commandLists, {}, {}, submitInfo.waitFor);
 		}
 		const auto& request = *submitInfo.swapchain;
 		auto* swapchain = static_cast<VulkanSwapchain*>(request.swapchain);
@@ -147,18 +99,18 @@ namespace RealRHI {
 					.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT});
 		}
 		const auto token = SubmitTracked(
-			commandBufferInfos, waits, signals, trackedLists, VK_NULL_HANDLE, submitInfo.waitFor, swapchain);
+			submitInfo.commandLists, waits, signals, submitInfo.waitFor, swapchain);
 		swapchain->FinishSubmission(request, token);
 		return token;
 	}
 
-	SubmissionToken VulkanCommandQueue::SubmitTracked(std::span<const VkCommandBufferSubmitInfo> commandBuffers,
+	SubmissionToken VulkanCommandQueue::SubmitTracked(std::span<CommandList* const> trackedLists,
 		std::span<const VkSemaphoreSubmitInfo> waitSemaphores,
 		std::span<const VkSemaphoreSubmitInfo> signalSemaphores,
-		std::span<CommandList*> trackedLists,
-		VkFence fence,
 		std::span<const SubmissionToken> waitFor,
-		Swapchain* retainedSwapchain) {
+		Swapchain* retainedSwapchain,
+		VkCommandBuffer preTransition,
+		VkCommandBuffer postTransition) {
 		const VulkanCpuTimer timer(m_Device);
 
 		std::vector<VkSemaphoreSubmitInfo> waitSemaphoreInfos(waitSemaphores.begin(), waitSemaphores.end());
@@ -190,6 +142,17 @@ namespace RealRHI {
 
 		std::vector<Ref<CommandList>> retainedLists;
 		retainedLists.reserve(trackedLists.size());
+		std::vector<VkCommandBufferSubmitInfo> commandBuffers;
+		commandBuffers.reserve(trackedLists.size() + 2);
+		auto appendCommandBuffer = [&](VkCommandBuffer buffer) {
+			commandBuffers.push_back({
+				.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
+				.commandBuffer = buffer,
+			});
+		};
+		if (preTransition != VK_NULL_HANDLE) {
+			appendCommandBuffer(preTransition);
+		}
 
 		std::vector<VkSemaphoreSubmitInfo> signalInfos(signalSemaphores.begin(), signalSemaphores.end());
 
@@ -219,6 +182,10 @@ namespace RealRHI {
 			}
 
 			retainedLists.emplace_back(commandList);
+			appendCommandBuffer(vkCommandList->GetCommandBuffer());
+		}
+		if (postTransition != VK_NULL_HANDLE) {
+			appendCommandBuffer(postTransition);
 		}
 
 		std::unique_lock submitLock(m_SubmissionMutex);
@@ -257,11 +224,10 @@ namespace RealRHI {
 			}
 		}
 
-		if (vkQueueSubmit2(m_Queue, 1, &submitInfo2, fence) != VK_SUCCESS) {
+		if (vkQueueSubmit2(m_Queue, 1, &submitInfo2, VK_NULL_HANDLE) != VK_SUCCESS) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
 				"Failed to submit Vulkan command buffers to the queue.");
-			// Caller owns recovery of a failed frame fence.
 			return {};
 		}
 

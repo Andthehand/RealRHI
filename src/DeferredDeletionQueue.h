@@ -1,8 +1,10 @@
 #pragma once
 #include "Queue.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <functional>
+#include <iterator>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -31,27 +33,27 @@ namespace RealRHI {
 		}
 
 		void Process(const CompletionQuery& isComplete) {
-			std::vector<std::function<void()>> ready;
+			std::vector<Entry> pending;
 			{
 				std::scoped_lock lock(m_Mutex);
-				auto entry = m_Entries.begin();
-				while (entry != m_Entries.end()) {
-					bool completed = true;
-					for (const SubmissionToken& token : entry->dependencies) {
-						if (token.IsValid() && !isComplete(token)) {
-							completed = false;
-							break;
-						}
-					}
+				pending.swap(m_Entries);
+			}
 
-					if (completed) {
-						ready.push_back(std::move(entry->destroy));
-						entry = m_Entries.erase(entry);
-					}
-					else {
-						++entry;
-					}
+			// Completion queries can retire resources and enqueue more cleanup too.
+			// Process a snapshot, with all external callbacks outside the queue lock.
+			std::vector<std::function<void()>> ready;
+			std::erase_if(pending, [&](Entry& entry) {
+				const bool completed = std::all_of(entry.dependencies.begin(), entry.dependencies.end(),
+					[&](const SubmissionToken& token) { return !token.IsValid() || isComplete(token); });
+				if (completed) {
+					ready.push_back(std::move(entry.destroy));
 				}
+				return completed;
+			});
+			if (!pending.empty()) {
+				std::scoped_lock lock(m_Mutex);
+				m_Entries.insert(m_Entries.end(),
+					std::make_move_iterator(pending.begin()), std::make_move_iterator(pending.end()));
 			}
 
 			// Callbacks may destroy objects that acquire other locks.
