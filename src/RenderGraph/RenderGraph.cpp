@@ -200,6 +200,7 @@ namespace RealRHI {
 		m_Compiled = false;
 		m_MultiQueue = false;
 		m_InitialReleases.clear();
+		m_Batches.clear();
 		m_UsedResources.clear();
 		m_Order.clear();
 		m_Prerequisites.clear();
@@ -785,6 +786,7 @@ namespace RealRHI {
 			const auto index = m_Order[position];
 			diagnostics.passes[index].executionIndex = position;
 			diagnostics.passes[index].nativeQueue = m_Plan[position].nativeQueue;
+			diagnostics.passes[index].batchIndex = m_Plan[position].batchIndex;
 			for (const auto& use : m_Passes[index].desc.resources) {
 				auto& resource = diagnostics.resources[use.resource.index];
 				if (resource.firstUse == UINT32_MAX) {
@@ -800,6 +802,7 @@ namespace RealRHI {
 			}
 			diagnostics.initialBarriers.push_back(std::move(info));
 		}
+		diagnostics.batches = m_Batches;
 		return diagnostics;
 	}
 
@@ -814,6 +817,22 @@ namespace RealRHI {
 			text << " (multi-queue)";
 		}
 		text << '\n';
+		for (size_t i = 0; i < diagnostics.batches.size(); ++i) {
+			const auto& batch = diagnostics.batches[i];
+			text << "Batch " << i << " on " << QueueName(batch.queue) << " native queue "
+				 << batch.nativeQueue.familyIndex << ":" << batch.nativeQueue.queueIndex << " steps:";
+			for (auto step : batch.steps) {
+				text << " " << step;
+			}
+			if (batch.initialRelease) {
+				text << " initial barriers " << *batch.initialRelease;
+			}
+			text << " waits:";
+			for (auto dependency : batch.prerequisites) {
+				text << " " << dependency;
+			}
+			text << '\n';
+		}
 		for (const auto& release : diagnostics.initialBarriers) {
 			text << "Initial barriers on " << QueueName(release.queue) << " consumers:";
 			for (auto consumer : release.consumers) {
@@ -831,7 +850,11 @@ namespace RealRHI {
 			if (pass.nativeQueue) {
 				text << " native queue " << pass.nativeQueue->familyIndex << ":" << pass.nativeQueue->queueIndex;
 			}
-			text << " [step " << pass.executionIndex << "]\n  prerequisites:";
+			text << " [step " << pass.executionIndex << "]";
+			if (pass.batchIndex != UINT32_MAX) {
+				text << " [batch " << pass.batchIndex << "]";
+			}
+			text << "\n  prerequisites:";
 			for (auto prerequisite : pass.prerequisites) {
 				text << " p" << prerequisite.index;
 			}
@@ -908,7 +931,11 @@ namespace RealRHI {
 				text << "\\nculled\",style=dashed];\n";
 			}
 			else {
-				text << "\\nstep " << pass.executionIndex << "\"];\n";
+				text << "\\nstep " << pass.executionIndex;
+				if (pass.batchIndex != UINT32_MAX) {
+					text << "\\nbatch " << pass.batchIndex;
+				}
+				text << "\"];\n";
 			}
 			for (auto dependency : pass.prerequisites) {
 				text << "  p" << dependency.index << " -> p" << pass.pass.index << ";\n";
@@ -1147,6 +1174,79 @@ namespace RealRHI {
 		}
 	}
 
+	void RenderGraph::BuildBatches(Device& device) {
+		m_Batches.clear();
+		std::vector<uint32_t> passBatches(m_Passes.size(), UINT32_MAX);
+		std::vector<std::vector<uint32_t>> consumers(m_Passes.size());
+		std::vector<std::vector<uint32_t>> initialWaits(m_Passes.size());
+		for (uint32_t i = 0; i < m_InitialReleases.size(); ++i) {
+			const auto& release = m_InitialReleases[i];
+			m_Batches.push_back(
+				{.queue = release.queue,
+					.nativeQueue = device.GetCommandQueue(release.queue)->GetQueueId(),
+					.initialRelease = i});
+			for (auto consumer : release.consumers) {
+				initialWaits[consumer].push_back(i);
+			}
+		}
+		for (uint32_t index : m_Order) {
+			const auto queue = device.GetCommandQueue(m_Passes[index].desc.queue)->GetQueueId();
+			for (auto prerequisite : m_Prerequisites[index]) {
+				if (device.GetCommandQueue(m_Passes[prerequisite].desc.queue)->GetQueueId() != queue) {
+					consumers[prerequisite].push_back(index);
+				}
+			}
+		}
+
+		for (uint32_t position = 0; position < m_Order.size(); ++position) {
+			const auto index = m_Order[position];
+			auto& step = m_Plan[position];
+			const auto queue = *step.nativeQueue;
+			std::vector<uint32_t> dependencies = initialWaits[index];
+			for (auto prerequisite : m_Prerequisites[index]) {
+				const auto batch = passBatches[prerequisite];
+				if (m_Batches[batch].nativeQueue != queue) {
+					dependencies.push_back(batch);
+				}
+			}
+			std::sort(dependencies.begin(), dependencies.end());
+			dependencies.erase(std::unique(dependencies.begin(), dependencies.end()), dependencies.end());
+
+			bool merge = false;
+			if (!m_Batches.empty()) {
+				const auto& previous = m_Batches.back();
+				if (!previous.steps.empty() && previous.nativeQueue == queue) {
+					// Do not move a later pass's new wait ahead of earlier independent work.
+					merge = std::includes(previous.prerequisites.begin(),
+						previous.prerequisites.end(),
+						dependencies.begin(),
+						dependencies.end());
+					for (auto earlier : previous.steps) {
+						for (auto consumer : consumers[m_Order[earlier]]) {
+							const auto& prerequisites = m_Prerequisites[consumer];
+							if (std::find(prerequisites.begin(), prerequisites.end(), index) == prerequisites.end()) {
+								// Preserve an early signal unless its consumer already needs this pass too.
+								merge = false;
+								break;
+							}
+						}
+						if (!merge) {
+							break;
+						}
+					}
+				}
+			}
+			if (!merge) {
+				m_Batches.push_back(
+					{.queue = step.queue, .nativeQueue = queue, .prerequisites = std::move(dependencies)});
+			}
+			const auto batch = static_cast<uint32_t>(m_Batches.size() - 1);
+			m_Batches.back().steps.push_back(position);
+			passBatches[index] = batch;
+			step.batchIndex = batch;
+		}
+	}
+
 	Result RenderGraph::Submit(Device& device,
 		RenderGraphSubmission& outSubmission,
 		TransientResourcePool* pool,
@@ -1188,68 +1288,46 @@ namespace RealRHI {
 		BuildQueuePlan(device, initialReleases);
 		m_MultiQueue = true;
 
-		struct Batch {
-			QueueType queue;
-			Ref<CommandList> commands;
-			std::vector<size_t> dependencies;
-		};
-		std::vector<Batch> batches;
-		for (const auto& release : initialReleases) {
-			batches.push_back({.queue = release.queue});
-		}
-		std::vector<size_t> passBatches(m_Passes.size());
-		for (uint32_t index : m_Order) {
-			passBatches[index] = batches.size();
-			batches.push_back({.queue = m_Passes[index].desc.queue});
-		}
-		for (uint32_t index : m_Order) {
-			for (auto dependency : m_Prerequisites[index]) {
-				batches[passBatches[index]].dependencies.push_back(passBatches[dependency]);
-			}
-		}
-		for (size_t i = 0; i < initialReleases.size(); ++i) {
-			for (auto consumer : initialReleases[i].consumers) {
-				batches[passBatches[consumer]].dependencies.push_back(i);
-			}
-		}
+		BuildBatches(device);
+		std::vector<Ref<CommandList>> commands(m_Batches.size());
 
 		// Create and begin every list before invoking callbacks, then finish all recording
 		// before submitting any work. Queue submission retains successful lists in flight.
-		for (auto& batch : batches) {
+		for (size_t i = 0; i < m_Batches.size(); ++i) {
 			Ref<CommandAllocator> allocator;
-			auto result = device.CreateCommandAllocator(batch.queue, allocator);
+			auto result = device.CreateCommandAllocator(m_Batches[i].queue, allocator);
 			if (result != Result::Success) {
 				return result;
 			}
-			result = device.CreateCommandList(allocator.Raw(), batch.commands);
+			result = device.CreateCommandList(allocator.Raw(), commands[i]);
 			if (result != Result::Success) {
 				return result;
 			}
-			result = batch.commands->Begin();
+			result = commands[i]->Begin();
 			if (result != Result::Success) {
 				return result;
 			}
 		}
-		for (size_t i = 0; i < batches.size(); ++i) {
-			auto& commands = *batches[i].commands;
-			if (i < initialReleases.size()) {
-				commands.Barrier(initialReleases[i].barriers);
+		for (size_t i = 0; i < m_Batches.size(); ++i) {
+			const auto& batch = m_Batches[i];
+			if (batch.initialRelease) {
+				commands[i]->Barrier(initialReleases[*batch.initialRelease].barriers);
 			}
-			else {
-				const size_t position = i - initialReleases.size();
-				RecordPass(commands, position);
+			for (auto position : batch.steps) {
+				RecordPass(*commands[i], position);
 			}
-			const auto ended = commands.End();
+			const auto ended = commands[i]->End();
 			if (ended != Result::Success) {
 				return ended;
 			}
 		}
-		for (auto& batch : batches) {
+		for (size_t i = 0; i < m_Batches.size(); ++i) {
+			const auto& batch = m_Batches[i];
 			std::vector<SubmissionToken> waits(waitFor.begin(), waitFor.end());
-			for (size_t dependency : batch.dependencies) {
+			for (auto dependency : batch.prerequisites) {
 				waits.push_back(outSubmission.completions[dependency]);
 			}
-			std::array<CommandList*, 1> lists{batch.commands.Raw()};
+			std::array<CommandList*, 1> lists{commands[i].Raw()};
 			const auto token = device.GetCommandQueue(batch.queue)->Submit({.commandLists = lists, .waitFor = waits});
 			if (!token.IsValid()) {
 				Report("Submit failed; returned completion tokens cover the work already queued.");

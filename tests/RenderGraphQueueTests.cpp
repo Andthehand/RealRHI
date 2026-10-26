@@ -176,7 +176,9 @@ namespace {
 		const std::array<SubmissionToken, 1> waits{uploaded};
 		Expect(graph.Submit(device, completion, nullptr, waits) == Result::Success,
 			"Schedule imports, compute, and read/read ownership handoffs");
-		Expect(completion.completions.size() >= 4, "Graph returns completion tokens for all pass submissions");
+		Expect(
+			!completion.completions.empty() && completion.completions.size() == graph.GetDiagnostics().batches.size(),
+			"Graph returns one completion token per submitted batch");
 		const auto diagnostics = graph.GetDiagnostics();
 		Expect(diagnostics.compiled && diagnostics.multiQueue && diagnostics.passes.size() == 4 &&
 				diagnostics.passes[0].nativeQueue == device.GetCommandQueue(QueueType::Compute)->GetQueueId(),
@@ -266,21 +268,44 @@ namespace {
 		RenderGraphSubmission completion;
 		Expect(graph.Submit(device, completion) == Result::Success && recorded == 3,
 			"Record and submit independent queues");
-		Expect(s_WaitCounts.size() == 3 && s_WaitCounts[0] == 0 && s_WaitCounts[1] == 0,
-			"Independent queue submissions do not wait on each other");
-		uint32_t expectedWaits = 2;
-		if (device.GetCommandQueue(QueueType::Compute)->GetQueueId() ==
-			device.GetCommandQueue(QueueType::Transfer)->GetQueueId()) {
-			expectedWaits = 1;
+		const auto compute = device.GetCommandQueue(QueueType::Compute)->GetQueueId();
+		const auto transfer = device.GetCommandQueue(QueueType::Transfer)->GetQueueId();
+		const auto graphics = device.GetGraphicsCommandQueue()->GetQueueId();
+		const bool allAliased = compute == transfer && compute == graphics;
+		if (allAliased) {
+			Expect(s_WaitCounts == std::vector<uint32_t>{0} && completion.completions.size() == 1,
+				"Aliasing roles batch on one native queue without self-waits");
 		}
-		Expect(s_WaitCounts[2] == expectedWaits,
-			"Join waits on all distinct producer timelines, including aliasing queue roles");
+		else {
+			size_t expectedBatches = 3;
+			if (compute == transfer) {
+				expectedBatches = 2;
+			}
+			Expect(s_WaitCounts.size() == expectedBatches && s_WaitCounts[0] == 0,
+				"Independent queues do not gain waits through batching");
+			if (expectedBatches == 3) {
+				Expect(s_WaitCounts[1] == 0, "The second independent native queue also has no wait");
+			}
+			uint32_t expectedWaits = 0;
+			if (compute != graphics) {
+				++expectedWaits;
+			}
+			if (transfer != graphics && transfer != compute) {
+				++expectedWaits;
+			}
+			Expect(s_WaitCounts.back() == expectedWaits,
+				"Join waits only on foreign producer timelines; its own queue is already ordered");
+		}
 		completion.Wait(device);
 		s_SubmitCalls = 0;
 		s_WaitCounts.clear();
 		s_FailCall = 2;
+		if (allAliased) {
+			s_FailCall = 1;
+		}
+		const auto prefixCount = s_FailCall - 1;
 		s_ExpectedErrors += 2;
-		Expect(graph.Submit(device, completion) == Result::Failed && completion.completions.size() == 1,
+		Expect(graph.Submit(device, completion) == Result::Failed && completion.completions.size() == prefixCount,
 			"A driver submission failure preserves tokens for the successfully queued prefix");
 		vkQueueSubmit2 = s_Submit;
 		s_FailCall = 0;
@@ -288,6 +313,113 @@ namespace {
 		Expect(completion.IsComplete(device), "The submitted prefix can be waited after failure");
 		Expect(graph.Submit(device, completion) == Result::Success,
 			"A graph can be submitted again after a recoverable submission failure");
+		completion.Wait(device);
+	}
+
+	void TestBatching(Device& device) {
+		RenderGraph graph(Capture);
+		graph.SetOptions({.enableGpuTimings = true});
+		std::vector<CommandList*> recordings;
+		bool timestamps = false;
+		uint32_t callbacks = 0;
+		for (uint32_t i = 0; i < 5; ++i) {
+			graph.AddPass({.name = "Batched pass " + std::to_string(i)}, [&](CommandList& list) {
+				recordings.push_back(&list);
+				timestamps = list.SupportsTimestamps();
+				++callbacks;
+				list.WriteTimestamp("Callback marker");
+			});
+		}
+		s_Submit = vkQueueSubmit2;
+		vkQueueSubmit2 = CaptureSubmit;
+		s_SubmitCalls = 0;
+		s_FailCall = 0;
+		s_WaitCounts.clear();
+		RenderGraphSubmission completion;
+		Expect(graph.Submit(device, completion) == Result::Success && callbacks == 5 && s_SubmitCalls == 1 &&
+				completion.completions.size() == 1,
+			"Five consecutive same-queue passes use one native submission");
+		vkQueueSubmit2 = s_Submit;
+		for (auto* recording : recordings) {
+			Expect(recording == recordings[0], "Batched callbacks share a command list");
+		}
+		const auto diagnostics = graph.GetDiagnostics();
+		Expect(diagnostics.batches.size() == 1 && diagnostics.batches[0].steps.size() == 5 &&
+				diagnostics.batches[0].prerequisites.empty() &&
+				graph.GetDebugDescription().find("Batch 0") != std::string::npos &&
+				graph.GetDependencyGraphDot().find("batch 0") != std::string::npos,
+			"Reports expose the native submission batch and its passes");
+		graph.Reset();
+		completion.Wait(device);
+		if (timestamps) {
+			for (uint32_t i = 0; i < 5; ++i) {
+				bool found = false;
+				for (const auto& timing : device.GetStatistics().gpuTimings) {
+					if (timing.name == "RenderGraph: Batched pass " + std::to_string(i)) {
+						found = timing.timing.sampleCount == 1;
+					}
+				}
+				Expect(found, "Batching preserves separate per-pass timings despite callback markers");
+			}
+		}
+
+		// Use an actually distinct native queue; role aliases are exercised above and
+		// in the join test. Hardware with one queue cannot exercise foreign waits.
+		const auto graphics = device.GetGraphicsCommandQueue()->GetQueueId();
+		std::optional<QueueType> other;
+		for (auto role : {QueueType::Compute, QueueType::Transfer}) {
+			if (device.GetCommandQueue(role)->GetQueueId() != graphics) {
+				other = role;
+				break;
+			}
+		}
+		if (!other) {
+			return;
+		}
+
+		graph.Reset();
+		const auto producer = graph.AddPass({.name = "Foreign producer", .queue = *other}, [](CommandList&) { });
+		graph.AddPass({.name = "Earlier independent graphics"}, [](CommandList&) { });
+		graph.AddPass({.name = "Graphics needs foreign work", .dependsOn = {producer}}, [](CommandList&) { });
+		Expect(graph.Submit(device, completion) == Result::Success, "Submit a later foreign wait");
+		const auto waiting = graph.GetDiagnostics();
+		Expect(waiting.batches.size() == 3 && waiting.batches[1].prerequisites.empty() &&
+				waiting.batches[2].prerequisites == std::vector<uint32_t>{0},
+			"A later pass's wait is not moved before independent graphics work");
+		completion.Wait(device);
+
+		graph.Reset();
+		const auto early = graph.AddPass({.name = "Early graphics producer"}, [](CommandList&) { });
+		graph.AddPass({.name = "Later graphics work"}, [](CommandList&) { });
+		graph.AddPass({.name = "Foreign consumer", .dependsOn = {early}, .queue = *other}, [](CommandList&) { });
+		Expect(graph.Submit(device, completion) == Result::Success, "Submit early cross-queue signal");
+		const auto signaling = graph.GetDiagnostics();
+		Expect(signaling.batches.size() == 3 && signaling.batches[2].prerequisites == std::vector<uint32_t>{0},
+			"A producer signals its foreign consumer without waiting for later same-queue work");
+		completion.Wait(device);
+
+		graph.Reset();
+		const auto shared =
+			graph.AddPass({.name = "Shared foreign prerequisite", .queue = *other}, [](CommandList&) { });
+		graph.AddPass({.name = "First graphics consumer", .dependsOn = {shared}}, [](CommandList&) { });
+		graph.AddPass({.name = "Second graphics consumer", .dependsOn = {shared}}, [](CommandList&) { });
+		Expect(graph.Submit(device, completion) == Result::Success, "Submit consumers sharing the same wait");
+		const auto sharedWait = graph.GetDiagnostics();
+		Expect(sharedWait.batches.size() == 2 && sharedWait.batches[1].steps.size() == 2 &&
+				sharedWait.batches[1].prerequisites == std::vector<uint32_t>{0},
+			"Consumers with an established wait share one batch without duplicate dependency tokens");
+		completion.Wait(device);
+
+		graph.Reset();
+		const auto first = graph.AddPass({.name = "First joined producer"}, [](CommandList&) { });
+		const auto second = graph.AddPass({.name = "Second joined producer"}, [](CommandList&) { });
+		graph.AddPass(
+			{.name = "Consumer needs both", .dependsOn = {first, second}, .queue = *other}, [](CommandList&) { });
+		Expect(graph.Submit(device, completion) == Result::Success, "Submit producers with a common consumer");
+		const auto joined = graph.GetDiagnostics();
+		Expect(joined.batches.size() == 2 && joined.batches[0].steps.size() == 2 &&
+				joined.batches[1].prerequisites == std::vector<uint32_t>{0},
+			"Producers can share a batch when their foreign consumer requires both to complete");
 		completion.Wait(device);
 	}
 
@@ -372,6 +504,12 @@ namespace {
 			RenderGraphSubmission completion;
 			Expect(graph.Submit(device, completion, &pool) == Result::Success,
 				"Combine queue scheduling with resource pooling");
+			const auto diagnostics = graph.GetDiagnostics();
+			const auto graphicsBatch = diagnostics.passes[1].batchIndex;
+			Expect(graphicsBatch == diagnostics.passes[2].batchIndex &&
+					diagnostics.batches[graphicsBatch].steps.size() >= 2 &&
+					completion.completions.size() == diagnostics.batches.size(),
+				"Consecutive graphics reads share one submission and keep pooled resources alive");
 			Expect(graph.GetExecutionPlan()[2].barriers.buffers.size() == 1 &&
 					graph.GetExecutionPlan()[2].barriers.buffers[0].buffer == readback.Raw(),
 				"Same-queue readers omit redundant source barriers across separate command lists");
@@ -408,6 +546,7 @@ int main() {
 		"Create multi-queue graph test device");
 	TestImportsAndFanOut(*device);
 	TestIndependentAndFailedSubmissions(*device);
+	TestBatching(*device);
 	TestQueueValidation(*device);
 	TestPoolIntegration(*device);
 	device->WaitIdle();

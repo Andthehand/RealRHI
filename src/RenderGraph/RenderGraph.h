@@ -60,6 +60,8 @@ namespace RealRHI {
 		QueueType queue = QueueType::Graphics;
 		BarrierDesc afterBarriers;
 		std::optional<QueueId> nativeQueue;
+		// Submit batch index; UINT32_MAX until batch planning (or when culled).
+		uint32_t batchIndex = UINT32_MAX;
 	};
 
 	struct RenderGraphPassInfo {
@@ -70,6 +72,8 @@ namespace RealRHI {
 		uint32_t executionIndex = UINT32_MAX;
 		std::vector<RenderGraphPass> prerequisites;
 		std::optional<QueueId> nativeQueue;
+		// Submit batch index; UINT32_MAX until batch planning (or when culled).
+		uint32_t batchIndex = UINT32_MAX;
 	};
 
 	struct RenderGraphResourceInfo {
@@ -90,16 +94,29 @@ namespace RealRHI {
 		std::vector<RenderGraphPass> consumers;
 	};
 
+	struct RenderGraphBatchInfo {
+		QueueType queue = QueueType::Graphics;
+		QueueId nativeQueue;
+		// Indices into GetExecutionPlan(), in recording order.
+		std::vector<uint32_t> steps;
+		// Earlier batch indices; same-queue ordering needs no semaphore wait.
+		std::vector<uint32_t> prerequisites;
+		// Prefix batches contain initial barriers instead of graph passes.
+		std::optional<uint32_t> initialRelease;
+	};
+
 	struct RenderGraphDiagnostics {
 		bool compiled = false;
 		bool multiQueue = false;
 		std::vector<RenderGraphPassInfo> passes;
 		std::vector<RenderGraphResourceInfo> resources;
 		std::vector<RenderGraphInitialBarriers> initialBarriers;
+		std::vector<RenderGraphBatchInfo> batches;
 	};
 
 	struct RenderGraphSubmission {
-		// Includes every successful submission, even if Submit fails partway through.
+		// One token per successful batch, in diagnostic batch order, including the
+		// queued prefix when Submit fails. A batch may contain several passes.
 		std::vector<SubmissionToken> completions;
 		bool IsComplete(Device& device) const;
 		void Wait(Device& device) const;
@@ -175,7 +192,9 @@ namespace RealRHI {
 		// the first allocation names the shared resource. The pool belongs to device.
 		// Validation/allocation failures return before recording any passes.
 		Result Execute(Device& device, CommandList& commands, TransientResourcePool* pool = nullptr);
-		// Record all lists before submitting any work. External waits apply to all
+		// Batch consecutive passes sharing a native queue when no new cross-queue wait
+		// or earlier cross-queue signal is needed. Record all lists before submitting any work.
+		// External waits apply to all
 		// submissions; matching release/acquire pairs handle exclusive ownership.
 		// Exports remain on their last-use queue. Resources crossing queues allocate
 		// directly; the pool is used only for resources confined to one native queue.
@@ -244,6 +263,7 @@ namespace RealRHI {
 		bool BuildBarriers(std::string& error);
 		bool ValidateQueues(Device& device, std::string& error) const;
 		void BuildQueuePlan(Device& device, std::vector<InitialRelease>& initialReleases);
+		void BuildBatches(Device& device);
 		void Transition(uint32_t resource,
 			ResourceState after,
 			TextureLayout layout,
@@ -259,6 +279,7 @@ namespace RealRHI {
 		bool m_MultiQueue = false;
 		std::vector<uint8_t> m_UsedResources;
 		std::vector<InitialRelease> m_InitialReleases;
+		std::vector<RenderGraphBatchInfo> m_Batches;
 		uint64_t m_Id = 0;
 		std::vector<Resource> m_Resources;
 		std::vector<Pass> m_Passes;
