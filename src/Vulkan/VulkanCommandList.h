@@ -80,7 +80,7 @@ namespace RealRHI {
 			int32_t vertexOffset = 0,
 			uint32_t firstInstance = 0) override;
 
-		QueueId GetQueueId() const { return m_QueueId; }
+		QueueId GetQueueId() const override { return m_QueueId; }
 		CommandListState GetState() const override {
 			std::scoped_lock lock(m_StateMutex);
 			return m_State;

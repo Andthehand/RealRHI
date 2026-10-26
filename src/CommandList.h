@@ -92,6 +92,7 @@ namespace RealRHI {
 		virtual Result End() = 0;
 		virtual Result Reset() = 0;
 		virtual CommandListState GetState() const = 0;
+		virtual QueueId GetQueueId() const = 0;
 
 		// Labels are optional when debug utils are unavailable. Balance regions in queue submission order.
 		virtual void BeginDebugLabel(const char* name) = 0;

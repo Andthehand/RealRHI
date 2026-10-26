@@ -10,6 +10,8 @@
 
 namespace RealRHI {
 	class Device;
+	class TransientResourcePool;
+
 	struct RenderGraphResource {
 		uint32_t index = UINT32_MAX;
 		uint64_t graph = 0;
@@ -95,9 +97,12 @@ namespace RealRHI {
 		bool Compile(std::string& error);
 		const std::vector<RenderGraphStep>& GetExecutionPlan() const { return m_Plan; }
 		const BarrierDesc& GetFinalBarriers() const { return m_FinalBarriers; }
-		// Compile, allocate fresh resources, and record into an active list outside
-		// rendering. Validation/allocation failures return before recording any passes.
-		Result Execute(Device& device, CommandList& commands);
+		// Compile, allocate resources, and record into an active list outside rendering.
+		// An optional pool reuses compatible idle allocations; contents are always
+		// discarded and require initialization. Debug names do not affect pool identity;
+		// the first allocation names the shared resource. The pool belongs to device.
+		// Validation/allocation failures return before recording any passes.
+		Result Execute(Device& device, CommandList& commands, TransientResourcePool* pool = nullptr);
 		void Reset();
 
 	private:
@@ -135,7 +140,7 @@ namespace RealRHI {
 		static bool IsTexture(const Resource& resource);
 		static bool IsCreated(const Resource& resource);
 		void ReleaseCreatedResources();
-		Result AllocateResources(Device& device);
+		Result AllocateResources(Device& device, QueueId queue, TransientResourcePool* pool);
 		bool IsValid(RenderGraphResource resource) const;
 		bool IsValid(RenderGraphPass pass) const;
 		bool ValidateResources(std::string& error) const;

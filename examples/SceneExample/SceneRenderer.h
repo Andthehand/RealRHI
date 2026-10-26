@@ -1,5 +1,6 @@
 #pragma once
 #include "Device.h"
+#include "RenderGraph/TransientResourcePool.h"
 
 #include <vector>
 
@@ -56,6 +57,7 @@ namespace RealRHI::Examples {
 
 	private:
 		Device* m_Device = nullptr;
+		std::unique_ptr<TransientResourcePool> m_TransientResources;
 		Ref<Pipeline> m_ShadowPipeline;
 		Ref<Pipeline> m_OpaquePipeline;
 		Ref<Pipeline> m_TransparentPipeline;

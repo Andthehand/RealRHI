@@ -110,6 +110,7 @@ namespace RealRHI::Examples {
 		}
 
 		m_Device = &device;
+		m_TransientResources = std::make_unique<TransientResourcePool>(device);
 		m_Frames.resize(frameCount);
 
 		const Result depthResult = SelectDepthFormat();
@@ -350,6 +351,9 @@ namespace RealRHI::Examples {
 		if (frameIndex >= m_Frames.size() || width == 0 || height == 0) {
 			return Result::InvalidParameter;
 		}
+		if (m_Frames[frameIndex].width != width || m_Frames[frameIndex].height != height) {
+			m_TransientResources->Trim();
+		}
 		m_Frames[frameIndex] = {width, height};
 		return Result::Success;
 	}
@@ -567,7 +571,7 @@ namespace RealRHI::Examples {
 				DrawPostprocess(list, targets, output);
 			});
 		commands.BeginDebugLabel("Scene frame");
-		const Result result = graph.Execute(*m_Device, commands);
+		const Result result = graph.Execute(*m_Device, commands, m_TransientResources.get());
 		if (result == Result::Success) {
 			commands.WriteTimestamp("Frame end");
 		}

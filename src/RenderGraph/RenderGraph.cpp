@@ -1,6 +1,7 @@
 #include "RenderGraph.h"
 
 #include "Device.h"
+#include "TransientResourcePool.h"
 
 #include <algorithm>
 #include <atomic>
@@ -106,11 +107,12 @@ namespace RealRHI {
 			if (IsCreated(resource)) {
 				resource.texture.Reset();
 				resource.buffer.Reset();
+				resource.initialState = {};
 			}
 		}
 	}
 
-	Result RenderGraph::AllocateResources(Device& device) {
+	Result RenderGraph::AllocateResources(Device& device, QueueId queue, TransientResourcePool* pool) {
 		Invalidate();
 		ReleaseCreatedResources();
 		std::string error;
@@ -129,12 +131,22 @@ namespace RealRHI {
 			if (resource.textureDesc) {
 				auto desc = *resource.textureDesc;
 				desc.debugName = resource.debugName.c_str();
-				result = device.CreateTexture(desc, textures[i]);
+				if (pool) {
+					result = pool->AcquireTexture(queue, desc, textures[i]);
+				}
+				else {
+					result = device.CreateTexture(desc, textures[i]);
+				}
 			}
 			else if (resource.bufferDesc) {
 				auto desc = *resource.bufferDesc;
 				desc.debugName = resource.debugName.c_str();
-				result = device.CreateBuffer(desc, buffers[i]);
+				if (pool) {
+					result = pool->AcquireBuffer(queue, desc, buffers[i]);
+				}
+				else {
+					result = device.CreateBuffer(desc, buffers[i]);
+				}
 			}
 			if (result != Result::Success) {
 				Invalidate();
@@ -145,6 +157,13 @@ namespace RealRHI {
 			if (IsCreated(m_Resources[i])) {
 				m_Resources[i].texture = std::move(textures[i]);
 				m_Resources[i].buffer = std::move(buffers[i]);
+				if (pool) {
+					// Reused allocations stay on the same queue. Order previous accesses
+					// before initialization, including image layout metadata writes.
+					m_Resources[i].initialState = {
+						PipelineStage::AllCommands, ResourceAccess::MemoryRead | ResourceAccess::MemoryWrite
+					};
+				}
 			}
 		}
 		m_Plan.clear();
@@ -505,12 +524,12 @@ namespace RealRHI {
 		m_Callback({DebugSeverity::Error, DebugMessageType::General, message.c_str()});
 	}
 
-	Result RenderGraph::Execute(Device& device, CommandList& commands) {
+	Result RenderGraph::Execute(Device& device, CommandList& commands, TransientResourcePool* pool) {
 		if (commands.GetState() != CommandListState::Recording) {
 			Report("Execute requires an active command list recording outside rendering.");
 			return Result::InvalidParameter;
 		}
-		const Result result = AllocateResources(device);
+		const Result result = AllocateResources(device, commands.GetQueueId(), pool);
 		if (result != Result::Success) {
 			return result;
 		}
