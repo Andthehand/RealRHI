@@ -24,9 +24,9 @@ namespace {
 				.applicationName = "RealRHI Scene Example",
 				.shaderDirectory = "shaders",
 				.enableDebug = true,
+				.enableProfiling = true,
 				.enableValidationLayers = validation,
 				.debugCallback = Examples::CaptureDebugMessage,
-				.enableProfiling = true,
 			};
 			if (Device::Create(deviceDesc, m_Device) != Result::Success) {
 				return false;

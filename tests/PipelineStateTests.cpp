@@ -790,10 +790,11 @@ namespace {
 int main() {
 	std::unique_ptr<RealRHI::Device> device;
 	Expect(RealRHI::Device::Create({.applicationName = "PipelineStateTests",
-									   .shaderDirectory = REALRHI_TEST_SHADER_DIRECTORY,
-									   .enableDebug = true,
-									   .enableValidationLayers = true,
-									   .debugCallback = Capture},
+										   .shaderDirectory = REALRHI_TEST_SHADER_DIRECTORY,
+										   .enableDebug = true,
+										   .enableProfiling = false,
+										   .enableValidationLayers = true,
+										   .debugCallback = Capture},
 			   device) == RealRHI::Result::Success,
 		"Create validation-enabled pipeline test device");
 	{

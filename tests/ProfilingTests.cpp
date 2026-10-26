@@ -755,9 +755,9 @@ namespace {
 					   .applicationName = "ProfilingTests",
 					   .shaderDirectory = REALRHI_TEST_SHADER_DIRECTORY,
 					   .enableDebug = true,
+					   .enableProfiling = profiling,
 					   .enableValidationLayers = validation,
 					   .debugCallback = CaptureDebugMessage,
-					   .enableProfiling = profiling,
 				   },
 				   device) == Result::Success,
 			"Create profiling test device");

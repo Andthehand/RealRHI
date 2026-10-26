@@ -36,6 +36,7 @@ namespace {
 				.applicationName = "RealRHI Triangle Example",
 				.shaderDirectory = "shaders",
 				.enableDebug = true,
+				.enableProfiling = false,
 				.enableValidationLayers = true,
 				.debugCallback = RealRHI::Examples::CaptureDebugMessage,
 			};

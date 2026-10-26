@@ -601,9 +601,10 @@ namespace {
 int main() {
 	std::unique_ptr<RealRHI::Device> device;
 	Expect(RealRHI::Device::Create({.applicationName = "TransientResourcePoolTests",
-									   .enableDebug = true,
-									   .enableValidationLayers = true,
-									   .debugCallback = Capture},
+										   .enableDebug = true,
+										   .enableProfiling = false,
+										   .enableValidationLayers = true,
+										   .debugCallback = Capture},
 			   device) == RealRHI::Result::Success,
 		"Create pool test device");
 	TestBudget(*device);

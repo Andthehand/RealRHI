@@ -237,9 +237,9 @@ namespace {
 		Expect(Device::Create({.applicationName = "CacheTests",
 								  .shaderDirectory = s_Directory,
 								  .enableDebug = true,
+								  .enableProfiling = true,
 								  .enableValidationLayers = true,
-								  .debugCallback = Capture,
-								  .enableProfiling = true},
+								  .debugCallback = Capture},
 				   device) == Result::Success,
 			"Create cache test device");
 		Ref<Shader> shader;

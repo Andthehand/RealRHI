@@ -41,6 +41,7 @@ int main() {
 	std::unique_ptr<Device> device;
 	Expect(Device::Create({.shaderDirectory = REALRHI_TEST_SHADER_DIRECTORY,
 							  .enableDebug = true,
+							  .enableProfiling = false,
 							  .enableValidationLayers = true,
 							  .debugCallback = Capture},
 			   device) == Result::Success,

@@ -685,9 +685,9 @@ int main() {
 	Expect(RealRHI::Device::Create({.applicationName = "RenderGraphTests",
 									   .shaderDirectory = REALRHI_TEST_SHADER_DIRECTORY,
 									   .enableDebug = true,
+									   .enableProfiling = true,
 									   .enableValidationLayers = true,
-									   .debugCallback = Capture,
-									   .enableProfiling = true},
+									   .debugCallback = Capture},
 			   device) == RealRHI::Result::Success,
 		"Create render graph test device");
 	{

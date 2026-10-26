@@ -1,6 +1,7 @@
 #include "RenderGraph/RenderGraph.h"
 
 #include <cstdlib>
+#include <initializer_list>
 #include <iostream>
 #include <string_view>
 
@@ -95,6 +96,114 @@ namespace {
 		Expect(graph.Compile(error) && graph.GetExecutionPlan().empty(), "Reset preserves culling options");
 	}
 
+	void ExpectPrerequisites(const RenderGraphDiagnostics& diagnostics,
+		RenderGraphPass pass,
+		std::initializer_list<RenderGraphPass> expected) {
+		const auto& prerequisites = diagnostics.passes[pass.index].prerequisites;
+		Expect(prerequisites.size() == expected.size(), "Keep exactly the declared and implicit dependencies");
+		size_t index = 0;
+		for (auto prerequisite : expected) {
+			Expect(prerequisites[index].index == prerequisite.index && prerequisites[index].graph == prerequisite.graph,
+				"Keep prerequisite diagnostics in their original order");
+			++index;
+		}
+	}
+
+	void TestReadLayoutsAndDependencyOrder() {
+		RenderGraph graph;
+		const auto texture = graph.CreateTexture({.width = 4,
+			.height = 4,
+			.format = TextureFormat::RGBA8_UNorm,
+			.usage = TextureUsage::ShaderResource | TextureUsage::Storage});
+		const auto buffer = graph.CreateBuffer({.size = 64, .usage = BufferUsage::Storage});
+		const auto writer = graph.AddPass({.name = "Initialize",
+			.resources = {{texture, s_Write, TextureLayout::General, RenderGraphAccess::Write},
+				{buffer, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}}, EmptyPass);
+		const auto generalA = graph.AddPass({.name = "General A",
+			.resources = {{texture, s_Read, TextureLayout::General}, {buffer, s_Read}}}, EmptyPass);
+		const auto generalB = graph.AddPass({.name = "General B",
+			.resources = {{texture, s_Read, TextureLayout::General}, {buffer, s_Read}}}, EmptyPass);
+		const auto sampledA = graph.AddPass({.name = "Sample A",
+			.resources = {{texture, s_Read, TextureLayout::ShaderRead}, {buffer, s_Read}}}, EmptyPass);
+		const auto sampledB = graph.AddPass({.name = "Sample B",
+			.resources = {{texture, s_Read, TextureLayout::ShaderRead}, {buffer, s_Read}},
+			.dependsOn = {writer, generalA, writer}}, EmptyPass);
+		constexpr ResourceState readWrite{PipelineStage::ComputeShader,
+			ResourceAccess::ShaderRead | ResourceAccess::ShaderWrite};
+		const auto overwrite = graph.AddPass({.name = "Overwrite",
+			.resources = {{texture, readWrite, TextureLayout::General, RenderGraphAccess::ReadWrite},
+				{buffer, readWrite, TextureLayout::Undefined, RenderGraphAccess::ReadWrite}}}, EmptyPass);
+		const auto generalAfter = graph.AddPass({.name = "General after overwrite",
+			.resources = {{texture, s_Read, TextureLayout::General}, {buffer, s_Read}}}, EmptyPass);
+		const auto sampledAfter = graph.AddPass({.name = "Sample after overwrite",
+			.resources = {{texture, s_Read, TextureLayout::ShaderRead}, {buffer, s_Read}}}, EmptyPass);
+		graph.AddDependency(generalA, generalB);
+		graph.AddDependency(sampledB, generalA);
+		graph.AddDependency(sampledB, writer);
+		std::string error;
+		Expect(graph.Compile(error), "Reorder compatible readers while keeping texture layout hazards");
+		const auto& plan = graph.GetExecutionPlan();
+		Expect(plan.size() == 8 && plan[1].name == "General B" && plan[2].name == "General A",
+			"Explicit dependencies can reverse reads sharing the same layout");
+		const auto diagnostics = graph.GetDiagnostics();
+		ExpectPrerequisites(diagnostics, writer, {});
+		ExpectPrerequisites(diagnostics, generalA, {writer, generalB});
+		ExpectPrerequisites(diagnostics, generalB, {writer});
+		ExpectPrerequisites(diagnostics, sampledA, {writer, generalA, generalB});
+		ExpectPrerequisites(diagnostics, sampledB, {writer, generalA, generalB});
+		ExpectPrerequisites(diagnostics, overwrite, {writer, generalA, generalB, sampledA, sampledB});
+		ExpectPrerequisites(diagnostics, generalAfter, {writer, sampledA, sampledB, overwrite});
+		ExpectPrerequisites(diagnostics, sampledAfter, {writer, generalA, generalB, overwrite, generalAfter});
+
+		graph.AddDependency(generalB, sampledA);
+		ExpectInvalid(graph, "cycle");
+	}
+
+	void TestReadyPassOrder() {
+		RenderGraph graph;
+		constexpr uint32_t count = 1024;
+		std::vector<RenderGraphPass> passes;
+		for (uint32_t i = 0; i < count; ++i) {
+			passes.push_back(graph.AddPass({.name = "Pass " + std::to_string(i)}, EmptyPass));
+		}
+		for (uint32_t i = 0; i < count; i += 2) {
+			graph.AddDependency(passes[i], passes[i + 1]);
+		}
+		std::string error;
+		Expect(graph.Compile(error), "Schedule a wide graph with explicit dependencies");
+		const auto diagnostics = graph.GetDiagnostics();
+		for (uint32_t i = 0; i < count; i += 2) {
+			Expect(diagnostics.passes[i + 1].executionIndex == i && diagnostics.passes[i].executionIndex == i + 1,
+				"Newly ready earlier passes run before later passes already waiting");
+		}
+	}
+
+	void TestSharedReaders() {
+		RenderGraph graph;
+		const auto buffer = graph.CreateBuffer({.size = 64, .usage = BufferUsage::Storage});
+		const auto writer = graph.AddPass(
+			{.name = "Initialize", .resources = {{buffer, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+			EmptyPass);
+		constexpr uint32_t count = 2048;
+		std::vector<RenderGraphPass> readers;
+		for (uint32_t i = 0; i < count; ++i) {
+			readers.push_back(graph.AddPass({.name = "Read " + std::to_string(i),
+				.resources = {{buffer, s_Read}}, .hasSideEffects = i == count - 1}, EmptyPass));
+		}
+		std::string error;
+		Expect(graph.Compile(error), "Compile many compatible readers of one resource");
+		const auto diagnostics = graph.GetDiagnostics();
+		for (uint32_t i = 0; i < count; ++i) {
+			ExpectPrerequisites(diagnostics, readers[i], {writer});
+			Expect(diagnostics.passes[readers[i].index].executionIndex == i + 1,
+				"Compatible readers keep insertion order without reader-to-reader edges");
+		}
+		graph.SetOptions({.cullUnusedPasses = true});
+		Expect(graph.Compile(error) && graph.GetExecutionPlan().size() == 2 &&
+				graph.GetExecutionPlan().back().name == "Read " + std::to_string(count - 1),
+			"Culling one observable reader retains its writer without retaining unrelated readers");
+	}
+
 	void TestInitializationAndLayouts() {
 		RenderGraph graph;
 		const auto texture = graph.CreateTexture({.width = 4,
@@ -125,6 +234,9 @@ namespace {
 
 int main() {
 	TestScheduling();
+	TestReadLayoutsAndDependencyOrder();
+	TestReadyPassOrder();
+	TestSharedReaders();
 	TestCullingAndReset();
 	TestInitializationAndLayouts();
 	std::cout << "RenderGraphPlanningTests passed\n";

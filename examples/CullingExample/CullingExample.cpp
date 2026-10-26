@@ -254,10 +254,11 @@ int main() {
 #endif
 	std::unique_ptr<RealRHI::Device> device;
 	Check(RealRHI::Device::Create({.applicationName = "CullingExample",
-									  .shaderDirectory = shaderDirectory,
-									  .enableDebug = true,
-									  .enableValidationLayers = true,
-									  .debugCallback = CaptureDebugMessage},
+											  .shaderDirectory = shaderDirectory,
+											  .enableDebug = true,
+											  .enableProfiling = false,
+											  .enableValidationLayers = true,
+											  .debugCallback = CaptureDebugMessage},
 			  device) == RealRHI::Result::Success,
 		"Create culling device");
 	for (auto queue : {RealRHI::QueueType::Graphics, RealRHI::QueueType::Compute}) {

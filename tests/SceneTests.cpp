@@ -363,6 +363,7 @@ int main() {
 				   .applicationName = "SceneTests",
 				   .shaderDirectory = REALRHI_SCENE_SHADER_DIRECTORY,
 				   .enableDebug = true,
+				   .enableProfiling = false,
 				   .enableValidationLayers = true,
 				   .debugCallback = CaptureDebugMessage,
 			   },

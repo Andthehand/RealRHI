@@ -101,6 +101,7 @@ namespace {
 				.applicationName = "RealRHI Texture Example",
 				.shaderDirectory = "shaders",
 				.enableDebug = true,
+				.enableProfiling = false,
 				.enableValidationLayers = true,
 				.debugCallback = RealRHI::Examples::CaptureDebugMessage,
 			};

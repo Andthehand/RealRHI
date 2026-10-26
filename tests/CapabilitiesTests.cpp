@@ -198,10 +198,10 @@ namespace {
 int main() {
 	std::unique_ptr<RealRHI::Device> device;
 	Expect(RealRHI::Device::Create({.applicationName = "CapabilitiesTests",
-									   .enableDebug = true,
-									   .enableValidationLayers = true,
-									   .debugCallback = Capture,
-									   .enableProfiling = true},
+											   .enableDebug = true,
+											   .enableProfiling = true,
+											   .enableValidationLayers = true,
+											   .debugCallback = Capture},
 			   device) == RealRHI::Result::Success,
 		"Create device for capability queries");
 	TestSnapshot(*device);

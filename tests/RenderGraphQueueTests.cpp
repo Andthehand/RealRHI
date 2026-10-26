@@ -732,9 +732,9 @@ int main() {
 	Expect(RealRHI::Device::Create({.applicationName = "RenderGraphQueueTests",
 									   .shaderDirectory = REALRHI_TEST_SHADER_DIRECTORY,
 									   .enableDebug = true,
+									   .enableProfiling = true,
 									   .enableValidationLayers = true,
-									   .debugCallback = Capture,
-									   .enableProfiling = true},
+									   .debugCallback = Capture},
 			   device) == RealRHI::Result::Success,
 		"Create multi-queue graph test device");
 	TestImportsAndFanOut(*device);
