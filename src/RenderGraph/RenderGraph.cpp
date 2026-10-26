@@ -6,7 +6,10 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <functional>
+#include <map>
 #include <numeric>
+#include <queue>
 #include <sstream>
 
 namespace RealRHI {
@@ -659,58 +662,94 @@ namespace RealRHI {
 		return true;
 	}
 
-	bool RenderGraph::BuildOrder(std::string& error) {
-		const auto count = m_Passes.size();
-		std::vector<std::vector<uint32_t>> edges(count);
-		std::vector<uint32_t> incoming(count);
-		m_Prerequisites.resize(count);
-		auto connect = [&](uint32_t from, uint32_t to) {
-			auto& destinations = edges[from];
-			if (std::find(destinations.begin(), destinations.end(), to) == destinations.end()) {
-				destinations.push_back(to);
-				m_Prerequisites[to].push_back(from);
-				++incoming[to];
-			}
+	void RenderGraph::BuildDependencies() {
+		struct ResourceUsers {
+			std::vector<uint32_t> writers;
+			std::map<TextureLayout, std::vector<uint32_t>> readers;
 		};
 
-		for (uint32_t i = 0; i < count; ++i) {
-			for (auto dependency : m_Passes[i].desc.dependsOn) {
-				connect(dependency.index, i);
-			}
-			for (uint32_t j = i + 1; j < count; ++j) {
-				for (const auto& before : m_Passes[i].desc.resources) {
-					for (const auto& after : m_Passes[j].desc.resources) {
-						if (before.resource.index == after.resource.index &&
-							(before.access != RenderGraphAccess::Read || after.access != RenderGraphAccess::Read ||
-								before.layout != after.layout)) {
-							connect(i, j);
+		const auto count = m_Passes.size();
+		m_Prerequisites.assign(count, {});
+		std::vector<ResourceUsers> users(m_Resources.size());
+		std::vector<std::vector<uint32_t>> additionalDependencies(count);
+		for (const auto& dependency : m_Dependencies) {
+			additionalDependencies[dependency.pass.index].push_back(dependency.prerequisite.index);
+		}
+		// A pass pair can share many resources or repeat an explicit dependency.
+		// Dense pass indices let us deduplicate without searching adjacency lists.
+		std::vector<uint32_t> seen(count, UINT32_MAX);
+
+		for (uint32_t pass = 0; pass < count; ++pass) {
+			auto& prerequisites = m_Prerequisites[pass];
+			auto connect = [&](uint32_t prerequisite) {
+				if (seen[prerequisite] != pass) {
+					seen[prerequisite] = pass;
+					prerequisites.push_back(prerequisite);
+				}
+			};
+			for (const auto& use : m_Passes[pass].desc.resources) {
+				auto& resource = users[use.resource.index];
+				for (uint32_t writer : resource.writers) {
+					connect(writer);
+				}
+				// Reads sharing a layout have no hazard. Skip that entire group,
+				// so many compatible readers do not require pairwise comparisons.
+				for (const auto& [layout, readers] : resource.readers) {
+					if (use.access != RenderGraphAccess::Read || use.layout != layout) {
+						for (uint32_t reader : readers) {
+							connect(reader);
 						}
 					}
 				}
-			}
-		}
-		for (const auto& dependency : m_Dependencies) {
-			connect(dependency.prerequisite.index, dependency.pass.index);
-		}
-
-		std::vector<bool> scheduled(count);
-		while (m_Order.size() < count) {
-			uint32_t next = UINT32_MAX;
-			for (uint32_t i = 0; i < count; ++i) {
-				if (!scheduled[i] && incoming[i] == 0) {
-					next = i;
-					break;
+				if (use.access == RenderGraphAccess::Read) {
+					resource.readers[use.layout].push_back(pass);
+				}
+				else {
+					resource.writers.push_back(pass);
 				}
 			}
-			if (next == UINT32_MAX) {
-				error = "Pass dependencies contain a cycle or contradict resource version order.";
-				return false;
+			// Keep diagnostic ordering: implicit hazards in insertion order,
+			// then descriptor dependencies, then AddDependency declarations.
+			std::sort(prerequisites.begin(), prerequisites.end());
+			for (auto dependency : m_Passes[pass].desc.dependsOn) {
+				connect(dependency.index);
 			}
-			scheduled[next] = true;
+			for (uint32_t dependency : additionalDependencies[pass]) {
+				connect(dependency);
+			}
+		}
+	}
+
+	bool RenderGraph::BuildOrder(std::string& error) {
+		BuildDependencies();
+		const auto count = m_Passes.size();
+		std::vector<std::vector<uint32_t>> dependents(count);
+		std::vector<uint32_t> incoming(count);
+		std::priority_queue<uint32_t, std::vector<uint32_t>, std::greater<uint32_t>> ready;
+		for (uint32_t pass = 0; pass < count; ++pass) {
+			incoming[pass] = static_cast<uint32_t>(m_Prerequisites[pass].size());
+			if (incoming[pass] == 0) {
+				ready.push(pass);
+			}
+			for (uint32_t prerequisite : m_Prerequisites[pass]) {
+				dependents[prerequisite].push_back(pass);
+			}
+		}
+		m_Order.reserve(count);
+		while (!ready.empty()) {
+			// A newly ready earlier pass takes precedence over later waiting work.
+			const uint32_t next = ready.top();
+			ready.pop();
 			m_Order.push_back(next);
-			for (uint32_t destination : edges[next]) {
-				--incoming[destination];
+			for (uint32_t destination : dependents[next]) {
+				if (--incoming[destination] == 0) {
+					ready.push(destination);
+				}
 			}
+		}
+		if (m_Order.size() != count) {
+			error = "Pass dependencies contain a cycle or contradict resource version order.";
+			return false;
 		}
 		return true;
 	}

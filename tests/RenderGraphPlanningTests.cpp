@@ -178,6 +178,28 @@ namespace {
 		}
 	}
 
+	void TestExplicitDependencyOrder() {
+		RenderGraph graph;
+		const auto first = graph.AddPass({.name = "First"}, EmptyPass);
+		const auto second = graph.AddPass({.name = "Second"}, EmptyPass);
+		const auto buffer = graph.CreateBuffer({.size = 64, .usage = BufferUsage::Storage});
+		const auto writer = graph.AddPass(
+			{.name = "Initialize", .resources = {{buffer, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+			EmptyPass);
+		const auto reader = graph.AddPass({.name = "Read", .resources = {{buffer, s_Read}},
+			.dependsOn = {second, first, second}}, EmptyPass);
+		const auto last = graph.AddPass({.name = "Last prerequisite"}, EmptyPass);
+		graph.AddDependency(reader, first);
+		graph.AddDependency(reader, last);
+		std::string error;
+		Expect(graph.Compile(error), "Combine implicit hazards and explicit dependencies");
+		const auto diagnostics = graph.GetDiagnostics();
+		ExpectPrerequisites(diagnostics, reader, {writer, second, first, last});
+		Expect(diagnostics.passes[last.index].executionIndex == 3 &&
+				diagnostics.passes[reader.index].executionIndex == 4,
+			"Explicit prerequisites can point to later independent passes");
+	}
+
 	void TestSharedReaders() {
 		RenderGraph graph;
 		const auto buffer = graph.CreateBuffer({.size = 64, .usage = BufferUsage::Storage});
@@ -236,6 +258,7 @@ int main() {
 	TestScheduling();
 	TestReadLayoutsAndDependencyOrder();
 	TestReadyPassOrder();
+	TestExplicitDependencyOrder();
 	TestSharedReaders();
 	TestCullingAndReset();
 	TestInitializationAndLayouts();

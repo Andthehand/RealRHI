@@ -276,6 +276,7 @@ namespace RealRHI {
 		bool IsValid(RenderGraphPass pass) const;
 		bool ValidateResources(std::string& error) const;
 		bool ValidatePasses(std::string& error) const;
+		void BuildDependencies();
 		bool BuildOrder(std::string& error);
 		void CullUnusedPasses();
 		void RecordPass(CommandList& commands, size_t position);
