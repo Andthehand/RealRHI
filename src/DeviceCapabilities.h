@@ -1,4 +1,5 @@
 #pragma once
+#include "RenderingInfo.h"
 #include "TextureDesc.h"
 
 #include <array>
@@ -21,6 +22,12 @@ namespace RealRHI {
 		uint32_t maxTextureDimension3D = 0;
 		uint32_t maxTextureArrayLayers = 0;
 		uint32_t maxColorAttachments = 0;
+		// Bitmasks whose bits are the supported numeric sample counts (1, 2, 4, ...).
+		uint32_t colorAttachmentSampleCounts = 0;
+		uint32_t integerColorAttachmentSampleCounts = 0;
+		uint32_t depthAttachmentSampleCounts = 0;
+		uint32_t stencilAttachmentSampleCounts = 0;
+		uint32_t noAttachmentSampleCounts = 0;
 
 		uint32_t maxVertexInputBindings = 0;
 		uint32_t maxVertexInputAttributes = 0;
@@ -42,12 +49,21 @@ namespace RealRHI {
 		float maxSamplerLodBias = 0.f;
 	};
 
+	struct DepthStencilResolveSupport {
+		// Bitwise combinations of ResolveMode values.
+		uint32_t depthModes = 0;
+		uint32_t stencilModes = 0;
+		bool independentResolve = false;
+		bool independentResolveNone = false;
+	};
+
 	struct DeviceCapabilitiesInfo {
 		std::string name;
 		uint32_t vendorId = 0;
 		uint32_t deviceId = 0;
 		DeviceFeatures features;
 		DeviceLimits limits;
+		DepthStencilResolveSupport depthStencilResolve;
 	};
 
 	struct TextureFormatSupport {
@@ -59,5 +75,7 @@ namespace RealRHI {
 		bool blitSource = false;
 		bool blitDestination = false;
 		bool storageAtomics = false;
+		uint32_t colorAttachmentSampleCounts = 0;
+		uint32_t depthStencilAttachmentSampleCounts = 0;
 	};
 }

@@ -28,11 +28,22 @@ namespace RealRHI {
 		uint32_t stencil = 0;
 	};
 
+	enum class ResolveMode : uint32_t {
+		None = 0,
+		SampleZero = 1,
+		Average = 2,
+		Min = 4,
+		Max = 8,
+	};
+
 	struct ColorAttachment {
 		TextureView* target = nullptr;
 		LoadOp loadOp = LoadOp::Clear;
 		StoreOp storeOp = StoreOp::Store;
 		ClearColorValue clearColor{};
+		// Single-sampled, matching format/extent; integer colors resolve sample zero,
+		// floating-point and normalized colors resolve the average.
+		TextureView* resolveTarget = nullptr;
 	};
 
 	struct DepthStencilAttachment {
@@ -41,7 +52,14 @@ namespace RealRHI {
 		StoreOp depthStoreOp = StoreOp::Store;
 		ClearDepthStencilValue clear{};
 		bool readOnlyDepth = false;
-		bool readOnlyStencil = true;
+		bool readOnlyStencil = false;
+		LoadOp stencilLoadOp = LoadOp::Clear;
+		StoreOp stencilStoreOp = StoreOp::Store;
+		// Resolve writes use ColorAttachmentOutput/ColorAttachmentWrite synchronization,
+		// including for depth/stencil images. Keep the target in DepthStencilAttachment layout.
+		TextureView* resolveTarget = nullptr;
+		ResolveMode depthResolveMode = ResolveMode::None;
+		ResolveMode stencilResolveMode = ResolveMode::None;
 	};
 
 	struct Viewport {

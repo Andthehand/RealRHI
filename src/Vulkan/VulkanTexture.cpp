@@ -60,11 +60,13 @@ namespace RealRHI {
 		if (!m_Device->SupportsTexture(desc)) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
-				"CreateTexture: The format, combined usages, dimensions, mip count, or layer count is unsupported by "
+				"CreateTexture: The format, combined usages, dimensions, mip count, layer count, or sample count is "
+				"unsupported by "
 				"this device.");
 			return Result::InvalidParameter;
 		}
 
+		m_SampleCount = desc.sampleCount;
 		m_Format = Utils::TextureFormatToVkFormat(desc.format);
 		m_Usage = desc.usage;
 		m_MipLevels = desc.mipLevels;
@@ -83,7 +85,7 @@ namespace RealRHI {
 			.extent = m_ImageExtent,
 			.mipLevels = m_MipLevels,
 			.arrayLayers = m_ArrayLayers,
-			.samples = VK_SAMPLE_COUNT_1_BIT,
+			.samples = static_cast<VkSampleCountFlagBits>(desc.sampleCount),
 			.tiling = VK_IMAGE_TILING_OPTIMAL,
 			.usage = Utils::TextureUsageToVkImageUsage(desc.usage),
 			.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
@@ -137,7 +139,7 @@ namespace RealRHI {
 			return viewResult;
 		}
 
-		if (Any(m_Usage & TextureUsage::ShaderResource)) {
+		if (Any(m_Usage & TextureUsage::ShaderResource) && m_SampleCount == 1) {
 			const Result samplerResult = m_Device->CreateSampler({.debugName = desc.debugName}, m_DefaultSampler);
 			if (samplerResult != Result::Success) {
 				return samplerResult;
@@ -185,7 +187,7 @@ namespace RealRHI {
 
 	Result VulkanTexture::UploadData(const void* data, uint32_t size) {
 		const uint32_t texelSize = Utils::TextureFormatByteSize(Utils::VkFormatToTextureFormat(m_Format));
-		if (data == nullptr || texelSize == 0 || m_MipLevels != 1 || m_IsExternal ||
+		if (data == nullptr || texelSize == 0 || m_MipLevels != 1 || m_SampleCount != 1 || m_IsExternal ||
 			!Any(m_Usage & TextureUsage::TransferDst) ||
 			m_ImageExtent.width > UINT64_MAX / m_ImageExtent.height / m_ImageExtent.depth / m_ArrayLayers / texelSize ||
 			static_cast<uint64_t>(m_ImageExtent.width) * m_ImageExtent.height * m_ImageExtent.depth * m_ArrayLayers *
@@ -194,7 +196,7 @@ namespace RealRHI {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
 				"UploadData: Provide sufficient tightly packed color data for a single-mip, "
-				"non-swapchain texture with TransferDst usage.");
+				"single-sampled, non-swapchain texture with TransferDst usage.");
 
 			return Result::InvalidParameter;
 		}
@@ -268,9 +270,10 @@ namespace RealRHI {
 	Result VulkanTexture::CreateFromSwapChain(const VulkanDevice* device,
 		VkFormat format,
 		VkImage image,
+		VkExtent2D extent,
 		Ref<VulkanTexture>& outTexture) {
 		Ref<VulkanTexture> texture = Ref<VulkanTexture>::Create(device);
-		Result res = texture->InitSwapChainTexture(format, image);
+		Result res = texture->InitSwapChainTexture(format, image, extent);
 		if (res != Result::Success) {
 			return res;
 		}
@@ -279,8 +282,9 @@ namespace RealRHI {
 		return Result::Success;
 	}
 
-	Result VulkanTexture::InitSwapChainTexture(VkFormat format, VkImage image) {
+	Result VulkanTexture::InitSwapChainTexture(VkFormat format, VkImage image, VkExtent2D extent) {
 		m_IsExternal = true;
+		m_ImageExtent = {extent.width, extent.height, 1};
 		m_SubresourceStates.resize(1);
 		m_Usage = TextureUsage::RenderTarget;
 		m_Format = format;

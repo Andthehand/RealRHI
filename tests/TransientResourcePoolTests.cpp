@@ -571,6 +571,12 @@ namespace {
 			Expect(textureAllocation(variant, *graphics) != texture,
 				"Every image compatibility field participates in matching");
 		}
+		changedTexture = textureDesc;
+		changedTexture.sampleCount = 4;
+		if (device.SupportsTexture(changedTexture)) {
+			Expect(textureAllocation(changedTexture, *graphics) != texture,
+				"Pool matching distinguishes texture sample counts");
+		}
 		const BufferDesc bufferDesc{.size = 64, .usage = BufferUsage::TransferDst};
 		auto* buffer = bufferAllocation(bufferDesc, *graphics);
 		auto changedBuffer = bufferDesc;

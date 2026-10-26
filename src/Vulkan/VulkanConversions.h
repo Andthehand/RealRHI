@@ -12,6 +12,50 @@
 #include <vma/vk_mem_alloc.h>
 
 namespace RealRHI::Utils {
+	constexpr bool IsValidSampleCount(uint32_t count) {
+		return count != 0 && count <= 64 && (count & (count - 1)) == 0;
+	}
+	constexpr bool IsIntegerColorFormat(TextureFormat format) {
+		switch (format) {
+			case TextureFormat::RGBA8_UInt:
+			case TextureFormat::RGBA8_SInt:
+			case TextureFormat::RGBA16_UInt:
+			case TextureFormat::RGBA16_SInt:
+			case TextureFormat::RGBA32_UInt:
+			case TextureFormat::RGBA32_SInt:
+			case TextureFormat::RGB32_UInt:
+			case TextureFormat::RGB32_SInt:
+			case TextureFormat::RG32_UInt:
+			case TextureFormat::RG32_SInt:
+			case TextureFormat::R32_UInt:
+			case TextureFormat::R32_SInt:
+				return true;
+			default:
+				return false;
+		}
+	}
+	constexpr VkStencilOp StencilOpToVk(StencilOp operation) {
+		switch (operation) {
+			case StencilOp::Keep:
+				return VK_STENCIL_OP_KEEP;
+			case StencilOp::Zero:
+				return VK_STENCIL_OP_ZERO;
+			case StencilOp::Replace:
+				return VK_STENCIL_OP_REPLACE;
+			case StencilOp::IncrementClamp:
+				return VK_STENCIL_OP_INCREMENT_AND_CLAMP;
+			case StencilOp::DecrementClamp:
+				return VK_STENCIL_OP_DECREMENT_AND_CLAMP;
+			case StencilOp::Invert:
+				return VK_STENCIL_OP_INVERT;
+			case StencilOp::IncrementWrap:
+				return VK_STENCIL_OP_INCREMENT_AND_WRAP;
+			case StencilOp::DecrementWrap:
+				return VK_STENCIL_OP_DECREMENT_AND_WRAP;
+		}
+		return VK_STENCIL_OP_MAX_ENUM;
+	}
+
 	constexpr VkShaderStageFlagBits ShaderStageToVkShaderStage(ShaderStage stage) {
 		switch (stage) {
 			case ShaderStage::Vertex:
@@ -559,7 +603,7 @@ namespace RealRHI::Utils {
 			case CompareOp::Always:
 				return VK_COMPARE_OP_ALWAYS;
 			default:
-				return VK_COMPARE_OP_NEVER;
+				return VK_COMPARE_OP_MAX_ENUM;
 		}
 	}
 

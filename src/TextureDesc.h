@@ -52,5 +52,7 @@ namespace RealRHI {
 
 		TextureUsage usage = TextureUsage::None;
 		const char* debugName = nullptr;
+		// Powers of two, 1 through 64; multisampled images require one mip and depth=1.
+		uint32_t sampleCount = 1;
 	};
 }

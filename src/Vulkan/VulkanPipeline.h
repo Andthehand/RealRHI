@@ -28,6 +28,11 @@ namespace RealRHI {
 		VkPipeline GetPipeline() const { return m_Pipeline; }
 		VkPipelineBindPoint GetBindPoint() const { return m_BindPoint; }
 
+		const RenderTargetFormats& GetRenderTargetFormats() const { return m_RenderTargetFormats; }
+		uint32_t GetSampleCount() const { return m_SampleCount; }
+		bool WritesDepth() const { return m_DepthWrites; }
+		bool WritesStencil() const { return m_StencilWrites; }
+
 	private:
 		Result BuildColorBlendDescriptions(const PipelineDesc& desc,
 			std::vector<VkPipelineColorBlendAttachmentState>& attachments) const;
@@ -38,6 +43,10 @@ namespace RealRHI {
 			std::vector<VkVertexInputAttributeDescription>& attributes) const;
 
 	private:
+		RenderTargetFormats m_RenderTargetFormats;
+		uint32_t m_SampleCount = 1;
+		bool m_DepthWrites = false;
+		bool m_StencilWrites = false;
 		std::vector<uint32_t> m_VertexBindings;
 		const VulkanDevice* m_Device = nullptr;
 

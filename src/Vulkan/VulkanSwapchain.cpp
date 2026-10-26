@@ -233,7 +233,7 @@ namespace RealRHI {
 
 		std::vector<Ref<VulkanTexture>> newImages(imageCount);
 		for (uint32_t i = 0; i < imageCount; ++i) {
-			if (VulkanTexture::CreateFromSwapChain(m_Device, surfaceFormat.format, images[i], newImages[i]) !=
+			if (VulkanTexture::CreateFromSwapChain(m_Device, surfaceFormat.format, images[i], extent, newImages[i]) !=
 				Result::Success) {
 				newImages.clear();
 				vkDestroySwapchainKHR(m_Device->GetDevice(), newSwapchain, nullptr);

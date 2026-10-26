@@ -11,7 +11,7 @@ namespace RealRHI {
 	bool TransientResourcePool::Matches(const TextureDesc& left, const TextureDesc& right) {
 		return left.width == right.width && left.height == right.height && left.depth == right.depth &&
 			left.mipLevels == right.mipLevels && left.arrayLayers == right.arrayLayers && left.format == right.format &&
-			left.usage == right.usage;
+			left.usage == right.usage && left.sampleCount == right.sampleCount;
 	}
 
 	bool TransientResourcePool::Matches(const BufferDesc& left, const BufferDesc& right) {

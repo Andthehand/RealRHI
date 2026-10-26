@@ -75,6 +75,19 @@ namespace RealRHI {
 			AppendCacheKey(key, desc.depthState.depthTestEnable);
 			AppendCacheKey(key, desc.depthState.depthWriteEnable);
 			AppendCacheKey(key, desc.depthState.compareOp);
+			AppendCacheKey(key, desc.stencilState.enable);
+			for (const auto& face : {desc.stencilState.front, desc.stencilState.back}) {
+				AppendCacheKey(key, face.failOp);
+				AppendCacheKey(key, face.passOp);
+				AppendCacheKey(key, face.depthFailOp);
+				AppendCacheKey(key, face.compareOp);
+				AppendCacheKey(key, face.compareMask);
+				AppendCacheKey(key, face.writeMask);
+				AppendCacheKey(key, face.reference);
+			}
+			AppendCacheKey(key, desc.multisampleState.sampleCount);
+			AppendCacheKey(key, desc.multisampleState.sampleMask);
+			AppendCacheKey(key, desc.multisampleState.alphaToCoverageEnable);
 			AppendCacheKey(key, desc.topology);
 			AppendCacheKey(key, desc.primitiveRestartEnable);
 
@@ -236,6 +249,22 @@ namespace RealRHI {
 		limits.maxTextureDimension3D = source.maxImageDimension3D;
 		limits.maxTextureArrayLayers = source.maxImageArrayLayers;
 		limits.maxColorAttachments = source.maxColorAttachments;
+		limits.colorAttachmentSampleCounts = source.framebufferColorSampleCounts;
+		limits.depthAttachmentSampleCounts = source.framebufferDepthSampleCounts;
+		limits.stencilAttachmentSampleCounts = source.framebufferStencilSampleCounts;
+		limits.noAttachmentSampleCounts = source.framebufferNoAttachmentsSampleCounts;
+		VkPhysicalDeviceVulkan12Properties resolve{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES};
+		VkPhysicalDeviceProperties2 extended{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &resolve
+		};
+		vkGetPhysicalDeviceProperties2(m_PhysicalDevice, &extended);
+		limits.integerColorAttachmentSampleCounts = resolve.framebufferIntegerColorSampleCounts;
+		m_Capabilities.depthStencilResolve = {
+			resolve.supportedDepthResolveModes,
+			resolve.supportedStencilResolveModes,
+			resolve.independentResolve != 0,
+			resolve.independentResolveNone != 0
+		};
 
 		limits.maxDrawIndirectCount = source.maxDrawIndirectCount;
 		limits.maxVertexInputBindings = source.maxVertexInputBindings;
@@ -295,6 +324,36 @@ namespace RealRHI {
 		support.blitSource = (flags & VK_FORMAT_FEATURE_BLIT_SRC_BIT) != 0;
 		support.blitDestination = (flags & VK_FORMAT_FEATURE_BLIT_DST_BIT) != 0;
 		support.storageAtomics = (flags & VK_FORMAT_FEATURE_STORAGE_IMAGE_ATOMIC_BIT) != 0;
+		for (auto usage : {TextureUsage::RenderTarget, TextureUsage::DepthStencil}) {
+			if (!Any(support.usages & usage)) {
+				continue;
+			}
+			VkImageFormatProperties image{};
+			if (vkGetPhysicalDeviceImageFormatProperties(m_PhysicalDevice,
+					nativeFormat,
+					VK_IMAGE_TYPE_2D,
+					VK_IMAGE_TILING_OPTIMAL,
+					Utils::TextureUsageToVkImageUsage(usage),
+					0,
+					&image) == VK_SUCCESS) {
+				if (usage == TextureUsage::RenderTarget) {
+					support.colorAttachmentSampleCounts =
+						image.sampleCounts & m_Capabilities.limits.colorAttachmentSampleCounts;
+					if (Utils::IsIntegerColorFormat(format)) {
+						support.colorAttachmentSampleCounts =
+							image.sampleCounts & m_Capabilities.limits.integerColorAttachmentSampleCounts;
+					}
+				}
+				else {
+					support.depthStencilAttachmentSampleCounts =
+						image.sampleCounts & m_Capabilities.limits.depthAttachmentSampleCounts;
+					if (Utils::TextureFormatToVkImageAspect(format) & VK_IMAGE_ASPECT_STENCIL_BIT) {
+						support.depthStencilAttachmentSampleCounts &=
+							m_Capabilities.limits.stencilAttachmentSampleCounts;
+					}
+				}
+			}
+		}
 		return support;
 	}
 
@@ -312,7 +371,10 @@ namespace RealRHI {
 	bool VulkanDevice::SupportsTexture(const TextureDesc& desc) const {
 		constexpr auto knownUsages = TextureUsage::ShaderResource | TextureUsage::Storage | TextureUsage::RenderTarget |
 			TextureUsage::DepthStencil | TextureUsage::TransferSrc | TextureUsage::TransferDst;
-		if (!desc.width || !desc.height || !desc.depth || !desc.arrayLayers || !desc.mipLevels ||
+		if (!Utils::IsValidSampleCount(desc.sampleCount) ||
+			(desc.sampleCount > 1 &&
+				(desc.mipLevels != 1 || desc.depth != 1 || Any(desc.usage & TextureUsage::Storage))) ||
+			!desc.width || !desc.height || !desc.depth || !desc.arrayLayers || !desc.mipLevels ||
 			desc.mipLevels > std::bit_width(std::max({desc.width, desc.height, desc.depth})) ||
 			desc.usage == TextureUsage::None ||
 			(static_cast<uint32_t>(desc.usage) & ~static_cast<uint32_t>(knownUsages)) != 0) {
@@ -338,6 +400,13 @@ namespace RealRHI {
 			return false;
 		}
 
+		if ((Any(desc.usage & TextureUsage::RenderTarget) &&
+				!(support.colorAttachmentSampleCounts & desc.sampleCount)) ||
+			(Any(desc.usage & TextureUsage::DepthStencil) &&
+				!(support.depthStencilAttachmentSampleCounts & desc.sampleCount))) {
+			return false;
+		}
+
 		VkImageFormatProperties properties{};
 		const auto result = vkGetPhysicalDeviceImageFormatProperties(m_PhysicalDevice,
 			format,
@@ -352,7 +421,7 @@ namespace RealRHI {
 
 		return desc.width <= properties.maxExtent.width && desc.height <= properties.maxExtent.height &&
 			desc.depth <= properties.maxExtent.depth && desc.mipLevels <= properties.maxMipLevels &&
-			desc.arrayLayers <= properties.maxArrayLayers && (properties.sampleCounts & VK_SAMPLE_COUNT_1_BIT) != 0;
+			desc.arrayLayers <= properties.maxArrayLayers && (properties.sampleCounts & desc.sampleCount) != 0;
 	}
 
 	Result VulkanDevice::SetDebugObjectName(VkObjectType type, uint64_t handle, const char* name) const {

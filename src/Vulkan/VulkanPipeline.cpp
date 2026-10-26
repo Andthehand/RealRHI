@@ -279,6 +279,62 @@ namespace RealRHI {
 			return Result::InvalidParameter;
 		}
 
+		auto reject = [&](const char* reason) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				(std::string("CreateGraphicsPipeline: ") + reason).c_str());
+			return Result::InvalidParameter;
+		};
+
+		const auto samples = desc.multisampleState.sampleCount;
+		if (Utils::CompareOpToVkCompareOp(desc.depthState.compareOp) == VK_COMPARE_OP_MAX_ENUM) {
+			return reject("Depth comparison must be valid.");
+		}
+		if (!Utils::IsValidSampleCount(samples)) {
+			return reject("Sample count must be a power of two between 1 and 64.");
+		}
+
+		for (const auto format : desc.renderTargetFormats.colorFormats) {
+			const auto support = m_Device->GetTextureFormatSupport(format);
+			if (!(support.colorAttachmentSampleCounts & samples)) {
+				return reject("Color format does not support the requested attachment sample count.");
+			}
+		}
+
+		const auto depthFormatValue = desc.renderTargetFormats.depthFormat;
+		const auto aspects = Utils::TextureFormatToVkImageAspect(depthFormatValue);
+		if (depthFormatValue != TextureFormat::Unknown &&
+			!(m_Device->GetTextureFormatSupport(depthFormatValue).depthStencilAttachmentSampleCounts & samples)) {
+			return reject("Depth/stencil format does not support the requested attachment sample count.");
+		}
+		if (desc.renderTargetFormats.colorFormats.empty() && depthFormatValue == TextureFormat::Unknown &&
+			!(m_Device->GetCapabilities().limits.noAttachmentSampleCounts & samples)) {
+			return reject("Sample count is unsupported for rendering without attachments.");
+		}
+		if (desc.stencilState.enable && !(aspects & VK_IMAGE_ASPECT_STENCIL_BIT)) {
+			return reject("Stencil testing requires a depth/stencil format with a stencil aspect.");
+		}
+
+		auto convertFace = [](const StencilFaceState& face) {
+			return VkStencilOpState{
+				Utils::StencilOpToVk(face.failOp),
+				Utils::StencilOpToVk(face.passOp),
+				Utils::StencilOpToVk(face.depthFailOp),
+				Utils::CompareOpToVkCompareOp(face.compareOp),
+				face.compareMask,
+				face.writeMask,
+				face.reference
+			};
+		};
+		const auto front = convertFace(desc.stencilState.front);
+		const auto back = convertFace(desc.stencilState.back);
+		for (const auto& face : {front, back}) {
+			if (face.failOp == VK_STENCIL_OP_MAX_ENUM || face.passOp == VK_STENCIL_OP_MAX_ENUM ||
+				face.depthFailOp == VK_STENCIL_OP_MAX_ENUM || face.compareOp == VK_COMPARE_OP_MAX_ENUM) {
+				return reject("Stencil faces require valid operations and comparisons.");
+			}
+		}
+
 		VkShaderModule shaderModule = shader->GetShaderModule();
 
 		const std::vector<ShaderEntryPoint>& entryPoints = shader->GetReflection().entryPoints;
@@ -351,10 +407,16 @@ namespace RealRHI {
 			.lineWidth = 1.0f,
 		};
 
+		const VkSampleMask sampleMask[]{
+			static_cast<uint32_t>(desc.multisampleState.sampleMask),
+			static_cast<uint32_t>(desc.multisampleState.sampleMask >> 32)
+		};
 		VkPipelineMultisampleStateCreateInfo multisampling{
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-			.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+			.rasterizationSamples = static_cast<VkSampleCountFlagBits>(samples),
 			.sampleShadingEnable = VK_FALSE,
+			.pSampleMask = sampleMask,
+			.alphaToCoverageEnable = desc.multisampleState.alphaToCoverageEnable,
 		};
 
 		VkPipelineDepthStencilStateCreateInfo depthStencilState{
@@ -362,6 +424,9 @@ namespace RealRHI {
 			.depthTestEnable = desc.depthState.depthTestEnable,
 			.depthWriteEnable = desc.depthState.depthWriteEnable,
 			.depthCompareOp = Utils::CompareOpToVkCompareOp(desc.depthState.compareOp),
+			.stencilTestEnable = desc.stencilState.enable,
+			.front = front,
+			.back = back,
 		};
 
 		const RenderTargetFormats& formats = desc.renderTargetFormats;
@@ -433,6 +498,16 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
+		m_RenderTargetFormats = desc.renderTargetFormats;
+		m_SampleCount = samples;
+		m_DepthWrites = desc.depthState.depthTestEnable && desc.depthState.depthWriteEnable;
+		auto writesStencil = [](const StencilFaceState& face) {
+			return face.writeMask != 0 &&
+				(face.failOp != StencilOp::Keep || face.passOp != StencilOp::Keep ||
+					face.depthFailOp != StencilOp::Keep);
+		};
+		m_StencilWrites = desc.stencilState.enable &&
+			(writesStencil(desc.stencilState.front) || writesStencil(desc.stencilState.back));
 		m_BindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 		m_Device->RecordResourceCreated(VulkanProfiledResource::Pipeline);
 		const Result nameResult = m_Device->SetDebugName(VK_OBJECT_TYPE_PIPELINE, m_Pipeline, desc.debugName);

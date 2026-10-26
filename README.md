@@ -32,7 +32,7 @@ To run just the tests that need no GPU after building the full backend:
 ctest --preset windows-release-cpu
 ```
 
-This runs `CoreTests` and `ShaderTests`. `ShaderTests` compiles shaders through Slang without creating a Vulkan device. All 16 device-creating tests carry the `gpu;integration` labels and can be run with:
+This runs `CoreTests`, `RenderGraphPlanningTests`, and `ShaderTests`. The planning tests cover resource hazards, deterministic scheduling, culling, stale handles, and texture initialization without creating a device. `ShaderTests` compiles shaders through Slang without creating a Vulkan device. All 16 device-creating tests carry the `gpu;integration` labels and can be run with:
 
 ```powershell
 ctest --preset windows-release-gpu
@@ -50,7 +50,17 @@ cmake --build --preset cpu
 ctest --preset cpu
 ```
 
-This configuration exposes the `RealRHICore` header-only target and builds `CoreTests`. It does not build the `RealRHI` Vulkan library or examples.
+This configuration exposes the `RealRHICore` header-only target, builds the backend-independent `RealRHIGraph` library, and runs `CoreTests` and `RenderGraphPlanningTests`. It does not build the `RealRHI` Vulkan library or examples.
+
+## Architecture and API contracts
+
+`RealRHICore` provides the resource/device interfaces and reference-counting, queue, and cleanup helpers. `RealRHIGraph` implements graph planning and transient resource pooling against those interfaces. `RealRHI` adds the Vulkan backend and Slang compiler and links the graph library transitively. Applications using `RealRHI` keep their existing link target; graph-only users can link `RealRHIGraph` without an SDK.
+
+The device must outlive its resources, queues, graphs holding resources, and pools. Command recordings retain referenced objects until reset; GPU completion makes a recording reusable but does not release those references. Deferred deletion processes a snapshot with completion queries and destruction callbacks outside its lock. Cleanup enqueued during processing remains available for a later call.
+
+Queue backends implement `Submit(const SubmitInfo&)`; the single-list and list-span overloads have shared default implementations. `SubmitInfo::commandLists` and the span overload use `std::span<CommandList* const>`, allowing const arrays while keeping command-list objects mutable. Derived backends should expose the convenience overloads with `using CommandQueue::Submit`. Vulkan validates, retains, and submits the same list collection through one internal path, including swapchain transition buffers when needed.
+
+`Buffer::WriteData` now returns `Result`, matching `ReadData`, so callers can handle mapped-copy and flush failures. Existing calls may ignore the result; custom buffer implementations must update their override's return type. The redundant Vulkan-only `CopyToMappedMemory` helper and unused compiler accessor were removed. `DeviceDesc::maxFramesInFlight` was also removed because the backend never used it: the swapchain currently uses two frame slots, while `FrameResources::Initialize` accepts an explicit slot count.
 
 ## Examples
 
@@ -102,6 +112,41 @@ Pool acquisitions and `Collect()` evict idle allocations in least-recently-acqui
 Aliasing is opt-in and also works without a pool. Identical graph-created resources with disjoint lifetimes on the same native queue can reuse one physical buffer or image. Imports, exports declared with `SetFinalState`, host-visible buffers, overlapping lifetimes, and resources used across native queues stay separate. A retained `Ref` keeps the physical allocation alive but does not preserve transient contents after its last declared use; export a resource when its contents must survive. Different resource descriptions do not share memory in this implementation.
 
 `pool.GetStatistics()` reports resident, idle, peak, and budget bytes plus eviction counts. `graph.GetDiagnostics()` identifies physical alias groups, actual transient allocation bytes, and bytes saved by aliasing.
+
+## Stencil and multisampling
+
+Stencil state lives in `PipelineDesc::stencilState`. Enable it with a stencil-capable depth format (`D24_UNorm_S8_UInt` or `D32_Float_S8_UInt`), then configure the front and back faces independently:
+
+```cpp
+pipelineDesc.stencilState.enable = true;
+pipelineDesc.stencilState.front = {
+    .passOp = StencilOp::Replace,
+    .compareOp = CompareOp::Always,
+    .reference = 1,
+};
+pipelineDesc.stencilState.back = pipelineDesc.stencilState.front;
+```
+
+Each face has fail/pass/depth-fail operations, a comparison, comparison/write masks, and a reference value. Depth and stencil attachments have separate load/store operations. For read-only aspects, use `Load` or `DontCare` and a pipeline that cannot write that aspect. `readOnlyDepth` and `readOnlyStencil` both default to false; stencil load/store defaults to Clear/Store.
+
+Textures and pipelines default to one sample. Query `GetTextureFormatSupport(format)` for attachment sample-count masks, and use `SupportsTexture(desc)` to check the complete combination of usages and dimensions. Match the pipeline sample count to every source attachment:
+
+```cpp
+textureDesc.sampleCount = 4;
+pipelineDesc.multisampleState.sampleCount = 4;
+// Optional: sampleMask and alphaToCoverageEnable.
+
+ColorAttachment color{
+    .target = multisampledColor->GetTextureView(),
+    .resolveTarget = singleSampleColor->GetTextureView(),
+};
+```
+
+Resolve targets require matching formats, selected-mip extents and view layer counts, attachment usage, and one sample. Color resolves use averaging for floating-point/normalized formats and sample zero for integer formats. A swapchain backbuffer can be the color resolve target. Multisampled textures require one mip and depth 1; storage usage and buffer uploads/readback are unsupported. Resolve to a single-sampled texture before reading pixels back.
+
+For depth/stencil resolves, set `DepthStencilAttachment::resolveTarget` and the desired `depthResolveMode`/`stencilResolveMode`. Check `GetCapabilities().depthStencilResolve` for supported mode masks and whether the two aspects can resolve independently. Modes default to `None`.
+
+Declare both the source and resolve target in render graph pass resources. Color resolve targets use `ColorAttachment` layout and `ColorAttachmentOutput`/`ColorAttachmentWrite` state. Depth/stencil resolve targets use **the same stage/access state**, with `DepthStencilAttachment` layout: Vulkan performs depth/stencil resolve writes at color output. Include those writes in the source state of subsequent barriers as well. Source depth/stencil attachments continue to use early/late fragment tests and depth/stencil access.
 
 ## Configuration options
 

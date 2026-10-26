@@ -103,6 +103,28 @@ namespace {
 			.format = TextureFormat::RGBA8_UNorm,
 			.usage = TextureUsage::ShaderResource | TextureUsage::RenderTarget | TextureUsage::TransferSrc
 		};
+		Expect(
+			device.GetCapabilities().limits.colorAttachmentSampleCounts & 1, "Single-sample attachments are supported");
+		for (uint32_t count : {0u, 3u, 65u}) {
+			auto invalid = valid;
+			invalid.mipLevels = 1;
+			invalid.sampleCount = count;
+			Expect(!device.SupportsTexture(invalid), "Reject invalid sample counts without native calls");
+		}
+		for (uint32_t count : {2u, 4u, 8u, 16u, 32u, 64u}) {
+			auto multisampled = valid;
+			multisampled.usage = TextureUsage::RenderTarget;
+			multisampled.mipLevels = 1;
+			multisampled.sampleCount = count;
+			Expect(device.SupportsTexture(multisampled) ==
+					((device.GetTextureFormatSupport(valid.format).colorAttachmentSampleCounts & count) != 0),
+				"Format sample-count masks agree with exact texture queries");
+			multisampled.mipLevels = 2;
+			Expect(!device.SupportsTexture(multisampled), "Multisampled textures cannot have mip chains");
+			multisampled.mipLevels = 1;
+			multisampled.usage |= TextureUsage::Storage;
+			Expect(!device.SupportsTexture(multisampled), "Multisampled storage images require an unenabled feature");
+		}
 		const auto before = device.GetStatistics();
 		for (uint32_t i = 0; i < 8; ++i) {
 			Expect(device.SupportsTexture(valid), "Check combined color usages and mip levels without allocation");

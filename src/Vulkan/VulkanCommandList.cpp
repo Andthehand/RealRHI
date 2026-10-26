@@ -89,6 +89,7 @@ namespace RealRHI {
 			m_State = CommandListState::Recording;
 			m_ComputePipelineBound = false;
 			m_GraphicsPipelineBound = false;
+			m_GraphicsPipeline = nullptr;
 			m_ActiveVertexBindings.clear();
 			m_Rendering = false;
 		}
@@ -200,11 +201,6 @@ namespace RealRHI {
 		}
 
 		const auto* texture = view->GetTexture();
-		if (texture->IsExternal()) {
-			// Swapchain textures expose their current extent through FrameContext.
-			return true;
-		}
-
 		const uint32_t mip = view->GetSubresources().baseMipLevel;
 		const auto extent = texture->GetMipExtent(mip);
 		const uint32_t width = extent.width;
@@ -223,143 +219,233 @@ namespace RealRHI {
 		return true;
 	}
 
+	bool VulkanCommandList::ValidateGraphicsAttachments(const char* operation) const {
+		auto reject = [&](const char* reason) {
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, (std::string(operation) + ": " + reason).c_str());
+			return false;
+		};
+		if (m_GraphicsPipeline == nullptr) {
+			return reject("Bind a graphics pipeline before drawing.");
+		}
+
+		const auto& formats = m_GraphicsPipeline->GetRenderTargetFormats();
+		if (formats.colorFormats != m_RenderTargetFormats.colorFormats ||
+			(formats.depthFormat != m_RenderTargetFormats.depthFormat &&
+				m_RenderTargetFormats.depthFormat != TextureFormat::Unknown)) {
+			return reject("Pipeline attachment formats must match the active rendering scope.");
+		}
+		if (m_RenderingSampleCount != 0 && m_GraphicsPipeline->GetSampleCount() != m_RenderingSampleCount) {
+			return reject("Pipeline sample count must match the source attachments.");
+		}
+		if (m_ReadOnlyDepth && m_GraphicsPipeline->WritesDepth()) {
+			return reject("A depth-writing pipeline cannot draw into a read-only depth attachment.");
+		}
+		if (m_ReadOnlyStencil && m_GraphicsPipeline->WritesStencil()) {
+			return reject("A stencil-writing pipeline cannot draw into a read-only stencil attachment.");
+		}
+
+		return true;
+	}
+
 	void VulkanCommandList::BeginRendering(const RenderingInfo& renderingInfo) {
+		auto reject = [this](const char* reason) {
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, (std::string("BeginRendering: ") + reason).c_str());
+		};
 		if (GetState() != CommandListState::Recording || m_Rendering || renderingInfo.renderArea.width == 0 ||
-			renderingInfo.renderArea.height == 0) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"BeginRendering: Requires recording outside a rendering scope and a nonzero render area.");
+			renderingInfo.renderArea.height == 0 ||
+			renderingInfo.colorAttachments.size() > m_Device->GetCapabilities().limits.maxColorAttachments) {
+			reject("Requires recording outside rendering, a nonzero area, and a supported color attachment count.");
 			return;
 		}
 
-		std::vector<VkRenderingAttachmentInfo> colorAttachmentInfos(renderingInfo.colorAttachments.size());
-		for (uint32_t i = 0; i < renderingInfo.colorAttachments.size(); i++) {
-			const auto& attachment = renderingInfo.colorAttachments[i];
-			if (attachment.target == nullptr) {
-				m_Device->SendDebugMessage(DebugSeverity::Error,
-					DebugMessageType::General,
-					"Rendering color attachment is missing a texture view.");
-				return;
+		uint32_t sampleCount = 0;
+		RenderTargetFormats formats;
+		struct AttachmentUse {
+			VulkanTextureView* view;
+			TextureLayout layout;
+		};
+		std::vector<AttachmentUse> uses;
+		auto addAttachment = [&](TextureView* target, TextureUsage usage, TextureLayout layout, bool resolve) {
+			auto* view = static_cast<VulkanTextureView*>(target);
+			if (view == nullptr) {
+				reject("Attachment requires a texture view.");
+				return false;
+			}
+			if (!ValidateAttachmentView(view, usage, renderingInfo.renderArea)) {
+				return false;
 			}
 
-			auto* textureView = static_cast<VulkanTextureView*>(attachment.target);
-			if (!ValidateAttachmentView(textureView, TextureUsage::RenderTarget, renderingInfo.renderArea)) {
+			const auto* texture = view->GetTexture();
+			const auto range = view->GetSubresources();
+			for (const auto& use : uses) {
+				const auto other = use.view->GetSubresources();
+				if (texture == use.view->GetTexture() && range.baseMipLevel == other.baseMipLevel &&
+					range.baseArrayLayer < other.baseArrayLayer + other.arrayLayerCount &&
+					other.baseArrayLayer < range.baseArrayLayer + range.arrayLayerCount) {
+					reject("Attachments and resolve targets must not overlap.");
+					return false;
+				}
+			}
+			if (!resolve) {
+				if (sampleCount != 0 && sampleCount != texture->GetSampleCount()) {
+					reject("Source attachments must have the same sample count.");
+					return false;
+				}
+				sampleCount = texture->GetSampleCount();
+			}
+			uses.push_back({view, layout});
+			return true;
+		};
+		auto addResolve = [&](TextureView* source, TextureView* target, TextureUsage usage, TextureLayout layout) {
+			auto* sourceView = static_cast<VulkanTextureView*>(source);
+			auto* targetView = static_cast<VulkanTextureView*>(target);
+			if (targetView == nullptr || sourceView->GetTexture()->GetSampleCount() == 1 ||
+				targetView->GetTexture()->GetSampleCount() != 1 ||
+				sourceView->GetTexture()->GetFormat() != targetView->GetTexture()->GetFormat()) {
+				reject("Resolve requires a multisampled source and a single-sampled target with matching format.");
+				return false;
+			}
+			const auto sourceExtent =
+				sourceView->GetTexture()->GetMipExtent(sourceView->GetSubresources().baseMipLevel);
+			const auto targetExtent =
+				targetView->GetTexture()->GetMipExtent(targetView->GetSubresources().baseMipLevel);
+			if (sourceExtent.width != targetExtent.width || sourceExtent.height != targetExtent.height ||
+				sourceView->GetSubresources().arrayLayerCount != targetView->GetSubresources().arrayLayerCount) {
+				reject("Resolve source and target views require matching extents and layer counts.");
+				return false;
+			}
+			return addAttachment(target, usage, layout, true);
+		};
+
+		std::vector<VkRenderingAttachmentInfo> colors;
+		for (const auto& attachment : renderingInfo.colorAttachments) {
+			if (!addAttachment(attachment.target, TextureUsage::RenderTarget, TextureLayout::ColorAttachment, false)) {
 				return;
 			}
-
-			RetainResource(textureView);
-			RetainResource(const_cast<VulkanTexture*>(textureView->GetTexture()));
-
-			VkClearValue clearColor = {
-				{{attachment.clearColor.r, attachment.clearColor.g, attachment.clearColor.b, attachment.clearColor.a}}
-			};
-			colorAttachmentInfos[i] = {
+			auto* view = static_cast<VulkanTextureView*>(attachment.target);
+			const auto format = Utils::VkFormatToTextureFormat(view->GetTexture()->GetFormat());
+			formats.colorFormats.push_back(format);
+			VkRenderingAttachmentInfo info{
 				.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-				.imageView = textureView->GetImageView(),
+				.imageView = view->GetImageView(),
 				.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-				.resolveMode = VK_RESOLVE_MODE_NONE,
 				.loadOp = Utils::LoadOpToVkLoadOp(attachment.loadOp),
 				.storeOp = Utils::StoreOpToVkStoreOp(attachment.storeOp),
-				.clearValue = clearColor,
+				.clearValue = {
+					{{attachment.clearColor.r,
+						attachment.clearColor.g,
+						attachment.clearColor.b,
+						attachment.clearColor.a}}
+				},
 			};
+			if (attachment.resolveTarget != nullptr) {
+				if (!addResolve(attachment.target,
+						attachment.resolveTarget,
+						TextureUsage::RenderTarget,
+						TextureLayout::ColorAttachment)) {
+					return;
+				}
+				info.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
+				if (Utils::IsIntegerColorFormat(format)) {
+					info.resolveMode = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
+				}
+				info.resolveImageView = static_cast<VulkanTextureView*>(attachment.resolveTarget)->GetImageView();
+				info.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			}
+			colors.push_back(info);
 		}
 
-		VkRenderingAttachmentInfo depthAttachmentInfo{
-			.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-		};
-		const VkRenderingAttachmentInfo* pDepthAttachment = nullptr;
-		const VkRenderingAttachmentInfo* pStencilAttachment = nullptr;
-
+		VkRenderingAttachmentInfo depth{.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+		VkRenderingAttachmentInfo stencil{.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+		bool hasStencil = false;
 		if (renderingInfo.hasDepth) {
 			const auto& attachment = renderingInfo.depthAttachment;
-			if (attachment.target == nullptr) {
-				m_Device->SendDebugMessage(DebugSeverity::Error,
-					DebugMessageType::General,
-					"Rendering depth attachment is missing a texture view.");
+			auto* view = static_cast<VulkanTextureView*>(attachment.target);
+			if (view == nullptr) {
+				reject("Depth/stencil attachment requires a texture view.");
 				return;
 			}
-
-			auto* textureView = static_cast<VulkanTextureView*>(attachment.target);
-			if (!ValidateAttachmentView(textureView, TextureUsage::DepthStencil, renderingInfo.renderArea)) {
+			formats.depthFormat = Utils::VkFormatToTextureFormat(view->GetTexture()->GetFormat());
+			hasStencil = (Utils::TextureFormatToVkImageAspect(formats.depthFormat) & VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
+			const bool readOnly = attachment.readOnlyDepth && (!hasStencil || attachment.readOnlyStencil);
+			const auto layout = readOnly ? TextureLayout::DepthStencilReadOnly : TextureLayout::DepthStencilAttachment;
+			if (!addAttachment(attachment.target, TextureUsage::DepthStencil, layout, false)) {
 				return;
 			}
-
-			RetainResource(textureView);
-			RetainResource(const_cast<VulkanTexture*>(textureView->GetTexture()));
-
-			const auto format = Utils::VkFormatToTextureFormat(textureView->GetTexture()->GetFormat());
-			const VkImageAspectFlags aspectMask = Utils::TextureFormatToVkImageAspect(format);
-			const bool hasStencilAspect = (aspectMask & VK_IMAGE_ASPECT_STENCIL_BIT) != 0;
-			const bool readOnly = attachment.readOnlyDepth && (!hasStencilAspect || attachment.readOnlyStencil);
-			VkImageLayout depthLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-			if (readOnly) {
-				depthLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+			if ((attachment.readOnlyDepth && attachment.depthLoadOp == LoadOp::Clear) ||
+				(hasStencil && attachment.readOnlyStencil && attachment.stencilLoadOp == LoadOp::Clear)) {
+				reject("Read-only depth/stencil aspects cannot use a Clear load operation.");
+				return;
 			}
-			VkClearValue clearValue{};
-			clearValue.depthStencil = {
-				.depth = attachment.clear.depth,
-				.stencil = attachment.clear.stencil,
-			};
+			depth.imageView = view->GetImageView();
+			depth.imageLayout = readOnly ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+										 : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+			depth.loadOp = Utils::LoadOpToVkLoadOp(attachment.depthLoadOp);
+			depth.storeOp = Utils::StoreOpToVkStoreOp(attachment.depthStoreOp);
+			depth.clearValue.depthStencil = {attachment.clear.depth, attachment.clear.stencil};
+			stencil = depth;
+			stencil.loadOp = Utils::LoadOpToVkLoadOp(attachment.stencilLoadOp);
+			stencil.storeOp = Utils::StoreOpToVkStoreOp(attachment.stencilStoreOp);
 
-			depthAttachmentInfo = {
-				.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-				.imageView = textureView->GetImageView(),
-				.imageLayout = depthLayout,
-				.resolveMode = VK_RESOLVE_MODE_NONE,
-				.loadOp = Utils::LoadOpToVkLoadOp(attachment.depthLoadOp),
-				.storeOp = Utils::StoreOpToVkStoreOp(attachment.depthStoreOp),
-				.clearValue = clearValue,
+			const auto depthMode = static_cast<uint32_t>(attachment.depthResolveMode);
+			const auto stencilMode = static_cast<uint32_t>(attachment.stencilResolveMode);
+			const auto& support = m_Device->GetCapabilities().depthStencilResolve;
+			auto validMode = [](uint32_t mode, uint32_t supported) {
+				return mode == 0 || ((mode & (mode - 1)) == 0 && (mode & supported) != 0);
 			};
-
-			if ((aspectMask & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) {
-				pDepthAttachment = &depthAttachmentInfo;
+			if (!validMode(depthMode, support.depthModes) || !validMode(stencilMode, support.stencilModes) ||
+				(!hasStencil && stencilMode != 0) ||
+				((depthMode != 0 || stencilMode != 0) != (attachment.resolveTarget != nullptr)) ||
+				(hasStencil && depthMode != stencilMode &&
+					((depthMode == 0 || stencilMode == 0) ? !support.independentResolveNone
+														  : !support.independentResolve))) {
+				reject(
+					"Depth/stencil resolve modes must be supported, compatible, and accompanied by a resolve target.");
+				return;
 			}
-			if (hasStencilAspect) {
-				pStencilAttachment = &depthAttachmentInfo;
+			if (attachment.resolveTarget != nullptr) {
+				if (!addResolve(attachment.target,
+						attachment.resolveTarget,
+						TextureUsage::DepthStencil,
+						TextureLayout::DepthStencilAttachment)) {
+					return;
+				}
+				const auto resolveView = static_cast<VulkanTextureView*>(attachment.resolveTarget)->GetImageView();
+				depth.resolveMode = static_cast<VkResolveModeFlagBits>(depthMode);
+				stencil.resolveMode = static_cast<VkResolveModeFlagBits>(stencilMode);
+				depth.resolveImageView = resolveView;
+				stencil.resolveImageView = resolveView;
+				depth.resolveImageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+				stencil.resolveImageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 			}
 		}
 
-		auto& renderAreaRect = renderingInfo.renderArea;
-		VkRect2D renderArea{
-			.offset =
-				{
-					.x = renderAreaRect.x,
-					.y = renderAreaRect.y,
-				},
-			.extent = {
-				.width = renderAreaRect.width,
-				.height = renderAreaRect.height,
-			},
-		};
-
-		VkRenderingInfo renderPassInfo{
+		const VkRenderingInfo info{
 			.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-			.renderArea = renderArea,
+			.renderArea =
+				{{renderingInfo.renderArea.x, renderingInfo.renderArea.y},
+					{renderingInfo.renderArea.width, renderingInfo.renderArea.height}},
 			.layerCount = 1,
-			.colorAttachmentCount = static_cast<uint32_t>(colorAttachmentInfos.size()),
-			.pColorAttachments = colorAttachmentInfos.data(),
-			.pDepthAttachment = pDepthAttachment,
-			.pStencilAttachment = pStencilAttachment,
+			.colorAttachmentCount = static_cast<uint32_t>(colors.size()),
+			.pColorAttachments = colors.data(),
+			.pDepthAttachment = renderingInfo.hasDepth ? &depth : nullptr,
+			.pStencilAttachment = hasStencil ? &stencil : nullptr,
 		};
-
-		auto recordAttachment = [this](TextureView* view, TextureLayout layout) {
-			auto* textureView = static_cast<VulkanTextureView*>(view);
-			RecordTextureUse(const_cast<VulkanTexture*>(textureView->GetTexture()),
-				textureView->GetSubresources(),
-				layout,
+		for (const auto& use : uses) {
+			RetainResource(use.view);
+			RetainResource(const_cast<VulkanTexture*>(use.view->GetTexture()));
+			RecordTextureUse(const_cast<VulkanTexture*>(use.view->GetTexture()),
+				use.view->GetSubresources(),
+				use.layout,
 				"BeginRendering");
-		};
-		for (const auto& attachment : renderingInfo.colorAttachments) {
-			recordAttachment(attachment.target, TextureLayout::ColorAttachment);
 		}
-		if (renderingInfo.hasDepth) {
-			TextureLayout layout = TextureLayout::DepthStencilAttachment;
-			if (depthAttachmentInfo.imageLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL) {
-				layout = TextureLayout::DepthStencilReadOnly;
-			}
-			recordAttachment(renderingInfo.depthAttachment.target, layout);
-		}
-		vkCmdBeginRendering(m_CommandBuffer, &renderPassInfo);
+		m_RenderTargetFormats = std::move(formats);
+		m_RenderingSampleCount = sampleCount;
+		m_ReadOnlyDepth = renderingInfo.hasDepth && renderingInfo.depthAttachment.readOnlyDepth;
+		m_ReadOnlyStencil = hasStencil && renderingInfo.depthAttachment.readOnlyStencil;
+		vkCmdBeginRendering(m_CommandBuffer, &info);
 		m_Rendering = true;
 	}
 
@@ -499,6 +585,7 @@ namespace RealRHI {
 		}
 		else {
 			m_GraphicsPipelineBound = true;
+			m_GraphicsPipeline = vulkanPipeline;
 			m_ActiveVertexBindings = vulkanPipeline->GetVertexBindings();
 		}
 	}
@@ -634,6 +721,10 @@ namespace RealRHI {
 				"Draw: Requires an active rendering scope and a bound graphics pipeline.");
 			return;
 		}
+		if (!ValidateGraphicsAttachments("Draw")) {
+			return;
+		}
+
 		RecordShaderResources("Draw");
 		if (!RecordVertexBuffers("Draw vertex buffer")) {
 			return;
@@ -652,6 +743,10 @@ namespace RealRHI {
 				"DrawIndexed: Requires an active rendering scope and a bound graphics pipeline.");
 			return;
 		}
+		if (!ValidateGraphicsAttachments("DrawIndexed")) {
+			return;
+		}
+
 		if (m_IndexBuffer == nullptr || firstIndex > m_IndexBuffer->GetSize() / sizeof(uint32_t) ||
 			indexCount > m_IndexBuffer->GetSize() / sizeof(uint32_t) - firstIndex) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
@@ -731,6 +826,9 @@ namespace RealRHI {
 				"DrawIndirect: Requires an active rendering scope and a bound graphics pipeline.");
 			return;
 		}
+		if (!ValidateGraphicsAttachments("DrawIndirect")) {
+			return;
+		}
 
 		auto* buffer = static_cast<VulkanBuffer*>(arguments);
 		if (!ValidateIndirectArguments(
@@ -756,6 +854,10 @@ namespace RealRHI {
 				"DrawIndexedIndirect: Requires an active rendering scope and a bound graphics pipeline.");
 			return;
 		}
+		if (!ValidateGraphicsAttachments("DrawIndexedIndirect")) {
+			return;
+		}
+
 		if (m_IndexBuffer == nullptr) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
@@ -839,6 +941,13 @@ namespace RealRHI {
 
 		auto* sourceBuffer = static_cast<VulkanBuffer*>(source);
 		auto* destinationTexture = static_cast<VulkanTexture*>(destination);
+		if (destinationTexture != nullptr && destinationTexture->GetSampleCount() != 1) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"CopyBufferToTexture: Buffer uploads require a single-sampled destination texture.");
+			return;
+		}
+
 		if (sourceBuffer == nullptr || destinationTexture == nullptr ||
 			region.mipLevel >= destinationTexture->GetMipLevelCount() ||
 			region.baseArrayLayer >= destinationTexture->GetArrayLayerCount() ||
@@ -920,6 +1029,13 @@ namespace RealRHI {
 
 		auto* texture = static_cast<VulkanTexture*>(source);
 		auto* buffer = static_cast<VulkanBuffer*>(destination);
+		if (texture != nullptr && texture->GetSampleCount() != 1) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"CopyTextureToBuffer: Resolve multisampled textures to a single-sampled texture before readback.");
+			return;
+		}
+
 		if (texture == nullptr || buffer == nullptr || !Any(texture->GetUsage() & TextureUsage::TransferSrc) ||
 			!Any(buffer->GetUsage() & BufferUsage::TransferDst) ||
 
@@ -994,6 +1110,15 @@ namespace RealRHI {
 
 		auto* sourceTexture = static_cast<VulkanTexture*>(source);
 		auto* destinationTexture = static_cast<VulkanTexture*>(destination);
+		if (sourceTexture != nullptr && destinationTexture != nullptr &&
+			sourceTexture->GetSampleCount() != destinationTexture->GetSampleCount()) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"CopyTexture: Source and destination must have matching sample counts; use attachment resolves to "
+				"reduce samples.");
+			return;
+		}
+
 		if (sourceTexture == nullptr || destinationTexture == nullptr ||
 			!Any(sourceTexture->GetUsage() & TextureUsage::TransferSrc) ||
 			!Any(destinationTexture->GetUsage() & TextureUsage::TransferDst) ||

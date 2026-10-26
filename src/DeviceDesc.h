@@ -65,8 +65,6 @@ namespace RealRHI {
 
 		std::filesystem::path shaderDirectory = "assets/shaders";
 
-		uint32_t maxFramesInFlight = 2;
-
 		bool enableDebug = false;
 		bool enableValidationLayers = false;
 		DebugCallback debugCallback = DefaultDebugCallback;

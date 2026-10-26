@@ -60,6 +60,39 @@ namespace RealRHI {
 		CompareOp compareOp = CompareOp::Less;
 	};
 
+	enum class StencilOp {
+		Keep,
+		Zero,
+		Replace,
+		IncrementClamp,
+		DecrementClamp,
+		Invert,
+		IncrementWrap,
+		DecrementWrap,
+	};
+
+	struct StencilFaceState {
+		StencilOp failOp = StencilOp::Keep;
+		StencilOp passOp = StencilOp::Keep;
+		StencilOp depthFailOp = StencilOp::Keep;
+		CompareOp compareOp = CompareOp::Always;
+		uint32_t compareMask = UINT32_MAX;
+		uint32_t writeMask = UINT32_MAX;
+		uint32_t reference = 0;
+	};
+
+	struct StencilState {
+		bool enable = false;
+		StencilFaceState front;
+		StencilFaceState back;
+	};
+
+	struct MultisampleState {
+		uint32_t sampleCount = 1;
+		uint64_t sampleMask = UINT64_MAX;
+		bool alphaToCoverageEnable = false;
+	};
+
 	enum class BlendFactor {
 		Zero,
 		One,
@@ -129,6 +162,8 @@ namespace RealRHI {
 
 		RasterState rasterState;
 		DepthState depthState;
+		StencilState stencilState;
+		MultisampleState multisampleState;
 		PrimitiveTopology topology = PrimitiveTopology::TriangleList;
 		// Restart uses the index type's maximum value and is supported for strips and fans.
 		bool primitiveRestartEnable = false;

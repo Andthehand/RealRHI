@@ -426,10 +426,11 @@ namespace RealRHI {
 			return Result::InvalidParameter;
 		}
 
-		if (destination->IsExternal() || !Any(destination->GetUsage() & TextureUsage::TransferDst)) {
+		if (destination->IsExternal() || destination->GetSampleCount() != 1 ||
+			!Any(destination->GetUsage() & TextureUsage::TransferDst)) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
-				"UploadTexture: Destination must be a non-swapchain TransferDst texture.");
+				"UploadTexture: Destination must be a single-sampled, non-swapchain TransferDst texture.");
 
 			return Result::InvalidParameter;
 		}

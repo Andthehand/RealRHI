@@ -26,6 +26,7 @@ namespace RealRHI {
 
 		Result UploadData(const void* data, uint32_t size);
 
+		uint32_t GetSampleCount() const override { return m_SampleCount; }
 		uint64_t GetAllocationSize() const override { return m_AllocationBytes; }
 
 		TextureView* GetTextureView() override { return m_TextureView.Raw(); }
@@ -73,14 +74,16 @@ namespace RealRHI {
 		static Result CreateFromSwapChain(const VulkanDevice* device,
 			VkFormat format,
 			VkImage image,
+			VkExtent2D extent,
 			Ref<VulkanTexture>& outTexture);
-		Result InitSwapChainTexture(VkFormat format, VkImage image);
+		Result InitSwapChainTexture(VkFormat format, VkImage image, VkExtent2D extent);
 
 	private:
 		const VulkanDevice* m_Device = nullptr;
 		VkImage m_Image = VK_NULL_HANDLE;
 		VmaAllocation m_Allocation = VK_NULL_HANDLE;
 		uint64_t m_AllocationBytes = 0;
+		uint32_t m_SampleCount = 1;
 
 		// Submission-ordered state; never modified during command recording.
 		std::vector<VulkanTextureState> m_SubresourceStates;

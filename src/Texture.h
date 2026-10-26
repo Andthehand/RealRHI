@@ -13,6 +13,7 @@ namespace RealRHI {
 
 		// Native allocation size, including alignment; external images report zero.
 		virtual uint64_t GetAllocationSize() const = 0;
+		virtual uint32_t GetSampleCount() const = 0;
 
 		// Borrowed default view; keep the texture alive while using it.
 		// Sampled-only textures expose all mips; storage/attachment defaults select the base mip.
