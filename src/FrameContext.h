@@ -10,5 +10,6 @@ namespace RealRHI {
 		TextureView* backBufferView = nullptr;
 		uint32_t width = 0;
 		uint32_t height = 0;
+		uint64_t acquisitionId = 0;
 	};
 }

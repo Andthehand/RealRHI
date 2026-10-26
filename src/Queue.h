@@ -1,12 +1,15 @@
 #pragma once
+#include "FrameContext.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <span>
 
 namespace RealRHI {
 	class CommandList;
+	class Swapchain;
 
 	enum class QueueType {
 		Graphics,
@@ -31,11 +34,22 @@ namespace RealRHI {
 		bool operator==(const SubmissionToken& other) const = default;
 	};
 
+	// Frame endpoints are serialized with BeginFrame/Present. Queue submissions retain
+	// the swapchain through completion; final synchronization must join all frame work.
+	struct SwapchainSubmitSync {
+		Swapchain* swapchain = nullptr;
+		FrameContext frame;
+		bool waitForAcquire = false;
+		bool signalForPresent = false;
+	};
+
 	struct SubmitInfo {
 		std::span<CommandList*> commandLists{};
 		// Acquiring ownership from another family requires its release submission token
 		// (or a later token on that queue). A CPU Wait does not replace this dependency.
 		std::span<const SubmissionToken> waitFor{};
+		// Endpoint synchronization only; command lists must record image layout/ownership barriers.
+		std::optional<SwapchainSubmitSync> swapchain;
 	};
 
 	class CommandQueue {

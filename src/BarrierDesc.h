@@ -73,6 +73,10 @@ namespace RealRHI {
 		// Roles sharing a family produce an ordinary barrier, with no ownership transfer.
 		std::optional<QueueType> sourceQueue;
 		std::optional<QueueType> destinationQueue;
+		// Swapchain endpoints use the presentation family rather than another RHI queue.
+		// Both flags are exclusive and cannot be combined with explicit queue endpoints.
+		bool acquireFromPresent = false;
+		bool releaseToPresent = false;
 	};
 
 	struct BufferBarrier {

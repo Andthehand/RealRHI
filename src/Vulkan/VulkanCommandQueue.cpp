@@ -3,6 +3,7 @@
 #include "VulkanCommandList.h"
 #include "VulkanCpuTimer.h"
 #include "VulkanDevice.h"
+#include "VulkanSwapchain.h"
 
 #include <algorithm>
 #include <unordered_map>
@@ -119,7 +120,36 @@ namespace RealRHI {
 			});
 		}
 
-		return SubmitTracked(commandBufferInfos, {}, {}, trackedLists, VK_NULL_HANDLE, submitInfo.waitFor);
+		if (!submitInfo.swapchain) {
+			return SubmitTracked(commandBufferInfos, {}, {}, trackedLists, VK_NULL_HANDLE, submitInfo.waitFor);
+		}
+		const auto& request = *submitInfo.swapchain;
+		auto* swapchain = static_cast<VulkanSwapchain*>(request.swapchain);
+		if (!swapchain || !swapchain->CanSubmit(request)) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"Submit: Swapchain endpoint requires a current frame and an unconsumed acquire or pending "
+				"presentation.");
+			return {};
+		}
+		std::vector<VkSemaphoreSubmitInfo> waits;
+		std::vector<VkSemaphoreSubmitInfo> signals;
+		if (request.waitForAcquire) {
+			waits.push_back(
+				{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+					.semaphore = swapchain->GetImageAvailableSemaphore(request.frame.frameIndex),
+					.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT});
+		}
+		if (request.signalForPresent) {
+			signals.push_back(
+				{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
+					.semaphore = swapchain->GetRenderFinishedSemaphore(request.frame.imageIndex),
+					.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT});
+		}
+		const auto token = SubmitTracked(
+			commandBufferInfos, waits, signals, trackedLists, VK_NULL_HANDLE, submitInfo.waitFor, swapchain);
+		swapchain->FinishSubmission(request, token);
+		return token;
 	}
 
 	SubmissionToken VulkanCommandQueue::SubmitTracked(std::span<const VkCommandBufferSubmitInfo> commandBuffers,
@@ -127,7 +157,8 @@ namespace RealRHI {
 		std::span<const VkSemaphoreSubmitInfo> signalSemaphores,
 		std::span<CommandList*> trackedLists,
 		VkFence fence,
-		std::span<const SubmissionToken> waitFor) {
+		std::span<const SubmissionToken> waitFor,
+		Swapchain* retainedSwapchain) {
 		const VulkanCpuTimer timer(m_Device);
 
 		std::vector<VkSemaphoreSubmitInfo> waitSemaphoreInfos(waitSemaphores.begin(), waitSemaphores.end());
@@ -238,6 +269,7 @@ namespace RealRHI {
 		++m_NextFrameValue;
 		m_PendingSubmissions.push_back({
 			.value = submissionValue,
+			.swapchain = Ref<Swapchain>(retainedSwapchain),
 			.commandLists = std::move(retainedLists),
 		});
 

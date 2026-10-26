@@ -28,11 +28,16 @@ namespace RealRHI {
 		TextureFormat GetBackBufferFormat() const override { return m_SwapchainImageFormat; }
 
 		FrameContext BeginFrame() override;
-		void Present(const FrameContext& frame) override;
+		Result Present(const FrameContext& frame) override;
+		bool IsFrameReady(const FrameContext& frame) const override;
+		Texture* GetBackBuffer(const FrameContext& frame) override;
 		uint32_t GetMaxFramesInFlight() const override { return s_MaxFramesInFlight; }
 
 	protected:
 		friend class VulkanDevice;
+		friend class VulkanCommandQueue;
+		bool CanSubmit(const SwapchainSubmitSync& sync) const;
+		void FinishSubmission(const SwapchainSubmitSync& sync, SubmissionToken token);
 		bool IsFrameValid(const FrameContext& frame) const;
 		TextureView* GetBackBufferView(uint32_t imageIndex);
 
@@ -65,6 +70,9 @@ namespace RealRHI {
 			SubmissionToken completionToken{};
 			bool submissionPending = false;
 			bool submitted = false;
+			bool acquireConsumed = false;
+			uint64_t acquisitionId = 0;
+			uint32_t imageIndex = UINT32_MAX;
 			VkCommandBuffer preCmdBuf = VK_NULL_HANDLE;
 			VkCommandBuffer postCmdBuf = VK_NULL_HANDLE;
 		};
@@ -77,7 +85,7 @@ namespace RealRHI {
 	private:
 		static constexpr uint32_t s_MaxFramesInFlight = 2;
 		const VulkanDevice* m_Device = nullptr;
-		const VulkanWindow* m_Window = nullptr;
+		Ref<VulkanWindow> m_Window;
 		VkSurfaceKHR m_Surface = VK_NULL_HANDLE;
 		VkSwapchainKHR m_Swapchain = VK_NULL_HANDLE;
 

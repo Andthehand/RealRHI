@@ -133,6 +133,12 @@ namespace RealRHI {
 					 << barrier.subresources.mipLevelCount << " layers=" << barrier.subresources.baseArrayLayer << "+"
 					 << barrier.subresources.arrayLayerCount << " " << LayoutName(barrier.oldLayout) << " -> "
 					 << LayoutName(barrier.newLayout);
+				if (barrier.acquireFromPresent) {
+					text << " acquire from Present";
+				}
+				if (barrier.releaseToPresent) {
+					text << " release to Present";
+				}
 				describe(barrier);
 			}
 		}
@@ -208,6 +214,7 @@ namespace RealRHI {
 		m_Prerequisites.clear();
 		m_Plan.clear();
 		m_FinalBarriers = {};
+		m_PresentationBarriers = {};
 	}
 
 	void RenderGraph::SetOptions(RenderGraphOptions options) {
@@ -221,6 +228,9 @@ namespace RealRHI {
 		m_Resources.clear();
 		m_Dependencies.clear();
 		m_Id = s_NextGraphId++;
+		m_FrameSwapchain.Reset();
+		m_Frame = {};
+		m_BackBuffer = UINT32_MAX;
 	}
 
 	bool RenderGraph::IsTexture(const Resource& resource) {
@@ -470,6 +480,24 @@ namespace RealRHI {
 		return pass.graph == m_Id && pass.index < m_Passes.size();
 	}
 
+	RenderGraphResource RenderGraph::ImportBackBuffer(Swapchain& swapchain, const FrameContext& frame) {
+		if (m_FrameSwapchain || !swapchain.IsFrameReady(frame)) {
+			Report("ImportBackBuffer requires a current, unsubmitted frame and at most one swapchain frame per graph.");
+			return {};
+		}
+		auto* texture = swapchain.GetBackBuffer(frame);
+		if (!texture) {
+			Report("ImportBackBuffer could not resolve the acquired image.");
+			return {};
+		}
+		const auto resource = ImportTexture(texture, TextureLayout::Undefined);
+		SetFinalState(resource, {PipelineStage::AllCommands, ResourceAccess::MemoryRead}, TextureLayout::Present);
+		m_FrameSwapchain = &swapchain;
+		m_Frame = frame;
+		m_BackBuffer = resource.index;
+		return resource;
+	}
+
 	void RenderGraph::SetFinalState(RenderGraphResource resource, ResourceState state, TextureLayout layout) {
 		Invalidate();
 		if (!IsValid(resource)) {
@@ -495,6 +523,15 @@ namespace RealRHI {
 	}
 
 	bool RenderGraph::ValidateResources(std::string& error) const {
+		if (m_FrameSwapchain &&
+			(!m_Resources[m_BackBuffer].hasFinalState ||
+				m_Resources[m_BackBuffer].finalLayout != TextureLayout::Present ||
+				m_Resources[m_BackBuffer].finalState.stages != PipelineStage::AllCommands ||
+				m_Resources[m_BackBuffer].finalState.access != ResourceAccess::MemoryRead)) {
+			error = "An imported backbuffer must retain its automatic Present layout and AllCommands/MemoryRead final "
+					"state.";
+			return false;
+		}
 		for (size_t i = 0; i < m_Resources.size(); ++i) {
 			const auto& resource = m_Resources[i];
 			const std::string context = "Resource " + std::to_string(i) + ": ";
@@ -891,6 +928,7 @@ namespace RealRHI {
 			diagnostics.initialBarriers.push_back(std::move(info));
 		}
 		diagnostics.batches = m_Batches;
+		diagnostics.presentationBarriers = m_PresentationBarriers;
 		return diagnostics;
 	}
 
@@ -914,6 +952,12 @@ namespace RealRHI {
 			}
 			if (batch.initialRelease) {
 				text << " initial barriers " << *batch.initialRelease;
+			}
+			if (batch.waitForAcquire) {
+				text << " waits for acquire";
+			}
+			if (batch.presentation) {
+				text << " signals presentation";
 			}
 			text << " waits:";
 			for (auto dependency : batch.prerequisites) {
@@ -966,6 +1010,10 @@ namespace RealRHI {
 			DescribeBarriers(text, step.barriers);
 			text << "  barriers after:\n";
 			DescribeBarriers(text, step.afterBarriers);
+		}
+		if (m_FrameSwapchain && m_MultiQueue) {
+			text << "Presentation barriers:\n";
+			DescribeBarriers(text, m_PresentationBarriers);
 		}
 		// Multi-queue exports already appear after their last-use passes or in prefix batches.
 		if (!m_MultiQueue) {
@@ -1034,6 +1082,17 @@ namespace RealRHI {
 				text << "  p" << dependency.index << " -> p" << pass.pass.index << ";\n";
 			}
 		}
+		if (m_FrameSwapchain && !diagnostics.batches.empty()) {
+			text << "  present [shape=box,label=\"Present\"];\n";
+			for (const auto& batch : diagnostics.batches) {
+				if (!batch.steps.empty()) {
+					text << "  p" << m_Order[batch.steps.back()] << " -> present;\n";
+				}
+				else if (batch.initialRelease) {
+					text << "  initial" << *batch.initialRelease << " -> present;\n";
+				}
+			}
+		}
 		text << "}\n";
 		return text.str();
 	}
@@ -1070,6 +1129,10 @@ namespace RealRHI {
 	}
 
 	Result RenderGraph::Execute(Device& device, CommandList& commands, TransientResourcePool* pool) {
+		if (m_FrameSwapchain) {
+			Report("Graphs importing a backbuffer require Submit to synchronize and present the acquired image.");
+			return Result::InvalidParameter;
+		}
 		if (commands.GetState() != CommandListState::Recording) {
 			Report("Execute requires an active command list recording outside rendering.");
 			return Result::InvalidParameter;
@@ -1246,6 +1309,11 @@ namespace RealRHI {
 					// Do not carry stage masks from a foreign queue family into later barriers.
 					state.state = use.state;
 				}
+				if (resourceIndex == m_BackBuffer && previous == UINT32_MAX) {
+					for (auto& barrier : barriers.textures) {
+						barrier.acquireFromPresent = true;
+					}
+				}
 				AppendBarriers(step.barriers, barriers);
 				lastUse[resourceIndex] = position;
 			}
@@ -1256,8 +1324,18 @@ namespace RealRHI {
 				continue;
 			}
 			BarrierDesc barriers;
+			if (i == m_BackBuffer) {
+				states[i].used = false;
+			}
 			Transition(i, resource.finalState, resource.finalLayout, states[i], barriers);
 			AppendBarriers(m_FinalBarriers, barriers);
+			if (i == m_BackBuffer) {
+				for (auto& barrier : barriers.textures) {
+					barrier.releaseToPresent = true;
+				}
+				AppendBarriers(m_PresentationBarriers, barriers);
+				continue;
+			}
 			if (lastUse[i] != UINT32_MAX) {
 				AppendBarriers(m_Plan[lastUse[i]].afterBarriers, barriers);
 			}
@@ -1269,6 +1347,8 @@ namespace RealRHI {
 
 	void RenderGraph::BuildBatches(Device& device) {
 		m_Batches.clear();
+		bool acquired = false;
+		QueueType presentationQueue = QueueType::Graphics;
 		std::vector<uint32_t> passBatches(m_Passes.size(), UINT32_MAX);
 		std::vector<std::vector<uint32_t>> consumers(m_Passes.size());
 		std::vector<std::vector<uint32_t>> initialWaits(m_Passes.size());
@@ -1305,10 +1385,18 @@ namespace RealRHI {
 			std::sort(dependencies.begin(), dependencies.end());
 			dependencies.erase(std::unique(dependencies.begin(), dependencies.end()), dependencies.end());
 
+			const auto& uses = m_Passes[index].desc.resources;
+			const bool backBuffer = std::any_of(uses.begin(), uses.end(), [&](const auto& use) {
+				return use.resource.index == m_BackBuffer;
+			});
+			const bool firstBackBufferUse = backBuffer && !acquired;
+			if (backBuffer) {
+				presentationQueue = step.queue;
+			}
 			bool merge = false;
 			if (!m_Batches.empty()) {
 				const auto& previous = m_Batches.back();
-				if (!previous.steps.empty() && previous.nativeQueue == queue) {
+				if (!firstBackBufferUse && !previous.steps.empty() && previous.nativeQueue == queue) {
 					// Do not move a later pass's new wait ahead of earlier independent work.
 					merge = std::includes(previous.prerequisites.begin(),
 						previous.prerequisites.end(),
@@ -1337,6 +1425,23 @@ namespace RealRHI {
 			m_Batches.back().steps.push_back(position);
 			passBatches[index] = batch;
 			step.batchIndex = batch;
+			if (firstBackBufferUse) {
+				m_Batches.back().waitForAcquire = true;
+				acquired = true;
+			}
+		}
+		if (m_FrameSwapchain) {
+			RenderGraphBatchInfo present{
+				.queue = presentationQueue,
+				.nativeQueue = device.GetCommandQueue(presentationQueue)->GetQueueId(),
+				.presentation = true
+			};
+			for (uint32_t i = 0; i < m_Batches.size(); ++i) {
+				if (m_Batches[i].nativeQueue != present.nativeQueue) {
+					present.prerequisites.push_back(i);
+				}
+			}
+			m_Batches.push_back(std::move(present));
 		}
 	}
 
@@ -1345,6 +1450,11 @@ namespace RealRHI {
 		TransientResourcePool* pool,
 		std::span<const SubmissionToken> waitFor) {
 		outSubmission.completions.clear();
+		if (m_FrameSwapchain && !m_FrameSwapchain->IsFrameReady(m_Frame)) {
+			Report("Submit requires a current unsubmitted swapchain frame; acquire another frame before rebuilding the "
+				   "graph.");
+			return Result::InvalidParameter;
+		}
 		std::string error;
 		if (!Compile(error) || !ValidateQueues(device, error)) {
 			Report(error);
@@ -1409,6 +1519,9 @@ namespace RealRHI {
 			for (auto position : batch.steps) {
 				RecordPass(*commands[i], position);
 			}
+			if (batch.presentation) {
+				commands[i]->Barrier(m_PresentationBarriers);
+			}
 			const auto ended = commands[i]->End();
 			if (ended != Result::Success) {
 				return ended;
@@ -1421,12 +1534,24 @@ namespace RealRHI {
 				waits.push_back(outSubmission.completions[dependency]);
 			}
 			std::array<CommandList*, 1> lists{commands[i].Raw()};
-			const auto token = device.GetCommandQueue(batch.queue)->Submit({.commandLists = lists, .waitFor = waits});
+			SubmitInfo submit{.commandLists = lists, .waitFor = waits};
+			if (batch.waitForAcquire || batch.presentation) {
+				submit.swapchain = SwapchainSubmitSync{
+					.swapchain = m_FrameSwapchain.Raw(),
+					.frame = m_Frame,
+					.waitForAcquire = batch.waitForAcquire,
+					.signalForPresent = batch.presentation
+				};
+			}
+			const auto token = device.GetCommandQueue(batch.queue)->Submit(submit);
 			if (!token.IsValid()) {
 				Report("Submit failed; returned completion tokens cover the work already queued.");
 				return Result::Failed;
 			}
 			outSubmission.completions.push_back(token);
+		}
+		if (m_FrameSwapchain) {
+			return m_FrameSwapchain->Present(m_Frame);
 		}
 		return Result::Success;
 	}

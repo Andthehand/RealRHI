@@ -1,7 +1,7 @@
 #pragma once
-
 #include "CommandList.h"
 #include "Queue.h"
+#include "Swapchain.h"
 
 #include <volk.h>
 
@@ -35,7 +35,8 @@ namespace RealRHI {
 			std::span<const VkSemaphoreSubmitInfo> signalSemaphores,
 			std::span<CommandList*> trackedLists = {},
 			VkFence fence = VK_NULL_HANDLE,
-			std::span<const SubmissionToken> waitFor = {});
+			std::span<const SubmissionToken> waitFor = {},
+			Swapchain* retainedSwapchain = nullptr);
 
 		bool IsComplete(const SubmissionToken& token) override;
 		void Wait(const SubmissionToken& token) override;
@@ -49,6 +50,7 @@ namespace RealRHI {
 	private:
 		struct PendingSubmission {
 			uint64_t value = 0;
+			Ref<Swapchain> swapchain;
 			std::vector<Ref<CommandList>> commandLists;
 		};
 

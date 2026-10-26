@@ -1,6 +1,5 @@
 #include "../ExampleSupport.h"
 #include "FrameContext.h"
-#include "FrameResources.h"
 #include "SceneRenderer.h"
 
 #include <SDL3/SDL.h>
@@ -41,8 +40,7 @@ namespace {
 			}
 
 			const uint32_t frameCount = m_Swapchain->GetMaxFramesInFlight();
-			return m_Frames.Initialize(*m_Device, QueueType::Graphics, frameCount) == Result::Success &&
-				m_Renderer.Init(*m_Device, m_Swapchain->GetBackBufferFormat(), frameCount, m_PendingUpload) ==
+			return m_Renderer.Init(*m_Device, m_Swapchain->GetBackBufferFormat(), frameCount, m_PendingUpload) ==
 				Result::Success;
 		}
 
@@ -126,33 +124,15 @@ namespace {
 		}
 
 		bool DrawFrame(const FrameContext& frame, float rotation) {
-			CommandList* commands = nullptr;
-			if (m_Frames.BeginSlot(frame.frameIndex, commands) != Result::Success ||
-				m_Renderer.ResizeTargets(frame.frameIndex, frame.width, frame.height) != Result::Success ||
-				commands->Begin() != Result::Success) {
+			if (m_Renderer.ResizeTargets(frame.frameIndex, frame.width, frame.height) != Result::Success) {
 				return false;
 			}
-
-			if (m_Renderer.Record(
-					*commands, frame.frameIndex, frame.backBufferView, rotation, m_PendingUpload, m_ShadowsEnabled) !=
-					Result::Success ||
-				commands->End() != Result::Success) {
-				return false;
-			}
-
-			std::span<const SubmissionToken> waits;
-			if (m_PendingUpload.completion.IsValid()) {
-				waits = {&m_PendingUpload.completion, 1};
-			}
-
-			SubmissionToken completion;
-			if (m_Device->Submit(commands, m_Swapchain.Raw(), frame, &completion, waits) != Result::Success ||
-				m_Frames.TrackSubmission(frame.frameIndex, completion) != Result::Success) {
+			RenderGraphSubmission completion;
+			if (m_Renderer.Submit(*m_Swapchain, frame, rotation, m_PendingUpload, completion, m_ShadowsEnabled) !=
+				Result::Success) {
 				return false;
 			}
 			m_PendingUpload = {};
-			m_Swapchain->Present(frame);
-
 			return true;
 		}
 
@@ -160,7 +140,6 @@ namespace {
 		std::unique_ptr<Device> m_Device;
 		Ref<Window> m_Window;
 		Ref<Swapchain> m_Swapchain;
-		FrameResources m_Frames;
 		Examples::SceneRenderer m_Renderer;
 		UploadSubmission m_PendingUpload;
 		bool m_ShadowsEnabled = true;

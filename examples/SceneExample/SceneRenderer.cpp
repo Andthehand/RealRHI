@@ -444,6 +444,10 @@ namespace RealRHI::Examples {
 	}
 
 	void SceneRenderer::DrawPostprocess(CommandList& commands, FrameTargets& targets, TextureView* output) {
+		commands.SetViewport(
+			{.width = static_cast<float>(targets.width), .height = static_cast<float>(targets.height)});
+		commands.SetScissor({.width = targets.width, .height = targets.height});
+
 		commands.BeginRendering({
 			.colorAttachments = {{.target = output}},
 			.renderArea = {.width = targets.width, .height = targets.height},
@@ -467,6 +471,47 @@ namespace RealRHI::Examples {
 		float rotation,
 		const UploadSubmission& pendingUpload,
 		bool shadowsEnabled) {
+		RenderGraph graph;
+		const auto built = BuildGraph(graph, frameIndex, output, rotation, pendingUpload, shadowsEnabled);
+		if (built != Result::Success) {
+			return built;
+		}
+		commands.BeginDebugLabel("Scene frame");
+		const auto result = graph.Execute(*m_Device, commands, m_TransientResources.get());
+		commands.EndDebugLabel();
+		return result;
+	}
+
+	Result SceneRenderer::Submit(Swapchain& swapchain,
+		const FrameContext& frame,
+		float rotation,
+		const UploadSubmission& pendingUpload,
+		RenderGraphSubmission& outSubmission,
+		bool shadowsEnabled) {
+		RenderGraph graph;
+		const auto output = graph.ImportBackBuffer(swapchain, frame);
+		if (output.index == UINT32_MAX) {
+			return Result::InvalidParameter;
+		}
+		const auto built =
+			BuildGraph(graph, frame.frameIndex, frame.backBufferView, rotation, pendingUpload, shadowsEnabled, output);
+		if (built != Result::Success) {
+			return built;
+		}
+		std::span<const SubmissionToken> waits;
+		if (pendingUpload.completion.IsValid()) {
+			waits = {&pendingUpload.completion, 1};
+		}
+		return graph.Submit(*m_Device, outSubmission, m_TransientResources.get(), waits);
+	}
+
+	Result SceneRenderer::BuildGraph(RenderGraph& graph,
+		uint32_t frameIndex,
+		TextureView* output,
+		float rotation,
+		const UploadSubmission& pendingUpload,
+		bool shadowsEnabled,
+		std::optional<RenderGraphResource> outputResource) {
 		if (frameIndex >= m_Frames.size() || m_Frames[frameIndex].width == 0 || m_Frames[frameIndex].height == 0) {
 			return Result::InvalidParameter;
 		}
@@ -481,7 +526,6 @@ namespace RealRHI::Examples {
 			PipelineStage::EarlyFragmentTests | PipelineStage::LateFragmentTests,
 			ResourceAccess::DepthStencilRead | ResourceAccess::DepthStencilWrite
 		};
-		RenderGraph graph;
 		graph.SetOptions({.cullUnusedPasses = true, .enableGpuTimings = true});
 		const auto color = graph.CreateTexture(
 			{.width = size.width,
@@ -501,13 +545,13 @@ namespace RealRHI::Examples {
 				.format = m_DepthFormat,
 				.usage = TextureUsage::DepthStencil | TextureUsage::ShaderResource,
 				.debugName = "Scene shadow map"});
-		auto resolveTargets = [&] {
+		auto resolveTargets = [&graph, color, depth, shadow, width = size.width, height = size.height] {
 			return FrameTargets{
 				.color = graph.GetTexture(color),
 				.depth = graph.GetTexture(depth),
 				.shadow = graph.GetTexture(shadow),
-				.width = size.width,
-				.height = size.height
+				.width = width,
+				.height = height
 			};
 		};
 		const auto pattern = graph.ImportTexture(m_Pattern.Raw(), TextureLayout::ShaderRead, sampled, {0, 6, 0, 1});
@@ -516,7 +560,7 @@ namespace RealRHI::Examples {
 		const auto vertices = graph.ImportBuffer(m_VertexBuffer.Raw(), vertexState);
 		const auto indices = graph.ImportBuffer(m_IndexBuffer.Raw(), indexState);
 
-		const auto setup = graph.AddPass({.name = "Frame setup"}, [&](CommandList& list) {
+		const auto setup = graph.AddPass({.name = "Frame setup"}, [this, pendingUpload, sampled](CommandList& list) {
 			if (pendingUpload.completion.IsValid()) {
 				list.Barrier(pendingUpload.acquireBarriers);
 				list.GenerateMipmaps(m_Pattern.Raw(), {.finalState = sampled});
@@ -533,7 +577,7 @@ namespace RealRHI::Examples {
 						{indices, indexState},
 					},
 				.dependsOn = {setup}},
-			[&](CommandList& list) {
+			[this, resolveTargets, rotation, shadowsEnabled](CommandList& list) {
 				auto targets = resolveTargets();
 				DrawShadowMap(list, targets, rotation, shadowsEnabled);
 			});
@@ -549,28 +593,26 @@ namespace RealRHI::Examples {
 						{vertices, vertexState},
 						{indices, indexState},
 					}},
-			[&](CommandList& list) {
+			[this, resolveTargets, rotation, shadowsEnabled](CommandList& list) {
 				auto targets = resolveTargets();
-				list.SetViewport({.width = static_cast<float>(size.width), .height = static_cast<float>(size.height)});
-				list.SetScissor({.width = size.width, .height = size.height});
+				list.SetViewport(
+					{.width = static_cast<float>(targets.width), .height = static_cast<float>(targets.height)});
+				list.SetScissor({.width = targets.width, .height = targets.height});
 				BeginScene(list, targets);
 				DrawScene(list, targets, rotation, shadowsEnabled);
 			});
 
-		// The caller/Device::Submit manages the output view's attachment and presentation state.
-		graph.AddPass({.name = "Postprocess",
-						  .resources =
-							  {
-								  {color, sampled, TextureLayout::ShaderRead},
-							  },
-						  .hasSideEffects = true},
-			[&](CommandList& list) {
+		// Offscreen Record callers manage the output; frame submission declares it here.
+		std::vector<RenderGraphUse> outputs{{color, sampled, TextureLayout::ShaderRead}};
+		if (outputResource) {
+			outputs.push_back(
+				{*outputResource, colorAttachment, TextureLayout::ColorAttachment, RenderGraphAccess::Write});
+		}
+		graph.AddPass({.name = "Postprocess", .resources = std::move(outputs), .hasSideEffects = true},
+			[this, resolveTargets, output](CommandList& list) {
 				auto targets = resolveTargets();
 				DrawPostprocess(list, targets, output);
 			});
-		commands.BeginDebugLabel("Scene frame");
-		const Result result = graph.Execute(*m_Device, commands, m_TransientResources.get());
-		commands.EndDebugLabel();
-		return result;
+		return Result::Success;
 	}
 }

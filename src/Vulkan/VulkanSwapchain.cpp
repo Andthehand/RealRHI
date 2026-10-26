@@ -4,10 +4,14 @@
 #include "VulkanConversions.h"
 
 #include <algorithm>
+#include <atomic>
 #include <iostream>
 #include <limits>
 
 namespace RealRHI {
+	namespace {
+		std::atomic<uint64_t> s_NextAcquisitionId{1};
+	}
 	VulkanSwapchain::VulkanSwapchain(const VulkanDevice* device)
 		: m_Device(device) { }
 
@@ -30,7 +34,9 @@ namespace RealRHI {
 			vkDestroySwapchainKHR(m_Device->GetDevice(), retired.handle, nullptr);
 		}
 		vkDestroySwapchainKHR(m_Device->GetDevice(), m_Swapchain, nullptr);
-		m_Window->DestroyVulkanSurface(m_Surface);
+		if (m_Window) {
+			m_Window->DestroyVulkanSurface(m_Surface);
+		}
 	}
 
 	Result VulkanSwapchain::Create(const VulkanDevice* device,
@@ -47,7 +53,7 @@ namespace RealRHI {
 	}
 
 	Result VulkanSwapchain::Init(const SwapchainDesc& desc) {
-		m_Window = static_cast<const VulkanWindow*>(desc.window);
+		m_Window = static_cast<VulkanWindow*>(desc.window);
 		if (!m_Window->CreateVulkanSurface(&m_Surface)) {
 			m_Device->SendDebugMessage(
 				DebugSeverity::Error, DebugMessageType::General, "Failed to create Vulkan surface for swapchain.");
@@ -318,6 +324,12 @@ namespace RealRHI {
 		const uint32_t frameIdx = m_CurrentFrameIndex;
 
 		auto& sync = m_FrameSync[frameIdx];
+		if (sync.acquisitionId != 0) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"BeginFrame: Submit and present the acquired frame before acquiring another.");
+			return FrameContext{.imageIndex = UINT32_MAX};
+		}
 		if (sync.submissionPending) {
 			auto* queue = m_Device->GetCommandQueue(sync.completionToken.queue);
 			if (queue == nullptr || !sync.completionToken.IsValid()) {
@@ -331,10 +343,16 @@ namespace RealRHI {
 					DebugSeverity::Error, DebugMessageType::General, "Failed to complete previous frame submission.");
 				return FrameContext{.imageIndex = std::numeric_limits<uint32_t>::max()};
 			}
+			// The final frame token joins GPU work from every queue. Retire completed
+			// foreign recordings too, so their transient allocations can be reused.
+			for (auto role : {QueueType::Graphics, QueueType::Compute, QueueType::Transfer}) {
+				static_cast<VulkanCommandQueue*>(m_Device->GetCommandQueue(role))->ProcessCompletedSubmissions();
+			}
 			sync.completionToken = {};
 			sync.submissionPending = false;
 		}
 		sync.submitted = false;
+		sync.acquireConsumed = false;
 
 		if (m_Swapchain == VK_NULL_HANDLE || m_SwapchainExtent.width == 0 || m_SwapchainExtent.height == 0) {
 			return FrameContext{.frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max()};
@@ -384,19 +402,58 @@ namespace RealRHI {
 			return FrameContext{.frameIndex = frameIdx, .imageIndex = std::numeric_limits<uint32_t>::max()};
 		}
 
+		sync.acquisitionId = s_NextAcquisitionId++;
+		sync.imageIndex = imageIndex;
 		return FrameContext{
 			.frameIndex = frameIdx,
 			.imageIndex = imageIndex,
 			.backBufferView = GetBackBufferView(imageIndex),
 			.width = m_SwapchainExtent.width,
 			.height = m_SwapchainExtent.height,
+			.acquisitionId = sync.acquisitionId,
 		};
 	}
 
 	bool VulkanSwapchain::IsFrameValid(const FrameContext& frame) const {
 		return frame.frameIndex < m_FrameSync.size() && frame.imageIndex < m_SwapchainImages.size() &&
+			frame.acquisitionId != 0 && frame.acquisitionId == m_FrameSync[frame.frameIndex].acquisitionId &&
+			frame.imageIndex == m_FrameSync[frame.frameIndex].imageIndex &&
 			frame.backBufferView == m_SwapchainImages[frame.imageIndex]->GetTextureView() &&
 			frame.width == m_SwapchainExtent.width && frame.height == m_SwapchainExtent.height;
+	}
+
+	bool VulkanSwapchain::IsFrameReady(const FrameContext& frame) const {
+		return IsFrameValid(frame) && !m_FrameFailed && !m_FrameSync[frame.frameIndex].acquireConsumed;
+	}
+
+	Texture* VulkanSwapchain::GetBackBuffer(const FrameContext& frame) {
+		if (!IsFrameValid(frame)) {
+			return nullptr;
+		}
+		return m_SwapchainImages[frame.imageIndex].Raw();
+	}
+
+	bool VulkanSwapchain::CanSubmit(const SwapchainSubmitSync& request) const {
+		if (!IsFrameValid(request.frame) || m_FrameFailed || (!request.waitForAcquire && !request.signalForPresent)) {
+			return false;
+		}
+		const auto& sync = m_FrameSync[request.frame.frameIndex];
+		return !sync.submitted && request.waitForAcquire != sync.acquireConsumed;
+	}
+
+	void VulkanSwapchain::FinishSubmission(const SwapchainSubmitSync& request, SubmissionToken token) {
+		auto& sync = m_FrameSync[request.frame.frameIndex];
+		if (!token.IsValid()) {
+			m_FrameFailed = true;
+			return;
+		}
+		sync.acquireConsumed = sync.acquireConsumed || request.waitForAcquire;
+		sync.completionToken = token;
+		sync.submissionPending = true;
+		sync.submitted = request.signalForPresent;
+		if (request.signalForPresent) {
+			m_ImageLayouts[request.frame.imageIndex] = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+		}
 	}
 
 	bool VulkanSwapchain::PrepareFrameSubmission(uint32_t frameIndex) {
@@ -405,7 +462,8 @@ namespace RealRHI {
 		}
 
 		auto& sync = m_FrameSync[frameIndex];
-		return !m_FrameFailed && !sync.submissionPending && !sync.submitted;
+		return !m_FrameFailed && sync.acquisitionId != 0 && !sync.acquireConsumed && !sync.submissionPending &&
+			!sync.submitted;
 	}
 
 	void VulkanSwapchain::FinishFrameSubmission(uint32_t frameIndex, SubmissionToken token) {
@@ -418,6 +476,7 @@ namespace RealRHI {
 		sync.completionToken = token;
 		sync.submissionPending = submitted;
 		sync.submitted = submitted;
+		sync.acquireConsumed = submitted;
 
 		if (!submitted) {
 			sync.completionToken = {};
@@ -426,26 +485,26 @@ namespace RealRHI {
 		}
 	}
 
-	void VulkanSwapchain::Present(const FrameContext& frame) {
+	Result VulkanSwapchain::Present(const FrameContext& frame) {
 		if (!IsFrameValid(frame)) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
 				"Present: Frame indices, backbuffer view, and extent must match this swapchain.");
 
-			return;
+			return Result::InvalidParameter;
 		}
 
 		if (frame.imageIndex == std::numeric_limits<uint32_t>::max() || frame.backBufferView == nullptr ||
 			m_Swapchain == VK_NULL_HANDLE) {
-			return;
+			return Result::InvalidParameter;
 		}
 
 		if (m_FrameFailed || frame.frameIndex >= m_FrameSync.size() || !m_FrameSync[frame.frameIndex].submitted) {
-			return;
+			return Result::InvalidParameter;
 		}
 		const uint32_t imageIndex = frame.imageIndex;
 		if (imageIndex >= m_RenderFinishedSemaphores.size()) {
-			return;
+			return Result::InvalidParameter;
 		}
 
 		VkSemaphore waitSemaphore = m_RenderFinishedSemaphores[imageIndex];
@@ -472,6 +531,14 @@ namespace RealRHI {
 		}
 		m_CurrentFrameIndex = (m_CurrentFrameIndex + 1) % s_MaxFramesInFlight;
 		m_FrameSync[frame.frameIndex].submitted = false;
+		m_FrameSync[frame.frameIndex].acquisitionId = 0;
+		if (m_FrameFailed) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"Present: Vulkan presentation or swapchain recreation failed.");
+			return Result::Failed;
+		}
+		return Result::Success;
 	}
 
 	VkCommandBuffer VulkanSwapchain::RecordPreTransitionCmd(uint32_t frameIndex, uint32_t imageIndex) {
@@ -512,8 +579,8 @@ namespace RealRHI {
 			.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
 			.oldLayout = m_ImageLayouts[imageIndex],
 			.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.srcQueueFamilyIndex = m_Device->GetPresentQueueFamily(),
+			.dstQueueFamilyIndex = m_Device->GetGraphicsQueueFamily(),
 			.image = m_SwapchainImages[imageIndex]->GetImage(),
 			.subresourceRange = subresourceRange,
 		};
@@ -545,8 +612,8 @@ namespace RealRHI {
 			.dstAccessMask = VK_ACCESS_2_NONE,
 			.oldLayout = m_ImageLayouts[imageIndex],
 			.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.srcQueueFamilyIndex = m_Device->GetGraphicsQueueFamily(),
+			.dstQueueFamilyIndex = m_Device->GetPresentQueueFamily(),
 			.image = m_SwapchainImages[imageIndex]->GetImage(),
 			.subresourceRange = subresourceRange,
 		};

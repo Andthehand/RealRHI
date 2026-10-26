@@ -68,6 +68,25 @@ Pop-Location
 
 The other example directories are `TriangleExample`, `TextureExample`, and `ComputeExample`.
 
+## Presenting a render graph
+
+Acquire a frame, import its backbuffer, and declare that resource in the passes that render to it:
+
+```cpp
+const auto frame = swapchain->BeginFrame();
+if (frame.backBufferView) {
+    RenderGraph graph;
+    const auto output = graph.ImportBackBuffer(*swapchain, frame);
+    // Add passes declaring output as a ColorAttachment write.
+    RenderGraphSubmission completion;
+    const auto result = graph.Submit(*device, completion);
+}
+```
+
+`Submit` waits for image availability before the first backbuffer use, transitions the image to `Present`, returns ownership to the presentation family, and presents automatically. Its final batch joins every graph queue, so `BeginFrame` safely reuses the frame slot. Diagnostics expose the acquire batch and presentation join. The scene example uses this path; offscreen graphs still use `Submit` or `Execute` as before.
+
+One acquired frame is supported per graph. Backbuffer contents are discarded, so first use must write. Keep its automatically assigned final state. Frame acquisition IDs reject stale or repeated submissions, including after resize. Compilation/allocation failures consume no acquire semaphore and can be corrected before retrying. A failure after partial frame submission preserves completion tokens but requires rebuilding the swapchain before reusing that frame. Direct `Swapchain::Present` now returns `Result` for callers using the existing `Device::Submit` path.
+
 ## Transient memory
 
 The transient pool defaults to a **256 MiB soft budget**, measured using native buffer/image allocation sizes. Set a different budget at construction or with `SetBudget(bytes)`:

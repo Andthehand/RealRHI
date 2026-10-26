@@ -4,6 +4,8 @@
 
 #include <volk.h>
 
+#include <SDL3/SDL.h>
+
 #include <array>
 #include <cstdlib>
 #include <iostream>
@@ -17,6 +19,10 @@ namespace {
 	uint32_t s_SubmitCalls = 0;
 	uint32_t s_FailCall = 0;
 	std::vector<uint32_t> s_WaitCounts;
+	std::vector<uint32_t> s_BinaryWaits;
+	std::vector<uint32_t> s_BinarySignals;
+	PFN_vkQueuePresentKHR s_Present = nullptr;
+	uint32_t s_Presents = 0;
 	constexpr ResourceState s_Read{PipelineStage::Transfer, ResourceAccess::TransferRead};
 	constexpr ResourceState s_Write{PipelineStage::Transfer, ResourceAccess::TransferWrite};
 
@@ -45,10 +51,25 @@ namespace {
 		++s_SubmitCalls;
 		Expect(count == 1, "Graph uses one queue submission per batch");
 		s_WaitCounts.push_back(infos[0].waitSemaphoreInfoCount);
+		uint32_t binaryWaits = 0;
+		uint32_t binarySignals = 0;
+		for (uint32_t i = 0; i < infos[0].waitSemaphoreInfoCount; ++i) {
+			binaryWaits += infos[0].pWaitSemaphoreInfos[i].value == 0;
+		}
+		for (uint32_t i = 0; i < infos[0].signalSemaphoreInfoCount; ++i) {
+			binarySignals += infos[0].pSignalSemaphoreInfos[i].value == 0;
+		}
+		s_BinaryWaits.push_back(binaryWaits);
+		s_BinarySignals.push_back(binarySignals);
 		if (s_SubmitCalls == s_FailCall) {
 			return VK_ERROR_OUT_OF_HOST_MEMORY;
 		}
 		return s_Submit(queue, count, infos, fence);
+	}
+
+	VKAPI_ATTR VkResult VKAPI_CALL CapturePresent(VkQueue queue, const VkPresentInfoKHR* info) {
+		++s_Presents;
+		return s_Present(queue, info);
 	}
 
 	Ref<Buffer> Readback(Device& device, uint64_t size) {
@@ -458,6 +479,178 @@ namespace {
 			"Invalid external waits fail before scheduling");
 	}
 
+	void TestSwapchain(Device& device) {
+		Ref<Window> window;
+		Ref<Swapchain> swapchain;
+		Expect(device.CreateWindow({.Title = "Graph swapchain synchronization", .Width = 64, .Height = 64}, window) ==
+					Result::Success &&
+				device.CreateSwapchain({.window = window.Raw()}, swapchain) == Result::Success,
+			"Create graph swapchain");
+		const std::array<uint32_t, 4> initial{41, 43, 47, 53};
+		Ref<Buffer> upload;
+		Expect(device.CreateBuffer({.size = sizeof(initial),
+									   .usage = BufferUsage::TransferSrc,
+									   .memoryUsage = MemoryUsage::CPUToGPU,
+									   .initialData = initial.data()},
+				   upload) == Result::Success,
+			"Create graph frame input");
+		auto readback = Readback(device, sizeof(initial));
+		s_Submit = vkQueueSubmit2;
+		s_Present = vkQueuePresentKHR;
+		vkQueueSubmit2 = CaptureSubmit;
+		vkQueuePresentKHR = CapturePresent;
+		FrameContext stale;
+		for (uint32_t iteration = 0; iteration < 8; ++iteration) {
+			if (iteration == 4) {
+				int count = 0;
+				auto** windows = SDL_GetWindows(&count);
+				for (int i = 0; i < count; ++i) {
+					if (std::string_view(SDL_GetWindowTitle(windows[i])) == "Graph swapchain synchronization") {
+						Expect(SDL_SetWindowSize(windows[i], 80, 72) && SDL_SyncWindow(windows[i]),
+							"Resize graph presentation window");
+					}
+				}
+				SDL_free(windows);
+				SDL_PumpEvents();
+			}
+			const auto frame = swapchain->BeginFrame();
+			Expect(swapchain->IsFrameReady(frame) && frame.acquisitionId != 0, "Acquire a fresh graph frame");
+			if (iteration > 0) {
+				Expect(frame.acquisitionId != stale.acquisitionId && !swapchain->IsFrameReady(stale),
+					"Old acquisition IDs never become valid again");
+			}
+			if (iteration >= 4) {
+				Expect(frame.width == 80 && frame.height == 72, "Graph frame follows resized swapchain extent");
+			}
+			if (iteration == 0) {
+				RenderGraph unused(Capture);
+				unused.ImportBackBuffer(*swapchain, frame);
+				RenderGraphSubmission empty;
+				++s_ExpectedErrors;
+				Expect(unused.Submit(device, empty) == Result::InvalidParameter && empty.completions.empty() &&
+						swapchain->IsFrameReady(frame),
+					"An unwritten backbuffer fails before consuming image availability");
+			}
+			RenderGraph graph(Capture);
+			graph.SetOptions({.cullUnusedPasses = true, .enableGpuTimings = true});
+			const auto image = graph.ImportBackBuffer(*swapchain, frame);
+			const auto source = graph.ImportBuffer(upload.Raw(), s_Read);
+			const auto output =
+				graph.ImportBuffer(readback.Raw(), {PipelineStage::AllCommands, ResourceAccess::MemoryWrite});
+			const auto scratch = graph.CreateBuffer({.size = sizeof(initial), .usage = BufferUsage::TransferDst});
+			const auto before = graph.AddPass(
+				{.name = "Work before acquisition",
+					.resources =
+						{{source, s_Read}, {scratch, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}},
+					.queue = QueueType::Transfer,
+					.hasSideEffects = true},
+				[&](CommandList& list) {
+					list.CopyBuffer(upload.Raw(), graph.GetBuffer(scratch), {.size = sizeof(initial)});
+				});
+			const auto draw =
+				graph.AddPass({.name = "Clear acquired image",
+								  .resources =
+									  {{image,
+										  {PipelineStage::ColorAttachmentOutput, ResourceAccess::ColorAttachmentWrite},
+										  TextureLayout::ColorAttachment,
+										  RenderGraphAccess::Write}}},
+					[frame](CommandList& list) {
+						list.BeginRendering(
+							{.colorAttachments =
+									{{.target = frame.backBufferView,
+										.loadOp = LoadOp::Clear,
+										.clearColor = {0.1f, 0.2f, 0.4f, 1.0f}}},
+								.renderArea = {.width = frame.width, .height = frame.height}});
+						list.EndRendering();
+					});
+			graph.AddPass(
+				{.name = "Independent late transfer",
+					.resources =
+						{{source, s_Read}, {output, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}},
+					.queue = QueueType::Transfer},
+				[&](CommandList& list) {
+					list.CopyBuffer(upload.Raw(), readback.Raw(), {.size = sizeof(initial)});
+				});
+			if (iteration % 2 != 0) {
+				graph.AddPass(
+					{.name = "Return from transfer family",
+						.resources =
+							{{image, {PipelineStage::AllCommands, ResourceAccess::MemoryRead}, TextureLayout::Present}},
+						.queue = QueueType::Transfer},
+					[](CommandList&) { });
+			}
+			s_SubmitCalls = 0;
+			s_FailCall = 0;
+			s_Presents = 0;
+			s_BinaryWaits.clear();
+			s_BinarySignals.clear();
+			RenderGraphSubmission completion;
+			Expect(graph.Submit(device, completion) == Result::Success && s_Presents == 1,
+				"Graph submits and presents an acquired image automatically");
+			const auto info = graph.GetDiagnostics();
+			const auto acquire = info.passes[draw.index].batchIndex;
+			Expect(info.batches.back().presentation && info.batches[acquire].waitForAcquire &&
+					info.passes[before.index].batchIndex < acquire &&
+					!info.batches[info.passes[before.index].batchIndex].waitForAcquire &&
+					info.presentationBarriers.textures.size() == 1 &&
+					info.presentationBarriers.textures[0].releaseToPresent,
+				"Diagnostics expose an acquire boundary and a final presentation join");
+			for (size_t i = 0; i < info.batches.size(); ++i) {
+				Expect(s_BinaryWaits[i] == uint32_t(i == acquire) &&
+						s_BinarySignals[i] == uint32_t(i + 1 == info.batches.size()),
+					"Image availability is waited exactly once and render completion signaled exactly once");
+			}
+			if (device.GetCommandQueue(QueueType::Transfer)->GetQueueId() !=
+				device.GetGraphicsCommandQueue()->GetQueueId()) {
+				Expect(!info.batches.back().prerequisites.empty(),
+					"Presentation joins independent work on foreign queues");
+			}
+			if (iteration == 0) {
+				++s_ExpectedErrors;
+				Expect(graph.Submit(device, completion) == Result::InvalidParameter && s_Presents == 1,
+					"Already submitted frames fail before duplicate presentation");
+			}
+			stale = frame;
+		}
+		device.WaitIdle();
+		std::array<uint32_t, 4> values{};
+		Expect(readback->ReadData(values.data(), sizeof(values)) == Result::Success && values == initial,
+			"Frame completion covers independent late transfer data");
+		RenderGraph invalid(Capture);
+		++s_ExpectedErrors;
+		Expect(invalid.ImportBackBuffer(*swapchain, stale).index == UINT32_MAX, "Stale frame import is rejected");
+
+		const auto frame = swapchain->BeginFrame();
+		RenderGraph failing(Capture);
+		const auto image = failing.ImportBackBuffer(*swapchain, frame);
+		failing.AddPass({.name = "Frame before failed present signal",
+							.resources =
+								{{image,
+									{PipelineStage::ColorAttachmentOutput, ResourceAccess::ColorAttachmentWrite},
+									TextureLayout::ColorAttachment,
+									RenderGraphAccess::Write}}},
+			[frame](CommandList& list) {
+				list.BeginRendering(
+					{.colorAttachments = {{.target = frame.backBufferView, .loadOp = LoadOp::Clear}},
+						.renderArea = {.width = frame.width, .height = frame.height}});
+				list.EndRendering();
+			});
+		s_SubmitCalls = 0;
+		s_Presents = 0;
+		s_FailCall = 2;
+		s_ExpectedErrors += 2;
+		RenderGraphSubmission prefix;
+		Expect(failing.Submit(device, prefix) == Result::Failed && prefix.completions.size() == 1 && s_Presents == 0,
+			"Failed final synchronization preserves queued tokens and never presents an unsignaled semaphore");
+		s_FailCall = 0;
+		vkQueueSubmit2 = s_Submit;
+		vkQueuePresentKHR = s_Present;
+		failing.Reset();
+		prefix.Wait(device);
+		Expect(
+			!swapchain->IsFrameReady(frame), "A partially submitted frame cannot consume its acquire semaphore again");
+	}
+
 	void TestPoolIntegration(Device& device) {
 		TransientResourcePool pool(device);
 		const std::array<uint32_t, 8> initial{2, 3, 5, 7, 11, 13, 17, 19};
@@ -549,6 +742,7 @@ int main() {
 	TestBatching(*device);
 	TestQueueValidation(*device);
 	TestPoolIntegration(*device);
+	TestSwapchain(*device);
 	device->WaitIdle();
 	device.reset();
 	Expect(s_Errors == s_ExpectedErrors, "Only expected scheduler errors occur, including cleanup");

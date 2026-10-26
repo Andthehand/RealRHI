@@ -601,7 +601,8 @@ namespace RealRHI {
 		TextureSubresourceRange subresources,
 		TextureLayout layout,
 		const char* operation) {
-		// Swapchain pre/post transitions and presentation ownership are managed by Device::Submit.
+		// Swapchain ownership/layouts are managed by frame submission rather than the
+		// ordinary resource tracker. Graph barriers still record native transitions.
 		if (!texture->IsExternal()) {
 			m_ResourceOperations.push_back(
 				{.name = operation, .texture = texture, .subresources = subresources, .oldLayout = layout});
@@ -1198,6 +1199,24 @@ namespace RealRHI {
 			if (!ResolveQueueFamilies(barrier.sourceQueue, barrier.destinationQueue, sourceFamily, destinationFamily)) {
 				return;
 			}
+			if (barrier.acquireFromPresent || barrier.releaseToPresent) {
+				if (!texture->IsExternal() || (barrier.acquireFromPresent && barrier.releaseToPresent) ||
+					barrier.sourceQueue || barrier.destinationQueue) {
+					m_Device->SendDebugMessage(DebugSeverity::Error,
+						DebugMessageType::General,
+						"Barrier: Presentation ownership flags require a swapchain image, one endpoint, and no "
+						"explicit queue roles.");
+					return;
+				}
+				if (barrier.acquireFromPresent) {
+					sourceFamily = m_Device->GetPresentQueueFamily();
+					destinationFamily = m_QueueId.familyIndex;
+				}
+				else {
+					sourceFamily = m_QueueId.familyIndex;
+					destinationFamily = m_Device->GetPresentQueueFamily();
+				}
+			}
 			const bool transfer = sourceFamily != UINT32_MAX && sourceFamily != destinationFamily;
 			const bool acquire = transfer && m_QueueId.familyIndex == destinationFamily;
 			for (uint32_t mip = barrier.subresources.baseMipLevel;
@@ -1403,6 +1422,11 @@ namespace RealRHI {
 		SubmissionToken submission,
 		std::span<const VkSemaphoreSubmitInfo> waits) const {
 		for (const auto& operation : m_ResourceOperations) {
+			// Swapchain layouts/ownership follow acquire/present synchronization, outside
+			// the ordinary queue timeline ownership tracker (as with attachment uses).
+			if (operation.texture && operation.texture->IsExternal()) {
+				continue;
+			}
 			const bool transfer =
 				operation.sourceFamily != UINT32_MAX && operation.sourceFamily != operation.destinationFamily;
 			const bool acquire = transfer && m_QueueId.familyIndex == operation.destinationFamily;

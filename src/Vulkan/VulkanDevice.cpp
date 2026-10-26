@@ -656,7 +656,8 @@ namespace RealRHI {
 				{&signalInfo, 1},
 				tracked,
 				VK_NULL_HANDLE,
-				waitFor);
+				waitFor,
+				swapchain);
 		vulkanSwapchain->FinishFrameSubmission(frame.frameIndex, token);
 		if (!token.IsValid()) {
 			return Result::Failed;

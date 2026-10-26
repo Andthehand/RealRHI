@@ -2,6 +2,7 @@
 #include "BufferDesc.h"
 #include "CommandList.h"
 #include "DeviceDesc.h"
+#include "Swapchain.h"
 
 #include <functional>
 #include <optional>
@@ -110,6 +111,8 @@ namespace RealRHI {
 		std::vector<uint32_t> prerequisites;
 		// Prefix batches contain initial barriers instead of graph passes.
 		std::optional<uint32_t> initialRelease;
+		bool waitForAcquire = false;
+		bool presentation = false;
 	};
 
 	struct RenderGraphDiagnostics {
@@ -121,6 +124,7 @@ namespace RealRHI {
 		std::vector<RenderGraphBatchInfo> batches;
 		uint64_t transientBytes = 0;
 		uint64_t aliasSavedBytes = 0;
+		BarrierDesc presentationBarriers;
 	};
 
 	struct RenderGraphSubmission {
@@ -167,6 +171,9 @@ namespace RealRHI {
 			uint64_t offset = 0,
 			uint64_t size = 0,
 			std::optional<QueueType> owner = {});
+		// One acquired frame per graph. Contents are discarded; first use must write.
+		// Submit handles acquire synchronization, final ownership/layout, and Present.
+		RenderGraphResource ImportBackBuffer(Swapchain& swapchain, const FrameContext& frame);
 		void SetFinalState(RenderGraphResource resource,
 			ResourceState state,
 			TextureLayout layout = TextureLayout::Undefined);
@@ -203,13 +210,14 @@ namespace RealRHI {
 		Result Execute(Device& device, CommandList& commands, TransientResourcePool* pool = nullptr);
 		// Batch consecutive passes sharing a native queue when no new cross-queue wait
 		// or earlier cross-queue signal is needed. Record all lists before submitting any work.
-		// External waits apply to all
-		// submissions; matching release/acquire pairs handle exclusive ownership.
+		// External waits apply to all submissions; matching release/acquire pairs handle exclusive ownership.
 		// Exports remain on their last-use queue. Resources crossing queues allocate
 		// directly; the pool is used only for resources confined to one native queue.
 		// outSubmission is replaced. On failure its tokens describe the queued prefix;
 		// imported resources may be partway through a transfer and need state/ownership
 		// recovery before reuse. Validation/allocation failures submit no work.
+		// An imported frame is presented automatically; the last completion token joins
+		// the entire graph. A partially submitted frame needs swapchain recreation before reuse.
 		Result Submit(Device& device,
 			RenderGraphSubmission& outSubmission,
 			TransientResourcePool* pool = nullptr,
@@ -285,6 +293,10 @@ namespace RealRHI {
 
 	private:
 		DebugCallback m_Callback;
+		Ref<Swapchain> m_FrameSwapchain;
+		FrameContext m_Frame;
+		uint32_t m_BackBuffer = UINT32_MAX;
+		BarrierDesc m_PresentationBarriers;
 		RenderGraphOptions m_Options;
 		bool m_Compiled = false;
 		bool m_MultiQueue = false;

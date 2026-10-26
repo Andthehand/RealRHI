@@ -1,5 +1,6 @@
 #pragma once
 #include "Device.h"
+#include "RenderGraph/RenderGraph.h"
 #include "RenderGraph/TransientResourcePool.h"
 
 #include <vector>
@@ -37,7 +38,21 @@ namespace RealRHI::Examples {
 			const UploadSubmission& pendingUpload,
 			bool shadowsEnabled = true);
 
+		Result Submit(Swapchain& swapchain,
+			const FrameContext& frame,
+			float rotation,
+			const UploadSubmission& pendingUpload,
+			RenderGraphSubmission& outSubmission,
+			bool shadowsEnabled = true);
+
 	private:
+		Result BuildGraph(RenderGraph& graph,
+			uint32_t frameIndex,
+			TextureView* output,
+			float rotation,
+			const UploadSubmission& pendingUpload,
+			bool shadowsEnabled,
+			std::optional<RenderGraphResource> outputResource = {});
 		Result SelectDepthFormat();
 		Result CreatePipelines(TextureFormat outputFormat);
 		Result UploadAssets(UploadSubmission& outUpload);

@@ -61,6 +61,7 @@ namespace RealRHI {
 		VkDevice GetDevice() const { return m_Device; }
 		VkPhysicalDevice GetPhysicalDevice() const { return m_PhysicalDevice; }
 		VkQueue GetPresentQueue() const { return m_PresentQueue; }
+		uint32_t GetPresentQueueFamily() const { return m_PresentQueueFamily; }
 		uint32_t GetGraphicsQueueFamily() const { return m_GraphicsQueueFamily; }
 		CommandQueue* GetGraphicsCommandQueue() const override;
 		CommandQueue* GetCommandQueue(QueueType type) const override;
