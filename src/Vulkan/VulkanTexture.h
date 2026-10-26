@@ -51,6 +51,7 @@ namespace RealRHI {
 		friend class VulkanSwapchain;
 		friend class VulkanTextureView;
 		friend class VulkanCommandList;
+		friend class VulkanTransferValidation;
 		friend class VulkanCommandResourceTracker;
 		friend class VulkanResourceStateTransaction;
 		friend class VulkanUploadContext;

@@ -7,6 +7,7 @@
 #include "VulkanPipeline.h"
 #include "VulkanTexture.h"
 #include "VulkanTextureView.h"
+#include "VulkanTransferValidation.h"
 
 #include <algorithm>
 #include <mutex>
@@ -837,317 +838,109 @@ namespace RealRHI {
 	}
 
 	void VulkanCommandList::CopyBuffer(Buffer* source, Buffer* destination, const BufferCopyRegion& region) {
-		if (GetState() != CommandListState::Recording || region.size == 0) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"CopyBuffer failed: Command list is not recording or region size is zero.");
-
+		if (!ValidateTransferRecording("CopyBuffer")) {
 			return;
 		}
-
 		auto* sourceBuffer = static_cast<VulkanBuffer*>(source);
 		auto* destinationBuffer = static_cast<VulkanBuffer*>(destination);
-		if (sourceBuffer == nullptr || destinationBuffer == nullptr ||
-			!Any(sourceBuffer->GetUsage() & BufferUsage::TransferSrc) ||
-			!Any(destinationBuffer->GetUsage() & BufferUsage::TransferDst)) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"CopyBuffer: Provide non-null source and destination buffers with TransferSrc "
-				"and TransferDst usage respectively.");
-
+		const VulkanTransferValidation validation(m_Device, m_ResourceTracker);
+		VkBufferCopy copy;
+		if (!validation.PrepareBufferCopy(sourceBuffer, destinationBuffer, region, copy)) {
 			return;
 		}
-
-		if (region.sourceOffset > sourceBuffer->GetSize() ||
-			region.size > sourceBuffer->GetSize() - region.sourceOffset ||
-			region.destinationOffset > destinationBuffer->GetSize() ||
-			region.size > destinationBuffer->GetSize() - region.destinationOffset) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"CopyBuffer failed: Copy region is out of bounds of source or destination buffer.");
-
-			return;
-		}
-
 		RetainResource(sourceBuffer);
 		RetainResource(destinationBuffer);
-		m_ResourceTracker.RecordBufferUse(sourceBuffer, region.sourceOffset, region.size, "CopyBuffer source");
-		m_ResourceTracker.RecordBufferUse(
-			destinationBuffer, region.destinationOffset, region.size, "CopyBuffer destination");
-
-		VkBufferCopy copyRegion{
-			.srcOffset = region.sourceOffset,
-			.dstOffset = region.destinationOffset,
-			.size = region.size,
-		};
-		vkCmdCopyBuffer(m_CommandBuffer, sourceBuffer->GetBuffer(), destinationBuffer->GetBuffer(), 1, &copyRegion);
+		m_ResourceTracker.RecordBufferUse(sourceBuffer, copy.srcOffset, copy.size, "CopyBuffer source");
+		m_ResourceTracker.RecordBufferUse(destinationBuffer, copy.dstOffset, copy.size, "CopyBuffer destination");
+		vkCmdCopyBuffer(m_CommandBuffer, sourceBuffer->GetBuffer(), destinationBuffer->GetBuffer(), 1, &copy);
 	}
 
 	void VulkanCommandList::CopyBufferToTexture(Buffer* source,
 		Texture* destination,
 		const BufferTextureCopyRegion& region) {
-		if (GetState() != CommandListState::Recording || region.width == 0 || region.height == 0 || region.depth == 0 ||
-			region.layerCount == 0) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"CopyBufferToTexture failed: Command list is not recording or region dimensions are zero.");
-
+		if (!ValidateTransferRecording("CopyBufferToTexture")) {
 			return;
 		}
-
-		auto* sourceBuffer = static_cast<VulkanBuffer*>(source);
-		auto* destinationTexture = static_cast<VulkanTexture*>(destination);
-		if (destinationTexture != nullptr && destinationTexture->GetSampleCount() != 1) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"CopyBufferToTexture: Buffer uploads require a single-sampled destination texture.");
+		auto* buffer = static_cast<VulkanBuffer*>(source);
+		auto* texture = static_cast<VulkanTexture*>(destination);
+		const VulkanTransferValidation validation(m_Device, m_ResourceTracker);
+		VulkanBufferTextureCopy copy;
+		if (!validation.PrepareBufferTextureCopy(VulkanTransferDirection::Upload, buffer, texture, region, copy)) {
 			return;
 		}
-
-		if (sourceBuffer == nullptr || destinationTexture == nullptr ||
-			region.mipLevel >= destinationTexture->GetMipLevelCount() ||
-			region.baseArrayLayer >= destinationTexture->GetArrayLayerCount() ||
-			region.layerCount > destinationTexture->GetArrayLayerCount() - region.baseArrayLayer ||
-			!Any(sourceBuffer->GetUsage() & BufferUsage::TransferSrc) ||
-			!Any(destinationTexture->GetUsage() & TextureUsage::TransferDst)) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"CopyBufferToTexture failed: Invalid source buffer or destination texture, or "
-				"invalid copy region parameters.");
-
-			return;
-		}
-
-		const VkExtent3D mipExtent = destinationTexture->GetMipExtent(region.mipLevel);
-		if (region.width > mipExtent.width || region.height > mipExtent.height || region.depth > mipExtent.depth ||
-			region.bufferOffset >= sourceBuffer->GetSize()) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"CopyBufferToTexture failed: Copy region dimensions exceed mip level extent or "
-				"buffer offset is out of bounds.");
-
-			return;
-		}
-
-		const uint32_t texelSize =
-			Utils::TextureFormatByteSize(Utils::VkFormatToTextureFormat(destinationTexture->GetFormat()));
-		if (texelSize == 0 || region.bufferOffset % texelSize != 0 ||
-			region.width > UINT64_MAX / region.height / region.depth / region.layerCount / texelSize ||
-			static_cast<uint64_t>(region.width) * region.height * region.depth * region.layerCount * texelSize >
-				sourceBuffer->GetSize() - region.bufferOffset) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"CopyBufferToTexture: Unsupported format, misaligned buffer offset, or "
-				"insufficient source buffer capacity.");
-			return;
-		}
-
-		m_ResourceTracker.RecordTextureUse(destinationTexture,
-			{region.mipLevel, 1, region.baseArrayLayer, region.layerCount},
+		RetainResource(buffer);
+		RetainResource(texture);
+		const auto& subresource = copy.region.imageSubresource;
+		m_ResourceTracker.RecordTextureUse(texture,
+			{subresource.mipLevel, 1, subresource.baseArrayLayer, subresource.layerCount},
 			TextureLayout::TransferDst,
 			"CopyBufferToTexture");
-		RetainResource(sourceBuffer);
-		RetainResource(destinationTexture);
-		m_ResourceTracker.RecordBufferUse(sourceBuffer,
-			region.bufferOffset,
-			static_cast<uint64_t>(region.width) * region.height * region.depth * region.layerCount * texelSize,
-			"CopyBufferToTexture");
-		VkBufferImageCopy copyRegion{
-			.bufferOffset = region.bufferOffset,
-			.imageSubresource =
-				{
-					.aspectMask = Utils::TextureFormatToVkImageAspect(
-						Utils::VkFormatToTextureFormat(destinationTexture->GetFormat())),
-					.mipLevel = region.mipLevel,
-					.baseArrayLayer = region.baseArrayLayer,
-					.layerCount = region.layerCount,
-				},
-			.imageExtent = {region.width, region.height, region.depth},
-		};
+		m_ResourceTracker.RecordBufferUse(buffer, copy.region.bufferOffset, copy.byteSize, "CopyBufferToTexture");
 		vkCmdCopyBufferToImage(m_CommandBuffer,
-			sourceBuffer->GetBuffer(),
-			destinationTexture->GetImage(),
+			buffer->GetBuffer(),
+			texture->GetImage(),
 			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 			1,
-			&copyRegion);
+			&copy.region);
 	}
 
 	void VulkanCommandList::CopyTextureToBuffer(Texture* source,
 		Buffer* destination,
 		const BufferTextureCopyRegion& region) {
-		if (GetState() != CommandListState::Recording || region.width == 0 || region.height == 0 || region.depth == 0 ||
-			region.layerCount == 0) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"Texture copy failed: Command list is not recording or region dimensions are zero.");
+		if (!ValidateTransferRecording("CopyTextureToBuffer")) {
 			return;
 		}
-
 		auto* texture = static_cast<VulkanTexture*>(source);
 		auto* buffer = static_cast<VulkanBuffer*>(destination);
-		if (texture != nullptr && texture->GetSampleCount() != 1) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"CopyTextureToBuffer: Resolve multisampled textures to a single-sampled texture before readback.");
+		const VulkanTransferValidation validation(m_Device, m_ResourceTracker);
+		VulkanBufferTextureCopy copy;
+		if (!validation.PrepareBufferTextureCopy(VulkanTransferDirection::Readback, buffer, texture, region, copy)) {
 			return;
 		}
-
-		if (texture == nullptr || buffer == nullptr || !Any(texture->GetUsage() & TextureUsage::TransferSrc) ||
-			!Any(buffer->GetUsage() & BufferUsage::TransferDst) ||
-
-			region.mipLevel >= texture->GetMipLevelCount() || region.baseArrayLayer >= texture->GetArrayLayerCount() ||
-			region.layerCount > texture->GetArrayLayerCount() - region.baseArrayLayer ||
-			region.bufferOffset >= buffer->GetSize() ||
-			!m_ResourceTracker.HasRecordedLayout(
-				texture, region.mipLevel, region.baseArrayLayer, region.layerCount, TextureLayout::TransferSrc)) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"CopyTextureToBuffer failed: Invalid source texture, destination buffer, or subresource range.");
-			return;
-		}
-
-		const VkExtent3D mipExtent = texture->GetMipExtent(region.mipLevel);
-		if (region.width > mipExtent.width || region.height > mipExtent.height || region.depth > mipExtent.depth) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"CopyTextureToBuffer failed: Copy dimensions exceed source mip extent.");
-			return;
-		}
-
-		// Initial readback supports tightly packed RGBA8 data. Other formats
-		// need format-aware block size and row pitch handling.
-		if (texture->GetFormat() != VK_FORMAT_R8G8B8A8_UNORM ||
-			region.width > UINT64_MAX / region.height / region.depth / region.layerCount / 4 ||
-			static_cast<uint64_t>(region.width) * region.height * region.depth * region.layerCount * 4 >
-				buffer->GetSize() - region.bufferOffset) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"CopyTextureToBuffer failed: Unsupported texture format or insufficient readback buffer capacity.");
-			return;
-		}
-
-		m_ResourceTracker.RecordTextureUse(texture,
-			{region.mipLevel, 1, region.baseArrayLayer, region.layerCount},
-			TextureLayout::TransferSrc,
-			"CopyTextureToBuffer");
 		RetainResource(texture);
 		RetainResource(buffer);
-		m_ResourceTracker.RecordBufferUse(buffer,
-			region.bufferOffset,
-			static_cast<uint64_t>(region.width) * region.height * region.depth * region.layerCount * 4,
+		const auto& subresource = copy.region.imageSubresource;
+		m_ResourceTracker.RecordTextureUse(texture,
+			{subresource.mipLevel, 1, subresource.baseArrayLayer, subresource.layerCount},
+			TextureLayout::TransferSrc,
 			"CopyTextureToBuffer");
-		VkBufferImageCopy copyRegion{
-			.bufferOffset = region.bufferOffset,
-			.imageSubresource =
-				{
-					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-					.mipLevel = region.mipLevel,
-					.baseArrayLayer = region.baseArrayLayer,
-					.layerCount = region.layerCount,
-				},
-			.imageExtent = {region.width, region.height, region.depth},
-		};
+		m_ResourceTracker.RecordBufferUse(buffer, copy.region.bufferOffset, copy.byteSize, "CopyTextureToBuffer");
 		vkCmdCopyImageToBuffer(m_CommandBuffer,
 			texture->GetImage(),
 			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 			buffer->GetBuffer(),
 			1,
-			&copyRegion);
+			&copy.region);
 	}
 
 	void VulkanCommandList::CopyTexture(Texture* source, Texture* destination, const TextureCopyRegion& region) {
-		if (GetState() != CommandListState::Recording || region.width == 0 || region.height == 0 || region.depth == 0 ||
-			region.layerCount == 0) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"Texture copy failed: Command list is not recording or region dimensions are zero.");
+		if (!ValidateTransferRecording("CopyTexture")) {
 			return;
 		}
-
 		auto* sourceTexture = static_cast<VulkanTexture*>(source);
 		auto* destinationTexture = static_cast<VulkanTexture*>(destination);
-		if (sourceTexture != nullptr && destinationTexture != nullptr &&
-			sourceTexture->GetSampleCount() != destinationTexture->GetSampleCount()) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"CopyTexture: Source and destination must have matching sample counts; use attachment resolves to "
-				"reduce samples.");
+		const VulkanTransferValidation validation(m_Device, m_ResourceTracker);
+		VkImageCopy copy;
+		if (!validation.PrepareTextureCopy(sourceTexture, destinationTexture, region, copy)) {
 			return;
 		}
-
-		if (sourceTexture == nullptr || destinationTexture == nullptr ||
-			!Any(sourceTexture->GetUsage() & TextureUsage::TransferSrc) ||
-			!Any(destinationTexture->GetUsage() & TextureUsage::TransferDst) ||
-
-			sourceTexture == destinationTexture || sourceTexture->GetFormat() != destinationTexture->GetFormat() ||
-			sourceTexture->GetFormat() != VK_FORMAT_R8G8B8A8_UNORM ||
-			region.sourceMipLevel >= sourceTexture->GetMipLevelCount() ||
-			region.destinationMipLevel >= destinationTexture->GetMipLevelCount() ||
-			region.sourceBaseArrayLayer >= sourceTexture->GetArrayLayerCount() ||
-			region.destinationBaseArrayLayer >= destinationTexture->GetArrayLayerCount() ||
-			region.layerCount > sourceTexture->GetArrayLayerCount() - region.sourceBaseArrayLayer ||
-			region.layerCount > destinationTexture->GetArrayLayerCount() - region.destinationBaseArrayLayer ||
-			!m_ResourceTracker.HasRecordedLayout(sourceTexture,
-				region.sourceMipLevel,
-				region.sourceBaseArrayLayer,
-				region.layerCount,
-				TextureLayout::TransferSrc) ||
-			!m_ResourceTracker.HasRecordedLayout(destinationTexture,
-				region.destinationMipLevel,
-				region.destinationBaseArrayLayer,
-				region.layerCount,
-				TextureLayout::TransferDst)) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"CopyTexture failed: Invalid textures, formats, or subresource range.");
-			return;
-		}
-
-		const auto fits = [&](const VulkanTexture* texture, uint32_t mipLevel) {
-			const auto extent = texture->GetMipExtent(mipLevel);
-			return region.width <= extent.width && region.height <= extent.height && region.depth <= extent.depth;
-		};
-		if (!fits(sourceTexture, region.sourceMipLevel) || !fits(destinationTexture, region.destinationMipLevel)) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"CopyTexture failed: Copy dimensions exceed source or destination mip extent.");
-			return;
-		}
-
+		RetainResource(sourceTexture);
+		RetainResource(destinationTexture);
 		m_ResourceTracker.RecordTextureUse(sourceTexture,
-			{region.sourceMipLevel, 1, region.sourceBaseArrayLayer, region.layerCount},
+			{copy.srcSubresource.mipLevel, 1, copy.srcSubresource.baseArrayLayer, copy.srcSubresource.layerCount},
 			TextureLayout::TransferSrc,
 			"CopyTexture source");
 		m_ResourceTracker.RecordTextureUse(destinationTexture,
-			{region.destinationMipLevel, 1, region.destinationBaseArrayLayer, region.layerCount},
+			{copy.dstSubresource.mipLevel, 1, copy.dstSubresource.baseArrayLayer, copy.dstSubresource.layerCount},
 			TextureLayout::TransferDst,
 			"CopyTexture destination");
-		RetainResource(sourceTexture);
-		RetainResource(destinationTexture);
-		VkImageCopy copyRegion{
-			.srcSubresource =
-				{
-					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-					.mipLevel = region.sourceMipLevel,
-					.baseArrayLayer = region.sourceBaseArrayLayer,
-					.layerCount = region.layerCount,
-				},
-			.dstSubresource =
-				{
-					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-					.mipLevel = region.destinationMipLevel,
-					.baseArrayLayer = region.destinationBaseArrayLayer,
-					.layerCount = region.layerCount,
-				},
-			.extent = {region.width, region.height, region.depth},
-		};
 		vkCmdCopyImage(m_CommandBuffer,
 			sourceTexture->GetImage(),
 			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 			destinationTexture->GetImage(),
 			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 			1,
-			&copyRegion);
+			&copy);
 	}
 
 	bool VulkanCommandList::ResolveQueueFamilies(std::optional<QueueType> source,
@@ -1538,125 +1331,24 @@ namespace RealRHI {
 		vkCmdInsertDebugUtilsLabelEXT(m_CommandBuffer, &label);
 	}
 
-	bool VulkanCommandList::ValidateMipGeneration(VulkanTexture* texture,
-		const MipGenerationDesc& desc,
-		TextureSubresourceRange& range) const {
-		if (GetState() != CommandListState::Recording || m_Rendering || texture == nullptr) {
+	bool VulkanCommandList::ValidateTransferRecording(const char* operation) const {
+		if (GetState() != CommandListState::Recording || m_Rendering) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
-				"GenerateMipmaps: Requires recording outside rendering and a non-null texture.");
-
+				(std::string(operation) + ": Requires recording outside rendering.").c_str());
 			return false;
 		}
-
-		if (desc.baseMipLevel >= texture->GetMipLevelCount() || desc.baseArrayLayer >= texture->GetArrayLayerCount()) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"GenerateMipmaps: Select an in-bounds base mip and array layer.");
-
-			return false;
-		}
-
-		range = {desc.baseMipLevel, desc.mipLevelCount, desc.baseArrayLayer, desc.arrayLayerCount};
-		if (range.mipLevelCount == 0) {
-			range.mipLevelCount = texture->GetMipLevelCount() - range.baseMipLevel;
-		}
-
-		if (range.arrayLayerCount == 0) {
-			range.arrayLayerCount = texture->GetArrayLayerCount() - range.baseArrayLayer;
-		}
-
-		if (range.mipLevelCount < 2 || range.mipLevelCount > texture->GetMipLevelCount() - range.baseMipLevel ||
-			range.arrayLayerCount > texture->GetArrayLayerCount() - range.baseArrayLayer) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"GenerateMipmaps: Select at least two in-bounds mips and a valid layer range.");
-
-			return false;
-		}
-
-		const TextureUsage usage = texture->GetUsage();
-		if (texture->IsExternal() || !Any(usage & TextureUsage::TransferSrc) ||
-			!Any(usage & TextureUsage::TransferDst) ||
-			Utils::TextureFormatToVkImageAspect(Utils::VkFormatToTextureFormat(texture->GetFormat())) !=
-				VK_IMAGE_ASPECT_COLOR_BIT) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"GenerateMipmaps: Requires an owned color texture with TransferSrc and TransferDst usage.");
-
-			return false;
-		}
-
-		bool validFinalLayout = false;
-		switch (desc.finalLayout) {
-			case TextureLayout::General:
-			case TextureLayout::TransferSrc:
-			case TextureLayout::TransferDst:
-				validFinalLayout = true;
-				break;
-			case TextureLayout::ShaderRead:
-				validFinalLayout = Any(usage & TextureUsage::ShaderResource);
-				break;
-			case TextureLayout::ColorAttachment:
-				validFinalLayout = Any(usage & TextureUsage::RenderTarget);
-				break;
-			default:
-				break;
-		}
-
-		if (!validFinalLayout || (desc.filter != Filter::Nearest && desc.filter != Filter::Linear)) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"GenerateMipmaps: Provide a supported filter and final layout compatible with texture usage.");
-
-			return false;
-		}
-
-		uint32_t familyCount = 0;
-		vkGetPhysicalDeviceQueueFamilyProperties(m_Device->GetPhysicalDevice(), &familyCount, nullptr);
-		std::vector<VkQueueFamilyProperties> families(familyCount);
-		vkGetPhysicalDeviceQueueFamilyProperties(m_Device->GetPhysicalDevice(), &familyCount, families.data());
-
-		if ((families[m_QueueId.familyIndex].queueFlags & VK_QUEUE_GRAPHICS_BIT) == 0) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"GenerateMipmaps: Blits require a graphics-capable queue family.");
-
-			return false;
-		}
-
-		VkFormatProperties properties{};
-		vkGetPhysicalDeviceFormatProperties(m_Device->GetPhysicalDevice(), texture->GetFormat(), &properties);
-		VkFormatFeatureFlags requiredFeatures = VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT;
-		if (desc.filter == Filter::Linear) {
-			requiredFeatures |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
-		}
-
-		if ((properties.optimalTilingFeatures & requiredFeatures) != requiredFeatures) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"GenerateMipmaps: Texture format does not support blitting with the selected filter.");
-
-			return false;
-		}
-
-		for (uint32_t layer = range.baseArrayLayer; layer < range.baseArrayLayer + range.arrayLayerCount; ++layer) {
-			if (m_ResourceTracker.GetExpectedLayout(texture, range.baseMipLevel, layer) == TextureLayout::Undefined) {
-				m_Device->SendDebugMessage(DebugSeverity::Error,
-					DebugMessageType::General,
-					"GenerateMipmaps: Initialize the source mip before generating its descendants.");
-
-				return false;
-			}
-		}
-
 		return true;
 	}
 
 	void VulkanCommandList::GenerateMipmaps(Texture* texture, const MipGenerationDesc& desc) {
+		if (!ValidateTransferRecording("GenerateMipmaps")) {
+			return;
+		}
 		auto* vulkanTexture = static_cast<VulkanTexture*>(texture);
+		const VulkanTransferValidation validation(m_Device, m_ResourceTracker);
 		TextureSubresourceRange range;
-		if (!ValidateMipGeneration(vulkanTexture, desc, range)) {
+		if (!validation.PrepareMipGeneration(vulkanTexture, desc, m_QueueId, range)) {
 			return;
 		}
 

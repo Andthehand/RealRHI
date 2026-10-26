@@ -1,5 +1,6 @@
 #include "Device.h"
 #include "Vulkan/VulkanDevice.h"
+#include "Vulkan/VulkanTransferValidation.h"
 
 #include <algorithm>
 #include <array>
@@ -612,6 +613,169 @@ namespace {
 		SubmitAndWait(device, *list);
 	}
 
+	void TestPackedTransferSizes() {
+		uint64_t bytes = 123;
+		Expect(VulkanTransferValidation::TryGetPackedSize({UINT32_MAX, UINT32_MAX, 1}, 1, 1, bytes) &&
+				bytes == uint64_t{UINT32_MAX} * UINT32_MAX,
+			"Packed byte counts retain values above 32 bits without truncation");
+		Expect(VulkanTransferValidation::TryGetPackedSize({1, 1, 1}, 1, UINT64_MAX, bytes) && bytes == UINT64_MAX,
+			"Packed byte count permits the exact 64-bit limit");
+		for (const auto extent :
+			{VkExtent3D{0, 1, 1},
+				VkExtent3D{1, 0, 1},
+				VkExtent3D{1, 1, 0},
+				VkExtent3D{UINT32_MAX, UINT32_MAX, UINT32_MAX}}) {
+			bytes = 123;
+			Expect(!VulkanTransferValidation::TryGetPackedSize(extent, 1, 4, bytes) && bytes == 123,
+				"Zero or overflowing extents publish no partial byte count");
+		}
+		Expect(!VulkanTransferValidation::TryGetPackedSize({1, 1, 1}, 0, 4, bytes) &&
+				!VulkanTransferValidation::TryGetPackedSize({1, 1, 1}, 1, 0, bytes) &&
+				!VulkanTransferValidation::TryGetPackedSize({2, 1, 1}, 1, UINT64_MAX, bytes) && bytes == 123,
+			"Zero layers, unsupported texel sizes, and multiplication overflow are rejected");
+	}
+
+	void TestTransferValidation(Device& device) {
+		auto source = MakeTexture(device, 4, 4, 1, 2, 2, TextureUsage::TransferSrc | TextureUsage::TransferDst);
+		auto destination = MakeTexture(device, 4, 4, 1, 2, 2, TextureUsage::TransferSrc | TextureUsage::TransferDst);
+		auto staging =
+			MakeBuffer(device, 64, BufferUsage::TransferSrc | BufferUsage::TransferDst, MemoryUsage::CPUToGPU);
+		auto readback = MakeBuffer(device, 40, BufferUsage::TransferDst, MemoryUsage::GPUToCPU);
+		auto target = MakeTexture(device, 4, 4, 1, 1, 1, TextureUsage::RenderTarget);
+		std::array<uint8_t, 64> input{};
+		for (uint32_t i = 0; i < input.size(); ++i) {
+			input[i] = static_cast<uint8_t>(i * 13 + 7);
+		}
+		Expect(staging->WriteData(input.data(), input.size()) == Result::Success, "Write transfer validation data");
+		auto list = MakeList(device);
+		Transition(*list, source.Raw(), TextureLayout::Undefined, TextureLayout::TransferDst, {1, 1, 0, 2});
+		Transition(*list, destination.Raw(), TextureLayout::Undefined, TextureLayout::TransferDst, {1, 1, 0, 2});
+		Transition(*list, target.Raw(), TextureLayout::Undefined, TextureLayout::ColorAttachment, {});
+		const auto stagingReferences = staging->GetRefCount();
+		const auto readbackReferences = readback->GetRefCount();
+		const BufferTextureCopyRegion upload{
+			.width = 2, .height = 2, .bufferOffset = 4, .mipLevel = 1, .layerCount = 2
+		};
+		std::vector<BufferTextureCopyRegion> invalidUploads;
+		for (uint32_t member = 0; member < 8; ++member) {
+			auto invalid = upload;
+			switch (member) {
+				case 0:
+					invalid.width = 0;
+					break;
+				case 1:
+					invalid.depth = 0;
+					break;
+				case 2:
+					invalid.mipLevel = UINT32_MAX;
+					break;
+				case 3:
+					invalid.baseArrayLayer = UINT32_MAX;
+					break;
+				case 4:
+					invalid.layerCount = UINT32_MAX;
+					break;
+				case 5:
+					invalid.bufferOffset = UINT64_MAX;
+					break;
+				case 6:
+					invalid.bufferOffset = 1;
+					break;
+				case 7:
+					invalid.bufferOffset = 36;
+					break;
+			}
+			invalidUploads.push_back(invalid);
+		}
+		for (const auto& invalid : invalidUploads) {
+			ExpectRejected(
+				[&] {
+					list->CopyBufferToTexture(staging.Raw(), source.Raw(), invalid);
+				},
+				"CopyBufferToTexture");
+		}
+		Expect(staging->GetRefCount() == stagingReferences, "Rejected uploads retain no staging resource");
+		ExpectRejected(
+			[&] {
+				list->CopyBuffer(staging.Raw(), staging.Raw(), {.destinationOffset = 4, .size = 16});
+			},
+			"must not overlap");
+		ExpectRejected(
+			[&] {
+				list->CopyBuffer(staging.Raw(), readback.Raw(), {.sourceOffset = UINT64_MAX, .size = 16});
+			},
+			"out of bounds");
+		list->BeginRendering(
+			{.colorAttachments = {{.target = target->GetTextureView()}}, .renderArea = {.width = 4, .height = 4}});
+		ExpectRejected(
+			[&] {
+				list->CopyBuffer(staging.Raw(), readback.Raw(), {.size = 16});
+			},
+			"outside rendering");
+		ExpectRejected(
+			[&] {
+				list->CopyBufferToTexture(staging.Raw(), source.Raw(), upload);
+			},
+			"outside rendering");
+		ExpectRejected(
+			[&] {
+				list->CopyTextureToBuffer(source.Raw(), readback.Raw(), upload);
+			},
+			"outside rendering");
+		ExpectRejected(
+			[&] {
+				list->CopyTexture(source.Raw(), destination.Raw(), {.width = 2, .height = 2});
+			},
+			"outside rendering");
+		ExpectRejected(
+			[&] {
+				list->GenerateMipmaps(source.Raw());
+			},
+			"outside rendering");
+		list->EndRendering();
+		Expect(staging->GetRefCount() == stagingReferences && readback->GetRefCount() == readbackReferences,
+			"Rejected transfers inside rendering retain no copy resources");
+		ExpectRejected(
+			[&] {
+				list->GenerateMipmaps(source.Raw(), {.finalLayout = TextureLayout::ColorAttachment});
+			},
+			"compatible with texture usage");
+		// A non-overlapping self-copy is valid and does not touch the later upload bytes.
+		list->CopyBuffer(staging.Raw(), staging.Raw(), {.destinationOffset = 48, .size = 16});
+		list->CopyBufferToTexture(staging.Raw(), source.Raw(), upload);
+		Transition(*list, source.Raw(), TextureLayout::TransferDst, TextureLayout::TransferSrc, {1, 1, 0, 2});
+		for (auto invalid : invalidUploads) {
+			ExpectRejected(
+				[&] {
+					list->CopyTextureToBuffer(source.Raw(), readback.Raw(), invalid);
+				},
+				"CopyTextureToBuffer");
+		}
+		Expect(readback->GetRefCount() == readbackReferences, "Rejected readbacks retain no output resource");
+		ExpectRejected(
+			[&] {
+				list->CopyTexture(source.Raw(),
+					destination.Raw(),
+					{.width = 2, .height = 2, .sourceMipLevel = UINT32_MAX, .destinationMipLevel = 1, .layerCount = 2});
+			},
+			"subresource range");
+		list->CopyTexture(source.Raw(),
+			destination.Raw(),
+			{.width = 2, .height = 2, .sourceMipLevel = 1, .destinationMipLevel = 1, .layerCount = 2});
+		Transition(*list, destination.Raw(), TextureLayout::TransferDst, TextureLayout::TransferSrc, {1, 1, 0, 2});
+		list->CopyTextureToBuffer(destination.Raw(),
+			readback.Raw(),
+			{.width = 2, .height = 2, .bufferOffset = 8, .mipLevel = 1, .layerCount = 2});
+		SubmitAndWait(device, *list);
+		std::array<uint8_t, 40> actual{};
+		Expect(readback->ReadData(actual.data(), actual.size()) == Result::Success &&
+				std::equal(actual.begin() + 8, actual.end(), input.begin() + 4),
+			"Corrected transfers preserve byte offsets, selected mips, and every array layer");
+		Expect(list->Reset() == Result::Success && staging->GetRefCount() == stagingReferences &&
+				readback->GetRefCount() == readbackReferences,
+			"Reset releases resources after corrected transfers complete");
+	}
+
 	VKAPI_ATTR VkResult VKAPI_CALL FailImageDescriptor(VkDevice,
 		uint32_t,
 		const VkResourceDescriptorInfoEXT*,
@@ -763,6 +927,7 @@ namespace {
 		TestViewSamplingAndLifetime(device);
 		TestAttachmentView(device);
 		TestValidation(device);
+		TestTransferValidation(device);
 		TestCreationFailures(device);
 		TestViewTypes(device);
 		device.WaitIdle();
@@ -772,6 +937,7 @@ namespace {
 }
 
 int main() {
+	TestPackedTransferSizes();
 	RunTests(false);
 	RunTests(true);
 	Expect(g_Errors == g_ExpectedErrors, "No cleanup errors");

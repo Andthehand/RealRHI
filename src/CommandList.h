@@ -154,6 +154,8 @@ namespace RealRHI {
 		virtual void BindVertexBuffer(Buffer* vertexBuffer, uint32_t binding = 0, uint64_t offset = 0) = 0;
 		virtual void BindIndexBuffer(Buffer* indexBuffer) = 0;
 
+		// Copies and mip generation require recording outside rendering. Self-copies
+		// of buffers require disjoint ranges; buffer-image offsets must align to texel size.
 		virtual void CopyBuffer(Buffer* source, Buffer* destination, const BufferCopyRegion& region) = 0;
 		virtual void CopyBufferToTexture(Buffer* source,
 			Texture* destination,

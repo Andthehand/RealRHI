@@ -3,6 +3,7 @@
 #include "VulkanConversions.h"
 #include "VulkanCpuTimer.h"
 #include "VulkanTexture.h"
+#include "VulkanTransferValidation.h"
 
 #include <algorithm>
 #include <numeric>
@@ -456,27 +457,8 @@ namespace RealRHI {
 		const auto format = Utils::VkFormatToTextureFormat(destination->GetFormat());
 		const uint64_t texelSize = Utils::TextureFormatByteSize(format);
 
-		bool validLayout = false;
-		switch (desc.finalLayout) {
-			case TextureLayout::General:
-			case TextureLayout::TransferDst:
-				validLayout = true;
-				break;
-			case TextureLayout::ShaderRead:
-				validLayout = Any(destination->GetUsage() & TextureUsage::ShaderResource);
-				break;
-			case TextureLayout::TransferSrc:
-				validLayout = Any(destination->GetUsage() & TextureUsage::TransferSrc);
-				break;
-			case TextureLayout::ColorAttachment:
-				validLayout = Any(destination->GetUsage() & TextureUsage::RenderTarget);
-				break;
-			default:
-				break;
-		}
-
-		if (!validLayout || texelSize == 0 ||
-			Utils::TextureFormatToVkImageAspect(format) != VK_IMAGE_ASPECT_COLOR_BIT) {
+		if (!VulkanTransferValidation::SupportsFinalLayout(destination->GetUsage(), desc.finalLayout) ||
+			texelSize == 0 || Utils::TextureFormatToVkImageAspect(format) != VK_IMAGE_ASPECT_COLOR_BIT) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
 				"UploadTexture: Only tightly packed color formats and a final layout compatible with texture usage are "
@@ -490,16 +472,12 @@ namespace RealRHI {
 		const uint32_t height = extent.height;
 		const uint32_t depth = extent.depth;
 
-		uint64_t required = texelSize;
-		for (uint32_t factor : {width, height, depth, desc.layerCount}) {
-			if (required > UINT64_MAX / factor) {
-				m_Device->SendDebugMessage(DebugSeverity::Error,
-					DebugMessageType::General,
-					"UploadTexture: Packed subresource byte count overflows uint64_t.");
-
-				return Result::InvalidParameter;
-			}
-			required *= factor;
+		uint64_t required = 0;
+		if (!VulkanTransferValidation::TryGetPackedSize(extent, desc.layerCount, texelSize, required)) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"UploadTexture: Packed subresource byte count overflows uint64_t.");
+			return Result::InvalidParameter;
 		}
 
 		if (size < required) {

@@ -116,9 +116,7 @@ namespace RealRHI {
 		bool RecordVertexBuffers(const char* operation);
 
 		void RecordShaderResources(const char* operation);
-		bool ValidateMipGeneration(VulkanTexture* texture,
-			const MipGenerationDesc& desc,
-			TextureSubresourceRange& range) const;
+		bool ValidateTransferRecording(const char* operation) const;
 		bool ResolveQueueFamilies(std::optional<QueueType> source,
 			std::optional<QueueType> destination,
 			uint32_t& sourceFamily,
