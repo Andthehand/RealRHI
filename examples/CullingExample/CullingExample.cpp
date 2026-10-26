@@ -1,4 +1,5 @@
 #include "Device.h"
+#include "RenderGraph/RenderGraph.h"
 
 #include <array>
 #include <cstdlib>
@@ -97,133 +98,124 @@ namespace {
 				  color) == Result::Success,
 			"Create offscreen target");
 
-		Ref<CommandAllocator> computeAllocator;
-		Ref<CommandAllocator> graphicsAllocator;
-		Ref<CommandList> compute;
-		Ref<CommandList> graphics;
-		Check(device.CreateCommandAllocator(computeQueue, computeAllocator) == Result::Success &&
-				device.CreateCommandAllocator(QueueType::Graphics, graphicsAllocator) == Result::Success &&
-				device.CreateCommandList(computeAllocator.Raw(), compute) == Result::Success &&
-				device.CreateCommandList(graphicsAllocator.Raw(), graphics) == Result::Success,
-			"Create compute and graphics command lists");
-
-		Check(compute->Begin() == Result::Success, "Begin culling commands");
-		compute->BindPipeline(cullPipeline.Raw());
-		compute->UseResource(arguments.Raw());
-		struct CullParameters {
-			uint32_t output;
-			float viewHalfWidth;
-		} parameters{arguments->GetDescriptorIndex(), viewHalfWidth};
-		compute->SetPushConstants(&parameters, sizeof(parameters));
+		RenderGraph graph;
+		const auto argumentResource = graph.ImportBuffer(arguments.Raw());
+		const auto dispatchResource = graph.ImportBuffer(dispatch.Raw());
+		const auto indexResource = graph.ImportBuffer(indices.Raw());
+		const auto outputResource = graph.ImportBuffer(readback.Raw());
+		const auto colorResource = graph.ImportTexture(color.Raw(), TextureLayout::Undefined);
+		const ResourceState indirect{PipelineStage::DrawIndirect, ResourceAccess::IndirectCommandRead};
+		graph.AddPass({.name = "Cull",
+						  .resources =
+							  {{argumentResource,
+								   {PipelineStage::ComputeShader, ResourceAccess::ShaderWrite},
+								   TextureLayout::Undefined,
+								   RenderGraphAccess::Write},
+								  {dispatchResource, indirect}},
+						  .queue = computeQueue},
+			[&](CommandList& list) {
+				list.BindPipeline(cullPipeline.Raw());
+				list.UseResource(arguments.Raw());
+				struct CullParameters {
+					uint32_t output;
+					float viewHalfWidth;
+				} parameters{arguments->GetDescriptorIndex(), viewHalfWidth};
+				list.SetPushConstants(&parameters, sizeof(parameters));
 #ifdef REALRHI_INDIRECT_TESTS
-		s_ExpectError = true;
-		compute->DispatchComputeIndirect(nullptr);
-		compute->DispatchComputeIndirect(dispatch.Raw(), 2);
-		compute->DispatchComputeIndirect(dispatch.Raw(), 8);
-		compute->DispatchComputeIndirect(readback.Raw());
-		s_ExpectError = false;
+				s_ExpectError = true;
+				list.DispatchComputeIndirect(nullptr);
+				list.DispatchComputeIndirect(dispatch.Raw(), 2);
+				list.DispatchComputeIndirect(dispatch.Raw(), 8);
+				list.DispatchComputeIndirect(readback.Raw());
+				s_ExpectError = false;
 #endif
-		compute->DispatchComputeIndirect(dispatch.Raw(), 4);
-		// Transfer ownership as well as visibility when the queue roles use different families.
-		BarrierDesc handoff;
-		handoff.buffers.push_back(
-			{.buffer = arguments.Raw(),
-				.before = {PipelineStage::ComputeShader, ResourceAccess::ShaderWrite},
-				.after =
-					{PipelineStage::DrawIndirect | PipelineStage::Transfer,
-						ResourceAccess::IndirectCommandRead | ResourceAccess::TransferRead},
-				.size = s_ArgumentSize,
-				.sourceQueue = computeQueue,
-				.destinationQueue = QueueType::Graphics});
-		compute->Barrier(handoff);
-		Check(compute->End() == Result::Success, "End culling commands");
-		auto* producer = device.GetCommandQueue(computeQueue);
-		const auto ready = producer->Submit(*compute);
-		Check(ready.IsValid(), "Submit compute culling");
-
-		Check(graphics->Begin() == Result::Success, "Begin indirect rendering");
-		if (producer->GetQueueId().familyIndex != device.GetGraphicsCommandQueue()->GetQueueId().familyIndex) {
-			graphics->Barrier(handoff);
-		}
-		BarrierDesc transition;
-		transition.textures.push_back(
-			{.texture = color.Raw(),
-				.after = {PipelineStage::ColorAttachmentOutput, ResourceAccess::ColorAttachmentWrite},
-				.oldLayout = TextureLayout::Undefined,
-				.newLayout = TextureLayout::ColorAttachment});
-		graphics->Barrier(transition);
-		graphics->BeginRendering(
-			{.colorAttachments = {{.target = color->GetTextureView()}}, .renderArea = {.width = 64, .height = 64}});
-		graphics->SetViewport({.width = 64, .height = 64});
-		graphics->SetScissor({.width = 64, .height = 64});
-		graphics->BindPipeline(drawPipeline.Raw());
+				list.DispatchComputeIndirect(dispatch.Raw(), 4);
+			});
+		graph.AddPass({.name = "Draw visible objects",
+						  .resources =
+							  {{argumentResource, indirect},
+								  {indexResource, {PipelineStage::VertexInput, ResourceAccess::IndexRead}},
+								  {colorResource,
+									  {PipelineStage::ColorAttachmentOutput, ResourceAccess::ColorAttachmentWrite},
+									  TextureLayout::ColorAttachment,
+									  RenderGraphAccess::Write}},
+						  .queue = QueueType::Graphics},
+			[&](CommandList& list) {
+				list.BeginRendering(
+					{.colorAttachments = {{.target = color->GetTextureView()}},
+						.renderArea = {.width = 64, .height = 64}});
+				list.SetViewport({.width = 64, .height = 64});
+				list.SetScissor({.width = 64, .height = 64});
+				list.BindPipeline(drawPipeline.Raw());
 #ifdef REALRHI_INDIRECT_TESTS
-		s_ExpectError = true;
-		graphics->DispatchComputeIndirect(dispatch.Raw());
-		graphics->DrawIndexedIndirect(arguments.Raw(), 32);
-		graphics->DrawIndirect(nullptr);
-		graphics->DrawIndirect(arguments.Raw(), 2);
-		graphics->DrawIndirect(arguments.Raw(), s_ArgumentSize - 4);
-		graphics->DrawIndirect(arguments.Raw(), 16, 2, 12);
-		graphics->DrawIndirect(arguments.Raw(), 16, 2, 17);
-		graphics->DrawIndirect(arguments.Raw(), 16, UINT32_MAX, UINT32_MAX - 3);
-		s_ExpectError = false;
+				s_ExpectError = true;
+				list.DispatchComputeIndirect(dispatch.Raw());
+				list.DrawIndexedIndirect(arguments.Raw(), 32);
+				list.DrawIndirect(nullptr);
+				list.DrawIndirect(arguments.Raw(), 2);
+				list.DrawIndirect(arguments.Raw(), s_ArgumentSize - 4);
+				list.DrawIndirect(arguments.Raw(), 16, 2, 12);
+				list.DrawIndirect(arguments.Raw(), 16, 2, 17);
+				list.DrawIndirect(arguments.Raw(), 16, UINT32_MAX, UINT32_MAX - 3);
+				s_ExpectError = false;
 #endif
-		graphics->BindIndexBuffer(indices.Raw());
+				list.BindIndexBuffer(indices.Raw());
 #ifdef REALRHI_INDIRECT_TESTS
-		s_ExpectError = true;
-		graphics->DrawIndexedIndirect(nullptr);
-		graphics->DrawIndexedIndirect(arguments.Raw(), 2);
-		graphics->DrawIndexedIndirect(arguments.Raw(), s_ArgumentSize - 4);
-		graphics->DrawIndexedIndirect(arguments.Raw(), 32, 2, 16);
-		graphics->DrawIndexedIndirect(arguments.Raw(), 32, 2, 21);
-		s_ExpectError = false;
+				s_ExpectError = true;
+				list.DrawIndexedIndirect(nullptr);
+				list.DrawIndexedIndirect(arguments.Raw(), 2);
+				list.DrawIndexedIndirect(arguments.Raw(), s_ArgumentSize - 4);
+				list.DrawIndexedIndirect(arguments.Raw(), 32, 2, 16);
+				list.DrawIndexedIndirect(arguments.Raw(), 32, 2, 21);
+				s_ExpectError = false;
 #endif
-		graphics->DrawIndirect(arguments.Raw(), s_ArgumentSize, 0);
-		graphics->DrawIndexedIndirect(arguments.Raw(), s_ArgumentSize, 0);
+				list.DrawIndirect(arguments.Raw(), s_ArgumentSize, 0);
+				list.DrawIndexedIndirect(arguments.Raw(), s_ArgumentSize, 0);
 
-		if (multiDraw && device.GetCapabilities().features.multiDrawIndirect &&
-			device.GetCapabilities().limits.maxDrawIndirectCount >= 4) {
-			if (indexed) {
-				graphics->DrawIndexedIndirect(arguments.Raw(), 32, 4, sizeof(DrawRecord));
-			}
-			else {
-				graphics->DrawIndirect(arguments.Raw(), 16, 4, sizeof(DrawRecord));
-			}
-		}
-		else {
-			for (uint32_t i = 0; i < 4; ++i) {
-				if (indexed) {
-					graphics->DrawIndexedIndirect(arguments.Raw(), 32 + i * sizeof(DrawRecord));
+				if (multiDraw && device.GetCapabilities().features.multiDrawIndirect &&
+					device.GetCapabilities().limits.maxDrawIndirectCount >= 4) {
+					if (indexed) {
+						list.DrawIndexedIndirect(arguments.Raw(), 32, 4, sizeof(DrawRecord));
+					}
+					else {
+						list.DrawIndirect(arguments.Raw(), 16, 4, sizeof(DrawRecord));
+					}
 				}
 				else {
-					graphics->DrawIndirect(arguments.Raw(), 16 + i * sizeof(DrawRecord));
+					for (uint32_t i = 0; i < 4; ++i) {
+						if (indexed) {
+							list.DrawIndexedIndirect(arguments.Raw(), 32 + i * sizeof(DrawRecord));
+						}
+						else {
+							list.DrawIndirect(arguments.Raw(), 16 + i * sizeof(DrawRecord));
+						}
+					}
 				}
-			}
-		}
-		graphics->EndRendering();
-		transition.textures[0].before = transition.textures[0].after;
-		transition.textures[0].after = {PipelineStage::Transfer, ResourceAccess::TransferRead};
-		transition.textures[0].oldLayout = TextureLayout::ColorAttachment;
-		transition.textures[0].newLayout = TextureLayout::TransferSrc;
-		graphics->Barrier(transition);
-		graphics->CopyTextureToBuffer(color.Raw(), readback.Raw(), {.width = 64, .height = 64});
-		graphics->CopyBuffer(
-			arguments.Raw(), readback.Raw(), {.destinationOffset = 64 * 64 * 4, .size = s_ArgumentSize});
-		Check(graphics->End() == Result::Success, "End indirect rendering");
-
-		// Recorded lists retain argument and index buffers through GPU execution.
+				list.EndRendering();
+			});
+		graph.AddPass({.name = "Readback",
+						  .resources =
+							  {{argumentResource, {PipelineStage::Transfer, ResourceAccess::TransferRead}},
+								  {colorResource,
+									  {PipelineStage::Transfer, ResourceAccess::TransferRead},
+									  TextureLayout::TransferSrc},
+								  {outputResource,
+									  {PipelineStage::Transfer, ResourceAccess::TransferWrite},
+									  TextureLayout::Undefined,
+									  RenderGraphAccess::Write}},
+						  .queue = QueueType::Transfer},
+			[&](CommandList& list) {
+				list.CopyTextureToBuffer(color.Raw(), readback.Raw(), {.width = 64, .height = 64});
+				list.CopyBuffer(
+					arguments.Raw(), readback.Raw(), {.destinationOffset = 64 * 64 * 4, .size = s_ArgumentSize});
+			});
+		RenderGraphSubmission submission;
+		Check(graph.Submit(device, submission) == Result::Success, "Schedule culling, graphics, and readback queues");
+		graph.Reset();
 		arguments.Reset();
 		dispatch.Reset();
 		indices.Reset();
-
-		std::array<CommandList*, 1> lists{graphics.Raw()};
-		const std::array<SubmissionToken, 1> waits{ready};
-		// The GPU wait covers both distinct queues and queue roles mapped to the same queue.
-		const auto finished = device.GetGraphicsCommandQueue()->Submit({.commandLists = lists, .waitFor = waits});
-		Check(finished.IsValid(), "Submit graphics with compute dependency");
-		device.GetGraphicsCommandQueue()->Wait(finished);
-		producer->Wait(ready);
+		submission.Wait(device);
 
 		std::array<uint8_t, 64 * 64 * 4> pixels{};
 		std::array<DrawRecord, 4> records{};

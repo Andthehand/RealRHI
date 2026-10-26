@@ -128,6 +128,7 @@ if(REALRHI_BUILD_TESTS)
         add_test(NAME ${name} COMMAND ${name})
     endfunction()
 
+    realrhi_add_test(RenderGraphQueueTests tests/RenderGraphQueueTests.cpp)
     realrhi_add_test(TransientResourcePoolTests tests/TransientResourcePoolTests.cpp)
     realrhi_add_test(RenderGraphTests tests/RenderGraphTests.cpp)
     realrhi_add_test(CacheTests tests/CacheTests.cpp)
@@ -154,7 +155,7 @@ if(REALRHI_BUILD_TESTS)
     realrhi_add_test(SceneTests tests/SceneTests.cpp examples/SceneExample/SceneRenderer.cpp)
     realrhi_add_test(DrawTests tests/DrawTests.cpp)
 
-    foreach(name IN ITEMS RenderGraphTests PipelineStateTests ShaderPipelineTests ProfilingTests TextureTests QueueOwnershipTests DrawTests)
+    foreach(name IN ITEMS RenderGraphQueueTests RenderGraphTests PipelineStateTests ShaderPipelineTests ProfilingTests TextureTests QueueOwnershipTests DrawTests)
         target_compile_definitions(${name} PRIVATE
             REALRHI_TEST_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/tests/shaders")
     endforeach()
@@ -163,7 +164,7 @@ if(REALRHI_BUILD_TESTS)
     target_compile_definitions(SceneTests PRIVATE
         REALRHI_SCENE_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/examples/SceneExample/shaders")
 
-    foreach(name IN ITEMS TransientResourcePoolTests RenderGraphTests CacheTests IndirectTests CapabilitiesTests PipelineStateTests ShaderPipelineTests ProfilingTests TextureTests QueueOwnershipTests UploadTests SceneTests DrawTests)
+    foreach(name IN ITEMS RenderGraphQueueTests TransientResourcePoolTests RenderGraphTests CacheTests IndirectTests CapabilitiesTests PipelineStateTests ShaderPipelineTests ProfilingTests TextureTests QueueOwnershipTests UploadTests SceneTests DrawTests)
         set_tests_properties(${name} PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
     endforeach()
 endif()

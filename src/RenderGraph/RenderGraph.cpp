@@ -4,10 +4,26 @@
 #include "TransientResourcePool.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 
 namespace RealRHI {
 	namespace {
+		CommandQueue* FindQueue(Device& device, QueueId id) {
+			for (auto role : {QueueType::Graphics, QueueType::Compute, QueueType::Transfer}) {
+				auto* queue = device.GetCommandQueue(role);
+				if (queue && queue->GetQueueId() == id) {
+					return queue;
+				}
+			}
+			return nullptr;
+		}
+
+		void AppendBarriers(BarrierDesc& destination, const BarrierDesc& source) {
+			destination.buffers.insert(destination.buffers.end(), source.buffers.begin(), source.buffers.end());
+			destination.textures.insert(destination.textures.end(), source.textures.begin(), source.textures.end());
+		}
+
 		std::atomic<uint64_t> s_NextGraphId{1};
 		constexpr auto s_WriteAccess = ResourceAccess::MemoryWrite | ResourceAccess::ShaderWrite |
 			ResourceAccess::ColorAttachmentWrite | ResourceAccess::DepthStencilWrite | ResourceAccess::TransferWrite;
@@ -54,6 +70,7 @@ namespace RealRHI {
 
 	void RenderGraph::Invalidate() {
 		m_Order.clear();
+		m_Prerequisites.clear();
 		m_Plan.clear();
 		m_FinalBarriers = {};
 	}
@@ -112,7 +129,10 @@ namespace RealRHI {
 		}
 	}
 
-	Result RenderGraph::AllocateResources(Device& device, QueueId queue, TransientResourcePool* pool) {
+	Result RenderGraph::AllocateResources(Device& device,
+		std::span<const QueueId> queues,
+		TransientResourcePool* pool,
+		std::span<const uint8_t> poolingAllowed) {
 		Invalidate();
 		ReleaseCreatedResources();
 		std::string error;
@@ -127,12 +147,13 @@ namespace RealRHI {
 		std::vector<Ref<Buffer>> buffers(m_Resources.size());
 		for (size_t i = 0; i < m_Resources.size(); ++i) {
 			const auto& resource = m_Resources[i];
+			const bool usePool = pool && (poolingAllowed.empty() || poolingAllowed[i]);
 			Result result = Result::Success;
 			if (resource.textureDesc) {
 				auto desc = *resource.textureDesc;
 				desc.debugName = resource.debugName.c_str();
-				if (pool) {
-					result = pool->AcquireTexture(queue, desc, textures[i]);
+				if (usePool) {
+					result = pool->AcquireTexture(queues[i], desc, textures[i]);
 				}
 				else {
 					result = device.CreateTexture(desc, textures[i]);
@@ -141,8 +162,8 @@ namespace RealRHI {
 			else if (resource.bufferDesc) {
 				auto desc = *resource.bufferDesc;
 				desc.debugName = resource.debugName.c_str();
-				if (pool) {
-					result = pool->AcquireBuffer(queue, desc, buffers[i]);
+				if (usePool) {
+					result = pool->AcquireBuffer(queues[i], desc, buffers[i]);
 				}
 				else {
 					result = device.CreateBuffer(desc, buffers[i]);
@@ -157,7 +178,7 @@ namespace RealRHI {
 			if (IsCreated(m_Resources[i])) {
 				m_Resources[i].texture = std::move(textures[i]);
 				m_Resources[i].buffer = std::move(buffers[i]);
-				if (pool) {
+				if (pool && (poolingAllowed.empty() || poolingAllowed[i])) {
 					// Reused allocations stay on the same queue. Order previous accesses
 					// before initialization, including image layout metadata writes.
 					m_Resources[i].initialState = {
@@ -198,24 +219,35 @@ namespace RealRHI {
 	RenderGraphResource RenderGraph::ImportTexture(Texture* texture,
 		TextureLayout layout,
 		ResourceState state,
-		TextureSubresourceRange subresources) {
+		TextureSubresourceRange subresources,
+		std::optional<QueueType> owner) {
 		Invalidate();
 		const auto index = static_cast<uint32_t>(m_Resources.size());
 		m_Resources.push_back(
 			{.texture = Ref<Texture>(texture),
 				.subresources = subresources,
 				.initialState = state,
-				.initialLayout = layout});
+				.initialLayout = layout,
+				.initialQueue = owner});
 		return {index, m_Id};
 	}
 
-	RenderGraphResource RenderGraph::ImportBuffer(Buffer* buffer, ResourceState state, uint64_t offset, uint64_t size) {
+	RenderGraphResource RenderGraph::ImportBuffer(Buffer* buffer,
+		ResourceState state,
+		uint64_t offset,
+		uint64_t size,
+		std::optional<QueueType> owner) {
 		Invalidate();
 		if (size == 0 && buffer && offset < buffer->GetSize()) {
 			size = buffer->GetSize() - offset;
 		}
 		const auto index = static_cast<uint32_t>(m_Resources.size());
-		m_Resources.push_back({.buffer = Ref<Buffer>(buffer), .offset = offset, .size = size, .initialState = state});
+		m_Resources.push_back(
+			{.buffer = Ref<Buffer>(buffer),
+				.offset = offset,
+				.size = size,
+				.initialState = state,
+				.initialQueue = owner});
 		return {index, m_Id};
 	}
 
@@ -382,10 +414,12 @@ namespace RealRHI {
 		const auto count = m_Passes.size();
 		std::vector<std::vector<uint32_t>> edges(count);
 		std::vector<uint32_t> incoming(count);
+		m_Prerequisites.resize(count);
 		auto connect = [&](uint32_t from, uint32_t to) {
 			auto& destinations = edges[from];
 			if (std::find(destinations.begin(), destinations.end(), to) == destinations.end()) {
 				destinations.push_back(to);
+				m_Prerequisites[to].push_back(from);
 				++incoming[to];
 			}
 		};
@@ -483,7 +517,7 @@ namespace RealRHI {
 		}
 		for (uint32_t index : m_Order) {
 			const auto& pass = m_Passes[index];
-			RenderGraphStep step{.name = pass.desc.name};
+			RenderGraphStep step{.name = pass.desc.name, .queue = pass.desc.queue};
 			for (const auto& use : pass.desc.resources) {
 				auto& before = states[use.resource.index];
 				if (!before.initialized && use.access != RenderGraphAccess::Write) {
@@ -529,7 +563,8 @@ namespace RealRHI {
 			Report("Execute requires an active command list recording outside rendering.");
 			return Result::InvalidParameter;
 		}
-		const Result result = AllocateResources(device, commands.GetQueueId(), pool);
+		const std::vector<QueueId> queues(m_Resources.size(), commands.GetQueueId());
+		const Result result = AllocateResources(device, queues, pool);
 		if (result != Result::Success) {
 			return result;
 		}
@@ -545,4 +580,291 @@ namespace RealRHI {
 		commands.Barrier(m_FinalBarriers);
 		return Result::Success;
 	}
+	bool RenderGraphSubmission::IsComplete(Device& device) const {
+		for (auto token : completions) {
+			auto* queue = FindQueue(device, token.queue);
+			if (!token.IsValid() || !queue || !queue->IsComplete(token)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	void RenderGraphSubmission::Wait(Device& device) const {
+		for (auto token : completions) {
+			auto* queue = FindQueue(device, token.queue);
+			if (!queue) {
+				DefaultDebugCallback(
+					{DebugSeverity::Error,
+						DebugMessageType::General,
+						"RenderGraphSubmission::Wait: Submission references an unknown queue."});
+				return;
+			}
+			queue->Wait(token);
+		}
+	}
+
+	bool RenderGraph::ValidateQueues(Device& device, std::string& error) const {
+		auto validRole = [&](QueueType role) {
+			return (role == QueueType::Graphics || role == QueueType::Compute || role == QueueType::Transfer) &&
+				device.GetCommandQueue(role) != nullptr;
+		};
+		auto compatible = [](QueueType role, ResourceState state) {
+			if (role == QueueType::Graphics) {
+				return true;
+			}
+			auto allowed = PipelineStage::AllCommands | PipelineStage::Transfer;
+			if (role == QueueType::Compute) {
+				allowed = allowed | PipelineStage::ComputeShader | PipelineStage::DrawIndirect;
+			}
+			return (static_cast<uint64_t>(state.stages) & ~static_cast<uint64_t>(allowed)) == 0;
+		};
+		for (const auto& pass : m_Passes) {
+			if (!validRole(pass.desc.queue)) {
+				error = "Pass '" + pass.desc.name + "': select an available queue role.";
+				return false;
+			}
+			for (const auto& use : pass.desc.resources) {
+				if (!compatible(pass.desc.queue, use.state)) {
+					error = "Pass '" + pass.desc.name + "': resource stages are incompatible with its queue role.";
+					return false;
+				}
+			}
+		}
+		for (uint32_t i = 0; i < m_Resources.size(); ++i) {
+			const auto& resource = m_Resources[i];
+			if (resource.initialQueue && !validRole(*resource.initialQueue)) {
+				error = "Imported resource owner must identify an available queue role.";
+				return false;
+			}
+			if (resource.hasFinalState) {
+				auto role = resource.initialQueue.value_or(QueueType::Graphics);
+				for (uint32_t index : m_Order) {
+					for (const auto& use : m_Passes[index].desc.resources) {
+						if (use.resource.index == i) {
+							role = m_Passes[index].desc.queue;
+						}
+					}
+				}
+				if (!compatible(role, resource.finalState)) {
+					error = "Final resource stages must be supported by its last-use queue.";
+					return false;
+				}
+			}
+		}
+
+		return true;
+	}
+
+	void RenderGraph::BuildQueuePlan(Device& device, std::vector<InitialRelease>& initialReleases) {
+		m_Plan.clear();
+		m_Plan.reserve(m_Order.size());
+		m_FinalBarriers = {};
+		std::vector<TrackedState> states;
+		std::vector<uint32_t> lastUse(m_Resources.size(), UINT32_MAX);
+		for (const auto& resource : m_Resources) {
+			states.push_back({resource.initialState, resource.initialLayout});
+		}
+		auto initialRelease = [&](QueueType role) -> InitialRelease& {
+			for (auto& release : initialReleases) {
+				if (release.queue == role) {
+					return release;
+				}
+			}
+			initialReleases.push_back({.queue = role});
+			return initialReleases.back();
+		};
+
+		for (uint32_t position = 0; position < m_Order.size(); ++position) {
+			const uint32_t passIndex = m_Order[position];
+			const auto& pass = m_Passes[passIndex].desc;
+			m_Plan.push_back({.name = pass.name, .queue = pass.queue});
+			auto& step = m_Plan.back();
+			const auto destination = device.GetCommandQueue(pass.queue)->GetQueueId();
+			for (const auto& use : pass.resources) {
+				const uint32_t resourceIndex = use.resource.index;
+				auto& state = states[resourceIndex];
+				const uint32_t previous = lastUse[resourceIndex];
+				std::optional<QueueType> sourceRole = m_Resources[resourceIndex].initialQueue;
+				if (previous != UINT32_MAX) {
+					sourceRole = m_Plan[previous].queue;
+				}
+				bool transfer = false;
+				if (sourceRole) {
+					const auto source = device.GetCommandQueue(*sourceRole)->GetQueueId();
+					transfer = source.familyIndex != destination.familyIndex;
+					if (previous != UINT32_MAX && source != destination) {
+						// Exclusive resources require ordered ownership even for read/read uses.
+						auto& dependencies = m_Prerequisites[passIndex];
+						const uint32_t producer = m_Order[previous];
+						if (std::find(dependencies.begin(), dependencies.end(), producer) == dependencies.end()) {
+							dependencies.push_back(producer);
+						}
+					}
+				}
+
+				// Each pass has its own list. Even read/read uses need a retained reference
+				// in that list, independent of earlier submissions completing and retiring.
+				state.used = false;
+				BarrierDesc barriers;
+				Transition(resourceIndex, use.state, use.layout, state, barriers);
+				if (transfer) {
+					for (auto& barrier : barriers.buffers) {
+						barrier.sourceQueue = sourceRole;
+						barrier.destinationQueue = pass.queue;
+					}
+					for (auto& barrier : barriers.textures) {
+						barrier.sourceQueue = sourceRole;
+						barrier.destinationQueue = pass.queue;
+					}
+					if (previous != UINT32_MAX) {
+						AppendBarriers(m_Plan[previous].afterBarriers, barriers);
+					}
+					else {
+						auto& release = initialRelease(*sourceRole);
+						AppendBarriers(release.barriers, barriers);
+						release.consumers.push_back(passIndex);
+					}
+					// Do not carry stage masks from a foreign queue family into later barriers.
+					state.state = use.state;
+				}
+				AppendBarriers(step.barriers, barriers);
+				lastUse[resourceIndex] = position;
+			}
+		}
+		for (uint32_t i = 0; i < m_Resources.size(); ++i) {
+			const auto& resource = m_Resources[i];
+			if (!resource.hasFinalState) {
+				continue;
+			}
+			BarrierDesc barriers;
+			Transition(i, resource.finalState, resource.finalLayout, states[i], barriers);
+			AppendBarriers(m_FinalBarriers, barriers);
+			if (lastUse[i] != UINT32_MAX) {
+				AppendBarriers(m_Plan[lastUse[i]].afterBarriers, barriers);
+			}
+			else {
+				AppendBarriers(initialRelease(resource.initialQueue.value_or(QueueType::Graphics)).barriers, barriers);
+			}
+		}
+	}
+
+	Result RenderGraph::Submit(Device& device,
+		RenderGraphSubmission& outSubmission,
+		TransientResourcePool* pool,
+		std::span<const SubmissionToken> waitFor) {
+		outSubmission.completions.clear();
+		std::string error;
+		if (!Compile(error) || !ValidateQueues(device, error)) {
+			Report(error);
+			return Result::InvalidParameter;
+		}
+		for (auto token : waitFor) {
+			if (!token.IsValid() || !FindQueue(device, token.queue)) {
+				Report("Submit requires valid external wait tokens from known queues.");
+				return Result::InvalidParameter;
+			}
+		}
+
+		std::vector<QueueId> resourceQueues(m_Resources.size(), device.GetGraphicsCommandQueue()->GetQueueId());
+		std::vector<uint8_t> poolingAllowed(m_Resources.size(), 1);
+		std::vector<bool> used(m_Resources.size());
+		for (auto index : m_Order) {
+			const auto queue = device.GetCommandQueue(m_Passes[index].desc.queue)->GetQueueId();
+			for (const auto& use : m_Passes[index].desc.resources) {
+				const auto resource = use.resource.index;
+				if (!used[resource]) {
+					resourceQueues[resource] = queue;
+				}
+				else if (resourceQueues[resource] != queue) {
+					poolingAllowed[resource] = 0;
+				}
+				used[resource] = true;
+			}
+		}
+		const auto allocated = AllocateResources(device, resourceQueues, pool, poolingAllowed);
+		if (allocated != Result::Success) {
+			return allocated;
+		}
+		std::vector<InitialRelease> initialReleases;
+		BuildQueuePlan(device, initialReleases);
+
+		struct Batch {
+			QueueType queue;
+			Ref<CommandList> commands;
+			std::vector<size_t> dependencies;
+		};
+		std::vector<Batch> batches;
+		for (const auto& release : initialReleases) {
+			batches.push_back({.queue = release.queue});
+		}
+		std::vector<size_t> passBatches(m_Passes.size());
+		for (uint32_t index : m_Order) {
+			passBatches[index] = batches.size();
+			batches.push_back({.queue = m_Passes[index].desc.queue});
+		}
+		for (uint32_t index : m_Order) {
+			for (auto dependency : m_Prerequisites[index]) {
+				batches[passBatches[index]].dependencies.push_back(passBatches[dependency]);
+			}
+		}
+		for (size_t i = 0; i < initialReleases.size(); ++i) {
+			for (auto consumer : initialReleases[i].consumers) {
+				batches[passBatches[consumer]].dependencies.push_back(i);
+			}
+		}
+
+		// Create and begin every list before invoking callbacks, then finish all recording
+		// before submitting any work. Queue submission retains successful lists in flight.
+		for (auto& batch : batches) {
+			Ref<CommandAllocator> allocator;
+			auto result = device.CreateCommandAllocator(batch.queue, allocator);
+			if (result != Result::Success) {
+				return result;
+			}
+			result = device.CreateCommandList(allocator.Raw(), batch.commands);
+			if (result != Result::Success) {
+				return result;
+			}
+			result = batch.commands->Begin();
+			if (result != Result::Success) {
+				return result;
+			}
+		}
+		for (size_t i = 0; i < batches.size(); ++i) {
+			auto& commands = *batches[i].commands;
+			if (i < initialReleases.size()) {
+				commands.Barrier(initialReleases[i].barriers);
+			}
+			else {
+				const size_t position = i - initialReleases.size();
+				const auto& step = m_Plan[position];
+				commands.Barrier(step.barriers);
+				commands.BeginDebugLabel(step.name.c_str());
+				m_Passes[m_Order[position]].record(commands);
+				commands.EndDebugLabel();
+				commands.ClearResourceDeclarations();
+				commands.Barrier(step.afterBarriers);
+			}
+			const auto ended = commands.End();
+			if (ended != Result::Success) {
+				return ended;
+			}
+		}
+		for (auto& batch : batches) {
+			std::vector<SubmissionToken> waits(waitFor.begin(), waitFor.end());
+			for (size_t dependency : batch.dependencies) {
+				waits.push_back(outSubmission.completions[dependency]);
+			}
+			std::array<CommandList*, 1> lists{batch.commands.Raw()};
+			const auto token = device.GetCommandQueue(batch.queue)->Submit({.commandLists = lists, .waitFor = waits});
+			if (!token.IsValid()) {
+				Report("Submit failed; returned completion tokens cover the work already queued.");
+				return Result::Failed;
+			}
+			outSubmission.completions.push_back(token);
+		}
+		return Result::Success;
+	}
+
 }

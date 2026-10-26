@@ -39,18 +39,28 @@ namespace RealRHI {
 		std::string name;
 		std::vector<RenderGraphUse> resources;
 		std::vector<RenderGraphPass> dependsOn;
+		// Submit honors this preference; Execute uses its caller-owned list.
+		QueueType queue = QueueType::Graphics;
 	};
 
 	struct RenderGraphStep {
 		std::string name;
 		BarrierDesc barriers;
+		QueueType queue = QueueType::Graphics;
+		BarrierDesc afterBarriers;
 	};
 
-	// A small layer above CommandList: all passes record into one list on one queue.
-	// Serialize building/recording; callbacks must not mutate the graph.
-	// Resource versions follow pass insertion order. Explicit dependencies can reorder
-	// independent passes. Imports must already belong to that queue; acquire ownership
-	// and wait for external submissions before using the graph.
+	struct RenderGraphSubmission {
+		// Includes every successful submission, even if Submit fails partway through.
+		std::vector<SubmissionToken> completions;
+		bool IsComplete(Device& device) const;
+		void Wait(Device& device) const;
+	};
+
+	// Serialize building/execution; callbacks must not mutate the graph. Resource
+	// versions follow insertion order; explicit dependencies reorder independent passes.
+	// Execute records into one caller-owned list. Submit honors each pass's queue,
+	// creates its own lists, and schedules GPU dependencies without CPU waits.
 	class RenderGraph {
 	public:
 		explicit RenderGraph(DebugCallback callback = DefaultDebugCallback);
@@ -70,14 +80,19 @@ namespace RealRHI {
 		// Undefined textures need a Write pass before reading. Imported buffer contents
 		// are supplied by the caller. A zero buffer size selects the remaining bytes.
 		// Texture ranges must fit the underlying image; the RHI validates their extents.
+		// For Submit, owner identifies an external resource's current queue role. If
+		// omitted, it must be unclaimed or already owned by its first use's family.
+		// Execute requires ownership already acquired onto the caller's queue.
 		RenderGraphResource ImportTexture(Texture* texture,
 			TextureLayout layout,
 			ResourceState state = {},
-			TextureSubresourceRange subresources = {});
+			TextureSubresourceRange subresources = {},
+			std::optional<QueueType> owner = {});
 		RenderGraphResource ImportBuffer(Buffer* buffer,
 			ResourceState state = {},
 			uint64_t offset = 0,
-			uint64_t size = 0);
+			uint64_t size = 0,
+			std::optional<QueueType> owner = {});
 		void SetFinalState(RenderGraphResource resource,
 			ResourceState state,
 			TextureLayout layout = TextureLayout::Undefined);
@@ -103,6 +118,17 @@ namespace RealRHI {
 		// the first allocation names the shared resource. The pool belongs to device.
 		// Validation/allocation failures return before recording any passes.
 		Result Execute(Device& device, CommandList& commands, TransientResourcePool* pool = nullptr);
+		// Record all lists before submitting any work. External waits apply to all
+		// submissions; matching release/acquire pairs handle exclusive ownership.
+		// Exports remain on their last-use queue. Resources crossing queues allocate
+		// directly; the pool is used only for resources confined to one native queue.
+		// outSubmission is replaced. On failure its tokens describe the queued prefix;
+		// imported resources may be partway through a transfer and need state/ownership
+		// recovery before reuse. Validation/allocation failures submit no work.
+		Result Submit(Device& device,
+			RenderGraphSubmission& outSubmission,
+			TransientResourcePool* pool = nullptr,
+			std::span<const SubmissionToken> waitFor = {});
 		void Reset();
 
 	private:
@@ -117,6 +143,7 @@ namespace RealRHI {
 			uint64_t size = 0;
 			ResourceState initialState;
 			TextureLayout initialLayout = TextureLayout::Undefined;
+			std::optional<QueueType> initialQueue;
 			bool hasFinalState = false;
 			ResourceState finalState;
 			TextureLayout finalLayout = TextureLayout::Undefined;
@@ -129,6 +156,11 @@ namespace RealRHI {
 			RenderGraphPass pass;
 			RenderGraphPass prerequisite;
 		};
+		struct InitialRelease {
+			QueueType queue;
+			BarrierDesc barriers;
+			std::vector<uint32_t> consumers;
+		};
 		struct TrackedState {
 			ResourceState state;
 			TextureLayout layout = TextureLayout::Undefined;
@@ -140,13 +172,18 @@ namespace RealRHI {
 		static bool IsTexture(const Resource& resource);
 		static bool IsCreated(const Resource& resource);
 		void ReleaseCreatedResources();
-		Result AllocateResources(Device& device, QueueId queue, TransientResourcePool* pool);
+		Result AllocateResources(Device& device,
+			std::span<const QueueId> queues,
+			TransientResourcePool* pool,
+			std::span<const uint8_t> poolingAllowed = {});
 		bool IsValid(RenderGraphResource resource) const;
 		bool IsValid(RenderGraphPass pass) const;
 		bool ValidateResources(std::string& error) const;
 		bool ValidatePasses(std::string& error) const;
 		bool BuildOrder(std::string& error);
 		bool BuildBarriers(std::string& error);
+		bool ValidateQueues(Device& device, std::string& error) const;
+		void BuildQueuePlan(Device& device, std::vector<InitialRelease>& initialReleases);
 		void Transition(uint32_t resource,
 			ResourceState after,
 			TextureLayout layout,
@@ -162,6 +199,7 @@ namespace RealRHI {
 		std::vector<Pass> m_Passes;
 		std::vector<Dependency> m_Dependencies;
 		std::vector<uint32_t> m_Order;
+		std::vector<std::vector<uint32_t>> m_Prerequisites;
 		std::vector<RenderGraphStep> m_Plan;
 		BarrierDesc m_FinalBarriers;
 	};
