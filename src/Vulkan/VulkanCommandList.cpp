@@ -183,9 +183,8 @@ namespace RealRHI {
 
 		// The native command buffer no longer references the old recording.
 		// Release outside the state mutex (destructors may invoke other locks).
-		std::vector<Ref<RefCounted>> released;
-		released.swap(m_ReferencedResources);
 		ResetRecordingState();
+		m_ReferencedResources.clear();
 		return Result::Success;
 	}
 

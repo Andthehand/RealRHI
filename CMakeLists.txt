@@ -175,6 +175,9 @@ target_compile_features(RealRHI PUBLIC cxx_std_20)
 if(REALRHI_BUILD_BENCHMARKS)
     add_executable(ResourceTrackingBenchmarks benchmarks/ResourceTrackingBenchmarks.cpp)
     target_link_libraries(ResourceTrackingBenchmarks PRIVATE RealRHI)
+
+    add_executable(ResourceTrackingPatternBenchmarks benchmarks/ResourceTrackingPatternBenchmarks.cpp)
+    target_link_libraries(ResourceTrackingPatternBenchmarks PRIVATE RealRHI)
 endif()
 
 if(REALRHI_BUILD_TESTS)
