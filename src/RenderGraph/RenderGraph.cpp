@@ -8,10 +8,12 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <numeric>
 #include <queue>
 #include <sstream>
+#include <unordered_map>
 
 namespace RealRHI {
 	namespace {
@@ -536,6 +538,8 @@ namespace RealRHI {
 	}
 
 	bool RenderGraph::ValidateResources(std::string& error) const {
+		std::unordered_map<const Buffer*, std::map<uint64_t, uint64_t>> bufferRanges;
+		std::unordered_map<const Texture*, std::vector<TextureSubresourceRange>> textureRanges;
 		if (m_FrameSwapchain &&
 			(!m_Resources[m_BackBuffer].hasFinalState ||
 				m_Resources[m_BackBuffer].finalLayout != TextureLayout::Present ||
@@ -589,29 +593,33 @@ namespace RealRHI {
 				return false;
 			}
 
-			for (size_t j = 0; j < i; ++j) {
-				const auto& other = m_Resources[j];
-				bool overlaps = false;
-				if (!IsCreated(resource) && !IsCreated(other) && resource.buffer && resource.buffer == other.buffer) {
-					overlaps =
-						resource.offset < other.offset + other.size && other.offset < resource.offset + resource.size;
+			if (IsCreated(resource)) {
+				continue;
+			}
+			if (resource.buffer) {
+				auto& ranges = bufferRanges[resource.buffer.Raw()];
+				const uint64_t end = resource.offset + resource.size;
+				const auto next = ranges.lower_bound(resource.offset);
+				// Accepted ranges never overlap, so only the insertion neighbors can conflict.
+				if ((next != ranges.end() && next->first < end) ||
+					(next != ranges.begin() && std::prev(next)->second > resource.offset)) {
+					error = context + "overlaps another import; use the same handle or import disjoint ranges.";
+					return false;
 				}
-				if (!IsCreated(resource) && !IsCreated(other) && resource.texture &&
-					resource.texture == other.texture) {
-					const auto& otherRange = other.subresources;
-					overlaps = Overlaps(range.baseMipLevel,
-								   range.mipLevelCount,
-								   otherRange.baseMipLevel,
-								   otherRange.mipLevelCount) &&
-						Overlaps(range.baseArrayLayer,
-							range.arrayLayerCount,
-							otherRange.baseArrayLayer,
-							otherRange.arrayLayerCount);
-				}
+				ranges.emplace_hint(next, resource.offset, end);
+			}
+			if (resource.texture) {
+				auto& ranges = textureRanges[resource.texture.Raw()];
+				const bool overlaps = std::any_of(ranges.begin(), ranges.end(), [&](const auto& other) {
+					return Overlaps(range.baseMipLevel, range.mipLevelCount, other.baseMipLevel, other.mipLevelCount) &&
+						Overlaps(
+							range.baseArrayLayer, range.arrayLayerCount, other.baseArrayLayer, other.arrayLayerCount);
+				});
 				if (overlaps) {
 					error = context + "overlaps another import; use the same handle or import disjoint ranges.";
 					return false;
 				}
+				ranges.push_back(range);
 			}
 		}
 
@@ -619,23 +627,24 @@ namespace RealRHI {
 	}
 
 	bool RenderGraph::ValidatePasses(std::string& error) const {
-		for (const auto& pass : m_Passes) {
+		std::vector<size_t> seen(m_Resources.size(), m_Passes.size());
+		for (size_t passIndex = 0; passIndex < m_Passes.size(); ++passIndex) {
+			const auto& pass = m_Passes[passIndex];
 			const std::string context = "Pass '" + pass.desc.name + "': ";
 			if (pass.desc.name.empty() || !pass.record) {
 				error = context + "provide a name and recording callback.";
 				return false;
 			}
-			std::vector<uint32_t> seen;
 			for (const auto& use : pass.desc.resources) {
 				if (!IsValid(use.resource)) {
 					error = context + "resource handle belongs to another graph, was reset, or is invalid.";
 					return false;
 				}
-				if (std::find(seen.begin(), seen.end(), use.resource.index) != seen.end()) {
+				if (seen[use.resource.index] == passIndex) {
 					error = context + "declare each resource once; use ReadWrite for an in-place operation.";
 					return false;
 				}
-				seen.push_back(use.resource.index);
+				seen[use.resource.index] = passIndex;
 				const auto& resource = m_Resources[use.resource.index];
 				const bool reads = HasAccess(use.state.access, s_ReadAccess);
 				const bool writes = HasAccess(use.state.access, s_WriteAccess);

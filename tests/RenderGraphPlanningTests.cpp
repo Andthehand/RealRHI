@@ -1,9 +1,12 @@
 #include "RenderGraph/RenderGraph.h"
 
+#include <array>
 #include <cstdlib>
 #include <initializer_list>
 #include <iostream>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace {
 	using namespace RealRHI;
@@ -18,6 +21,24 @@ namespace {
 	}
 
 	void EmptyPass(CommandList&) { }
+
+	class PlanningBuffer : public Buffer {
+	public:
+		uint64_t GetAllocationSize() const override { return 0; }
+		uint64_t GetSize() const override { return UINT64_MAX; }
+		uint32_t GetDescriptorIndex() const override { return UINT32_MAX; }
+		Result WriteData(const void*, uint64_t, uint64_t) override { return Result::Failed; }
+		Result ReadData(void*, uint64_t, uint64_t) const override { return Result::Failed; }
+	};
+
+	class PlanningTexture : public Texture {
+	public:
+		uint64_t GetAllocationSize() const override { return 0; }
+		uint32_t GetSampleCount() const override { return 1; }
+		TextureView* GetTextureView() override { return nullptr; }
+		const TextureView* GetTextureView() const override { return nullptr; }
+		Result UploadData(const void*, uint32_t) override { return Result::Failed; }
+	};
 
 	void ExpectInvalid(RenderGraph& graph, std::string_view diagnostic) {
 		std::string error;
@@ -63,6 +84,76 @@ namespace {
 		ExpectInvalid(graph, "cycle");
 	}
 
+	void TestImportValidation() {
+		auto buffer = Ref<PlanningBuffer>::Create();
+		auto otherBuffer = Ref<PlanningBuffer>::Create();
+		auto texture = Ref<PlanningTexture>::Create();
+		auto otherTexture = Ref<PlanningTexture>::Create();
+		RenderGraph graph;
+		std::string error;
+		// Import out of order; adjacent intervals and identical ranges on different objects are legal.
+		for (uint64_t offset : std::array<uint64_t, 4>{64, 0, 32, UINT64_MAX - 32}) {
+			graph.ImportBuffer(buffer.Raw(), {}, offset, 32);
+		}
+		graph.ImportBuffer(otherBuffer.Raw(), {}, 0, 96);
+		Expect(graph.Compile(error) && graph.Compile(error), "Disjoint buffer imports validate across recompilation");
+		for (const auto [offset, size] :
+			std::array<std::pair<uint64_t, uint64_t>, 6>{{{0, 64}, {16, 64}, {48, 64}, {80, 64}, {40, 8}, {32, 32}}}) {
+			graph.Reset();
+			graph.ImportBuffer(buffer.Raw(), {}, 32, 32);
+			graph.ImportBuffer(buffer.Raw(), {}, 96, 32);
+			graph.ImportBuffer(buffer.Raw(), {}, offset, size);
+			Expect(!graph.Compile(error) &&
+					error == "Resource 2: overlaps another import; use the same handle or import disjoint ranges.",
+				"Reject containing, contained, preceding and following buffer overlaps with the original diagnostic");
+		}
+		graph.Reset();
+		graph.ImportBuffer(buffer.Raw(), {}, UINT64_MAX - 16, 32);
+		ExpectInvalid(graph, "buffer range must be nonempty and fit");
+
+		graph.Reset();
+		graph.ImportTexture(texture.Raw(), TextureLayout::ShaderRead, s_Read, {2, 2, 0, 2});
+		graph.ImportTexture(texture.Raw(), TextureLayout::ShaderRead, s_Read, {0, 2, 0, 2});
+		graph.ImportTexture(texture.Raw(), TextureLayout::ShaderRead, s_Read, {0, 4, 2, 2});
+		graph.ImportTexture(otherTexture.Raw(), TextureLayout::ShaderRead, s_Read, {0, 4, 0, 4});
+		Expect(graph.Compile(error), "Mip or layer separation and distinct texture identity allow imports");
+		graph.ImportTexture(texture.Raw(), TextureLayout::ShaderRead, s_Read, {1, 2, 1, 2});
+		Expect(!graph.Compile(error) &&
+				error == "Resource 4: overlaps another import; use the same handle or import disjoint ranges.",
+			"Texture imports must overlap in both mip and layer dimensions to conflict");
+		graph.Reset();
+		graph.ImportTexture(texture.Raw(), TextureLayout::Undefined, {}, {UINT32_MAX, 2, 0, 1});
+		ExpectInvalid(graph, "texture range and initial layout must be valid");
+	}
+
+	void TestManyResourceDeclarations() {
+		RenderGraph graph;
+		std::vector<RenderGraphUse> writes;
+		std::vector<RenderGraphUse> reads;
+		for (uint32_t i = 0; i < 4096; ++i) {
+			const auto buffer = graph.CreateBuffer({.size = 64, .usage = BufferUsage::Storage});
+			writes.push_back({buffer, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write});
+			reads.push_back({buffer, s_Read});
+		}
+		graph.AddPass({.name = "Initialize many resources", .resources = writes}, EmptyPass);
+		graph.AddPass({.name = "First reader", .resources = reads}, EmptyPass);
+		graph.AddPass({.name = "Second reader", .resources = reads}, EmptyPass);
+		std::string error;
+		Expect(graph.Compile(error) && graph.Compile(error) && graph.GetExecutionPlan().size() == 3,
+			"Each pass can declare the same large resource set across repeated compilation");
+		reads.push_back(reads.front());
+		graph.AddPass({.name = "Duplicate at end", .resources = reads}, EmptyPass);
+		Expect(!graph.Compile(error) &&
+				error ==
+					"Pass 'Duplicate at end': declare each resource once; use ReadWrite for an in-place operation.",
+			"Reject a nonadjacent duplicate in a large declaration list with its original diagnostic");
+		graph.Reset();
+		auto invalid = graph.CreateBuffer({.size = 64, .usage = BufferUsage::Storage});
+		invalid.index = UINT32_MAX;
+		graph.AddPass({.name = "Invalid index", .resources = {{invalid, s_Read}}}, EmptyPass);
+		ExpectInvalid(graph, "resource handle belongs to another graph, was reset, or is invalid");
+	}
+
 	void TestCullingAndReset() {
 		RenderGraph graph;
 		graph.SetOptions({.cullUnusedPasses = true});
@@ -71,9 +162,8 @@ namespace {
 		graph.AddPass(
 			{.name = "Output", .resources = {{output, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
 			EmptyPass);
-		graph.AddPass(
-			{.name = "Discarded",
-				.resources = {{discarded, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+		graph.AddPass({.name = "Discarded",
+						  .resources = {{discarded, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
 			EmptyPass);
 		const auto prerequisite = graph.AddPass({.name = "Prerequisite"}, EmptyPass);
 		graph.AddPass({.name = "Side effect", .dependsOn = {prerequisite}, .hasSideEffects = true}, EmptyPass);
@@ -111,32 +201,49 @@ namespace {
 
 	void TestReadLayoutsAndDependencyOrder() {
 		RenderGraph graph;
-		const auto texture = graph.CreateTexture({.width = 4,
-			.height = 4,
-			.format = TextureFormat::RGBA8_UNorm,
-			.usage = TextureUsage::ShaderResource | TextureUsage::Storage});
+		const auto texture = graph.CreateTexture(
+			{.width = 4,
+				.height = 4,
+				.format = TextureFormat::RGBA8_UNorm,
+				.usage = TextureUsage::ShaderResource | TextureUsage::Storage});
 		const auto buffer = graph.CreateBuffer({.size = 64, .usage = BufferUsage::Storage});
-		const auto writer = graph.AddPass({.name = "Initialize",
-			.resources = {{texture, s_Write, TextureLayout::General, RenderGraphAccess::Write},
-				{buffer, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}}, EmptyPass);
-		const auto generalA = graph.AddPass({.name = "General A",
-			.resources = {{texture, s_Read, TextureLayout::General}, {buffer, s_Read}}}, EmptyPass);
-		const auto generalB = graph.AddPass({.name = "General B",
-			.resources = {{texture, s_Read, TextureLayout::General}, {buffer, s_Read}}}, EmptyPass);
-		const auto sampledA = graph.AddPass({.name = "Sample A",
-			.resources = {{texture, s_Read, TextureLayout::ShaderRead}, {buffer, s_Read}}}, EmptyPass);
-		const auto sampledB = graph.AddPass({.name = "Sample B",
-			.resources = {{texture, s_Read, TextureLayout::ShaderRead}, {buffer, s_Read}},
-			.dependsOn = {writer, generalA, writer}}, EmptyPass);
-		constexpr ResourceState readWrite{PipelineStage::ComputeShader,
-			ResourceAccess::ShaderRead | ResourceAccess::ShaderWrite};
-		const auto overwrite = graph.AddPass({.name = "Overwrite",
-			.resources = {{texture, readWrite, TextureLayout::General, RenderGraphAccess::ReadWrite},
-				{buffer, readWrite, TextureLayout::Undefined, RenderGraphAccess::ReadWrite}}}, EmptyPass);
-		const auto generalAfter = graph.AddPass({.name = "General after overwrite",
-			.resources = {{texture, s_Read, TextureLayout::General}, {buffer, s_Read}}}, EmptyPass);
-		const auto sampledAfter = graph.AddPass({.name = "Sample after overwrite",
-			.resources = {{texture, s_Read, TextureLayout::ShaderRead}, {buffer, s_Read}}}, EmptyPass);
+		const auto writer =
+			graph.AddPass({.name = "Initialize",
+							  .resources =
+								  {{texture, s_Write, TextureLayout::General, RenderGraphAccess::Write},
+									  {buffer, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+				EmptyPass);
+		const auto generalA = graph.AddPass(
+			{.name = "General A", .resources = {{texture, s_Read, TextureLayout::General}, {buffer, s_Read}}},
+			EmptyPass);
+		const auto generalB = graph.AddPass(
+			{.name = "General B", .resources = {{texture, s_Read, TextureLayout::General}, {buffer, s_Read}}},
+			EmptyPass);
+		const auto sampledA = graph.AddPass(
+			{.name = "Sample A", .resources = {{texture, s_Read, TextureLayout::ShaderRead}, {buffer, s_Read}}},
+			EmptyPass);
+		const auto sampledB =
+			graph.AddPass({.name = "Sample B",
+							  .resources = {{texture, s_Read, TextureLayout::ShaderRead}, {buffer, s_Read}},
+							  .dependsOn = {writer, generalA, writer}},
+				EmptyPass);
+		constexpr ResourceState readWrite{
+			PipelineStage::ComputeShader, ResourceAccess::ShaderRead | ResourceAccess::ShaderWrite
+		};
+		const auto overwrite =
+			graph.AddPass({.name = "Overwrite",
+							  .resources =
+								  {{texture, readWrite, TextureLayout::General, RenderGraphAccess::ReadWrite},
+									  {buffer, readWrite, TextureLayout::Undefined, RenderGraphAccess::ReadWrite}}},
+				EmptyPass);
+		const auto generalAfter =
+			graph.AddPass({.name = "General after overwrite",
+							  .resources = {{texture, s_Read, TextureLayout::General}, {buffer, s_Read}}},
+				EmptyPass);
+		const auto sampledAfter =
+			graph.AddPass({.name = "Sample after overwrite",
+							  .resources = {{texture, s_Read, TextureLayout::ShaderRead}, {buffer, s_Read}}},
+				EmptyPass);
 		graph.AddDependency(generalA, generalB);
 		graph.AddDependency(sampledB, generalA);
 		graph.AddDependency(sampledB, writer);
@@ -183,11 +290,12 @@ namespace {
 		const auto first = graph.AddPass({.name = "First"}, EmptyPass);
 		const auto second = graph.AddPass({.name = "Second"}, EmptyPass);
 		const auto buffer = graph.CreateBuffer({.size = 64, .usage = BufferUsage::Storage});
-		const auto writer = graph.AddPass(
-			{.name = "Initialize", .resources = {{buffer, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-			EmptyPass);
-		const auto reader = graph.AddPass({.name = "Read", .resources = {{buffer, s_Read}},
-			.dependsOn = {second, first, second}}, EmptyPass);
+		const auto writer =
+			graph.AddPass({.name = "Initialize",
+							  .resources = {{buffer, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+				EmptyPass);
+		const auto reader = graph.AddPass(
+			{.name = "Read", .resources = {{buffer, s_Read}}, .dependsOn = {second, first, second}}, EmptyPass);
 		const auto last = graph.AddPass({.name = "Last prerequisite"}, EmptyPass);
 		graph.AddDependency(reader, first);
 		graph.AddDependency(reader, last);
@@ -195,22 +303,25 @@ namespace {
 		Expect(graph.Compile(error), "Combine implicit hazards and explicit dependencies");
 		const auto diagnostics = graph.GetDiagnostics();
 		ExpectPrerequisites(diagnostics, reader, {writer, second, first, last});
-		Expect(diagnostics.passes[last.index].executionIndex == 3 &&
-				diagnostics.passes[reader.index].executionIndex == 4,
+		Expect(
+			diagnostics.passes[last.index].executionIndex == 3 && diagnostics.passes[reader.index].executionIndex == 4,
 			"Explicit prerequisites can point to later independent passes");
 	}
 
 	void TestSharedReaders() {
 		RenderGraph graph;
 		const auto buffer = graph.CreateBuffer({.size = 64, .usage = BufferUsage::Storage});
-		const auto writer = graph.AddPass(
-			{.name = "Initialize", .resources = {{buffer, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-			EmptyPass);
+		const auto writer =
+			graph.AddPass({.name = "Initialize",
+							  .resources = {{buffer, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+				EmptyPass);
 		constexpr uint32_t count = 2048;
 		std::vector<RenderGraphPass> readers;
 		for (uint32_t i = 0; i < count; ++i) {
 			readers.push_back(graph.AddPass({.name = "Read " + std::to_string(i),
-				.resources = {{buffer, s_Read}}, .hasSideEffects = i == count - 1}, EmptyPass));
+												.resources = {{buffer, s_Read}},
+												.hasSideEffects = i == count - 1},
+				EmptyPass));
 		}
 		std::string error;
 		Expect(graph.Compile(error), "Compile many compatible readers of one resource");
@@ -228,21 +339,23 @@ namespace {
 
 	void TestInitializationAndLayouts() {
 		RenderGraph graph;
-		const auto texture = graph.CreateTexture({.width = 4,
-			.height = 4,
-			.format = TextureFormat::RGBA8_UNorm,
-			.usage = TextureUsage::ShaderResource | TextureUsage::Storage});
-		graph.AddPass({.name = "Uninitialized read", .resources = {{texture, s_Read, TextureLayout::ShaderRead}}},
-			EmptyPass);
+		const auto texture = graph.CreateTexture(
+			{.width = 4,
+				.height = 4,
+				.format = TextureFormat::RGBA8_UNorm,
+				.usage = TextureUsage::ShaderResource | TextureUsage::Storage});
+		graph.AddPass(
+			{.name = "Uninitialized read", .resources = {{texture, s_Read, TextureLayout::ShaderRead}}}, EmptyPass);
 		ExpectInvalid(graph, "written before reading");
 
 		graph.Reset();
-		const auto initialized = graph.CreateTexture({.width = 4,
-			.height = 4,
-			.format = TextureFormat::RGBA8_UNorm,
-			.usage = TextureUsage::ShaderResource | TextureUsage::Storage});
-		graph.AddPass(
-			{.name = "Initialize", .resources = {{initialized, s_Write, TextureLayout::General, RenderGraphAccess::Write}}},
+		const auto initialized = graph.CreateTexture(
+			{.width = 4,
+				.height = 4,
+				.format = TextureFormat::RGBA8_UNorm,
+				.usage = TextureUsage::ShaderResource | TextureUsage::Storage});
+		graph.AddPass({.name = "Initialize",
+						  .resources = {{initialized, s_Write, TextureLayout::General, RenderGraphAccess::Write}}},
 			EmptyPass);
 		graph.AddPass({.name = "Sample", .resources = {{initialized, s_Read, TextureLayout::ShaderRead}}}, EmptyPass);
 		std::string error;
@@ -255,6 +368,8 @@ namespace {
 }
 
 int main() {
+	TestImportValidation();
+	TestManyResourceDeclarations();
 	TestScheduling();
 	TestReadLayoutsAndDependencyOrder();
 	TestReadyPassOrder();

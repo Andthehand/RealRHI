@@ -268,13 +268,44 @@ and 50.96 MiB unique with streaming; the transient pool stays at 8.69 MiB. Strea
 uploads 81,920 bytes per measured frame. The unique variants use 773/1,024 sampler
 slots, compared with six for shared assets.
 
-The next performance investigation should isolate graph validation: `ValidateResources`
-compares each import against earlier resources, and `ValidatePasses` searches a growing
-list for duplicate declarations. These pairwise scans are candidates for indexing by
-resource identity and dense handle IDs. The measurements establish compilation as the
-dominant phase; they do not separately attribute its cost to those functions. Sampler
-reuse or optional default samplers are a separate capacity improvement needed before
-the 1,024-object unique workload can run.
+Graph validation now groups imports by resource identity. Buffer imports use ordered
+intervals and check only their insertion neighbors; texture imports compare mip/layer
+ranges only within the same texture. Pass declarations use dense resource indices with
+a per-pass marker to reject duplicates without clearing or searching a growing list.
+Validation still visits resources and declarations in their original order and reports
+the same first error. Many disjoint imports of one texture can still require pairwise
+range checks within that texture's group.
+
+Fresh comparisons of saved baseline and optimized executables used three paired runs,
+alternating binary order, with 60 warmup and 300 measured frames per workload per run.
+Both variants use the same built-in C++ suite and settings. Each row below averages
+900 measured frames per variant; these numbers supersede the earlier baseline for
+assessing this change. Absolute timings differ from the initial run, so comparisons
+use the freshly measured baseline rather than combining separate measurement sessions.
+
+| Objects | Assets | CPU ms before → after | Compile ms before → after |
+| --- | --- | ---: | ---: |
+| 64 | Shared | 0.106 → 0.113 | 0.008 → 0.009 |
+| 64 | Unique | 0.389 → 0.298 | 0.172 → 0.080 |
+| 64 | Unique + streaming | 0.479 → 0.440 | 0.174 → 0.094 |
+| 256 | Shared | 0.206 → 0.243 | 0.008 → 0.010 |
+| 256 | Unique | 2.545 → 1.032 | 1.793 → 0.299 |
+| 256 | Unique + streaming | 2.641 → 1.082 | 1.802 → 0.293 |
+| 768 | Shared | 0.508 → 0.496 | 0.009 → 0.009 |
+| 768 | Unique | 16.577 → 3.502 | 13.870 → 0.930 |
+| 768 | Unique + streaming | 16.646 → 3.678 | 13.918 → 0.972 |
+
+At 768 unique objects, compilation is 93.3% lower and total measured CPU work is
+78.9% lower. Shared workloads show little compilation benefit and mixed CPU results,
+including a 0.037 ms increase at 256 objects. All 39 paired final-image checksums
+(including validation probes) match exactly, with no validation errors or warnings.
+The full Debug and Release suites pass, including SDK-independent checks for buffer
+interval boundaries, texture mip/layer overlap, and large pass declaration sets.
+Detailed comparison CSVs, per-frame results, executable hashes and methodology are
+saved locally under `out/test-results/graph-validation/`.
+
+Sampler reuse or optional default samplers remain a separate capacity improvement
+needed before the 1,024-object unique workload can run.
 
 ## Configuration options
 
