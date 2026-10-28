@@ -552,6 +552,75 @@ namespace {
 		device.WaitIdle();
 	}
 
+	void TestFragmentedBufferOwnership(Device& device) {
+		constexpr uint32_t regionCount = 257;
+		constexpr uint64_t regionBytes = 16;
+		std::array<uint32_t, regionCount * regionBytes / sizeof(uint32_t)> input{};
+		for (size_t i = 0; i < input.size(); ++i) {
+			input[i] = static_cast<uint32_t>(i * 19 + 7);
+		}
+		auto staging = MakeBuffer(device, sizeof(input), BufferUsage::TransferSrc, MemoryUsage::CPUToGPU, input.data());
+		auto buffer = MakeBuffer(device, sizeof(input), BufferUsage::TransferSrc | BufferUsage::TransferDst);
+		auto output = MakeBuffer(device, sizeof(input), BufferUsage::TransferDst, MemoryUsage::GPUToCPU);
+		auto transfer = MakeList(device, QueueType::Transfer);
+		for (uint32_t i = 0; i < regionCount; ++i) {
+			// A permutation forces splitting between previously tracked regions.
+			const uint64_t offset = ((i * 73) % regionCount) * regionBytes;
+			transfer->CopyBuffer(staging.Raw(),
+				buffer.Raw(),
+				{.sourceOffset = offset, .destinationOffset = offset, .size = regionBytes});
+			BufferBarrierFor(*transfer,
+				buffer.Raw(),
+				offset,
+				regionBytes,
+				QueueType::Transfer,
+				QueueType::Compute,
+				transferWrite,
+				transferRead);
+		}
+		End(*transfer);
+		const auto released = Submit(device, QueueType::Transfer, *transfer);
+		Expect(released.IsValid(), "Release many adjacent buffer regions separately");
+
+		if (DifferentFamilies(device, QueueType::Transfer, QueueType::Compute)) {
+			auto combined = MakeList(device, QueueType::Compute);
+			BufferBarrierFor(*combined,
+				buffer.Raw(),
+				0,
+				regionBytes * 2,
+				QueueType::Transfer,
+				QueueType::Compute,
+				transferWrite,
+				transferRead);
+			End(*combined);
+			ExpectRejected(device, QueueType::Compute, *combined, "exactly match", {&released, 1});
+		}
+		else {
+			std::cout << "Fragmented buffer acquire rejection requires distinct transfer/compute families; "
+						 "running the shared-family data path.\n";
+		}
+
+		auto compute = MakeList(device, QueueType::Compute);
+		for (uint32_t i = regionCount; i > 0; --i) {
+			BufferBarrierFor(*compute,
+				buffer.Raw(),
+				(i - 1) * regionBytes,
+				regionBytes,
+				QueueType::Transfer,
+				QueueType::Compute,
+				transferWrite,
+				transferRead);
+		}
+		compute->CopyBuffer(buffer.Raw(), output.Raw(), {.size = sizeof(input)});
+		End(*compute);
+		const auto acquired = Submit(device, QueueType::Compute, *compute, {&released, 1});
+		Expect(acquired.IsValid(), "Acquire each exact region after rejecting a combined acquire");
+		device.GetCommandQueue(QueueType::Compute)->Wait(acquired);
+		std::array<uint32_t, input.size()> actual{};
+		Expect(output->ReadData(actual.data(), sizeof(actual)) == Result::Success && actual == input,
+			"All buffer data survives fragmented release and acquire");
+	}
+
 	void TestRangesAndBatch(Device& device) {
 		if (!DifferentFamilies(device, QueueType::Transfer, QueueType::Compute)) {
 			std::cout << "Range ownership negatives require distinct transfer/compute families; shared-family data "
@@ -871,6 +940,7 @@ int main() {
 		TestBufferChain(*device);
 		TestTextureChain(*device);
 		TestRangesAndBatch(*device);
+		TestFragmentedBufferOwnership(*device);
 		TestTextureSubresources(*device);
 		TestRenderAttachmentOwnership(*device);
 		TestRecordingValidation(*device);

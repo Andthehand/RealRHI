@@ -4,6 +4,7 @@
 #include "Vulkan/VulkanResourceStateTransaction.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <iomanip>
@@ -30,10 +31,14 @@ namespace {
 		Check(message.severity != DebugSeverity::Error, "Benchmark encountered an RHI error");
 	}
 
-	void Report(std::string_view workload, uint32_t resources, uint32_t operations, std::vector<double> samples) {
+	void Report(std::string_view workload,
+		uint32_t resources,
+		uint32_t operations,
+		std::vector<double> samples,
+		uint32_t trackedRanges = 0) {
 		std::sort(samples.begin(), samples.end());
 		std::cout << workload << ',' << resources << ',' << operations << ',' << samples[samples.size() / 2] << ','
-			<< samples.front() << ',' << samples.back() << '\n';
+				  << samples.front() << ',' << samples.back() << ',' << trackedRanges << '\n';
 	}
 
 	struct RetainedObject final : RefCounted { };
@@ -83,18 +88,20 @@ namespace {
 
 	void MeasureReverseRanges(VulkanDevice& device, uint32_t count) {
 		Ref<Buffer> buffer;
-		Check(device.CreateBuffer({.size = count * s_RegionBytes,
-								 .usage = BufferUsage::TransferSrc | BufferUsage::TransferDst}, buffer) == Result::Success,
+		Check(device.CreateBuffer(
+				  {.size = count * s_RegionBytes, .usage = BufferUsage::TransferSrc | BufferUsage::TransferDst},
+				  buffer) == Result::Success,
 			"Create reverse-range benchmark buffer");
 
 		auto* native = static_cast<VulkanBuffer*>(buffer.Raw());
 		std::vector<VulkanResourceOperation> operations;
 		operations.reserve(count);
 		for (uint32_t i = 0; i < count; ++i) {
-			operations.push_back({.name = "Reverse range benchmark",
-				.buffer = native,
-				.offset = (count - i - 1) * s_RegionBytes,
-				.size = s_RegionBytes});
+			operations.push_back(
+				{.name = "Reverse range benchmark",
+					.buffer = native,
+					.offset = (count - i - 1) * s_RegionBytes,
+					.size = s_RegionBytes});
 		}
 
 		const SubmissionToken proposed{.queue = device.GetGraphicsCommandQueue()->GetQueueId(), .value = 1};
@@ -107,13 +114,78 @@ namespace {
 				VulkanResourceStateTransaction transaction(&device, proposed, {});
 				Check(transaction.Validate(operations), "Validate reverse-range benchmark operations");
 			}
-			const double milliseconds = std::chrono::duration<double, std::milli>(Clock::now() - start).count() / rounds;
+			const double milliseconds =
+				std::chrono::duration<double, std::milli>(Clock::now() - start).count() / rounds;
 			if (sample != 0) {
 				samples.push_back(milliseconds);
 			}
 		}
 
 		Report("reverse_ranges", 1, count, std::move(samples));
+	}
+
+	void MeasureFragmentedState(VulkanDevice& device, uint32_t count) {
+		Ref<Buffer> buffer;
+		Check(device.CreateBuffer(
+				  {.size = count * 2 * s_RegionBytes, .usage = BufferUsage::TransferSrc | BufferUsage::TransferDst},
+				  buffer) == Result::Success,
+			"Create fragmented-state benchmark buffer");
+		Ref<CommandAllocator> allocator;
+		Ref<CommandList> commands;
+		Check(device.CreateCommandAllocator(QueueType::Graphics, allocator) == Result::Success &&
+				device.CreateCommandList(allocator.Raw(), commands) == Result::Success,
+			"Create fragmented-state benchmark command list");
+		Check(commands->Begin() == Result::Success, "Begin fragmented-state setup");
+		for (uint32_t i = 0; i < count; ++i) {
+			BarrierDesc barrier;
+			barrier.buffers.push_back(
+				{.buffer = buffer.Raw(),
+					.after = {PipelineStage::Transfer, ResourceAccess::TransferRead},
+					.offset = (i * 2 + 1) * s_RegionBytes,
+					.size = s_RegionBytes});
+			commands->Barrier(barrier);
+		}
+		Check(commands->End() == Result::Success, "End fragmented-state setup");
+		auto* queue = device.GetGraphicsCommandQueue();
+		const auto submitted = queue->Submit(*commands);
+		Check(submitted.IsValid(), "Submit fragmented-state setup");
+		queue->Wait(submitted);
+		Check(commands->Reset() == Result::Success, "Reset fragmented-state setup recording");
+
+		// Alternating claimed and unclaimed regions remain distinct after a real
+		// submission, including on devices with only one queue family.
+		auto* native = static_cast<VulkanBuffer*>(buffer.Raw());
+		const SubmissionToken proposed{.queue = queue->GetQueueId(), .value = submitted.value + 1};
+		for (std::string_view workload : {"fragmented_state_single_region", "fragmented_state_whole_buffer"}) {
+			VulkanResourceOperation operation{
+				.name = "Fragmented-state benchmark",
+				.buffer = native,
+				.offset = (count * 2 - 1) * s_RegionBytes,
+				.size = s_RegionBytes,
+			};
+			if (workload == "fragmented_state_whole_buffer") {
+				operation.offset = 0;
+				operation.size = buffer->GetSize();
+			}
+			const std::array operations{operation};
+			const uint32_t rounds = std::max(16u, 65536u / (count * 2));
+			std::vector<double> samples;
+			for (uint32_t sample = 0; sample <= s_Samples; ++sample) {
+				const auto start = Clock::now();
+				for (uint32_t round = 0; round < rounds; ++round) {
+					std::scoped_lock lock(device.GetStateTrackingMutex());
+					VulkanResourceStateTransaction transaction(&device, proposed, {});
+					Check(transaction.Validate(operations), "Validate already-fragmented buffer state");
+					// Discard each prediction so every round copies the same submitted state.
+				}
+				const double milliseconds =
+					std::chrono::duration<double, std::milli>(Clock::now() - start).count() / rounds;
+				if (sample != 0) {
+					samples.push_back(milliseconds);
+				}
+			}
+			Report(workload, 1, 1, std::move(samples), count * 2);
+		}
 	}
 
 	void MeasureInterleavedBuffers(VulkanDevice& device, uint32_t count) {
@@ -124,7 +196,8 @@ namespace {
 		for (uint32_t i = 0; i < bufferCount; ++i) {
 			Ref<Buffer> buffer;
 			Check(device.CreateBuffer({.size = regionsPerBuffer * s_RegionBytes,
-									 .usage = BufferUsage::TransferSrc | BufferUsage::TransferDst}, buffer) == Result::Success,
+										  .usage = BufferUsage::TransferSrc | BufferUsage::TransferDst},
+					  buffer) == Result::Success,
 				"Create interleaved-buffer benchmark buffer");
 			buffers.push_back(std::move(buffer));
 		}
@@ -133,10 +206,11 @@ namespace {
 		operations.reserve(count);
 		for (uint32_t i = 0; i < count; ++i) {
 			const uint32_t bufferIndex = i % bufferCount;
-			operations.push_back({.name = "Interleaved buffer benchmark",
-				.buffer = static_cast<VulkanBuffer*>(buffers[bufferIndex].Raw()),
-				.offset = (i / bufferCount) * s_RegionBytes,
-				.size = s_RegionBytes});
+			operations.push_back(
+				{.name = "Interleaved buffer benchmark",
+					.buffer = static_cast<VulkanBuffer*>(buffers[bufferIndex].Raw()),
+					.offset = (i / bufferCount) * s_RegionBytes,
+					.size = s_RegionBytes});
 		}
 
 		const SubmissionToken proposed{.queue = device.GetGraphicsCommandQueue()->GetQueueId(), .value = 1};
@@ -149,7 +223,8 @@ namespace {
 				VulkanResourceStateTransaction transaction(&device, proposed, {});
 				Check(transaction.Validate(operations), "Validate interleaved-buffer benchmark operations");
 			}
-			const double milliseconds = std::chrono::duration<double, std::milli>(Clock::now() - start).count() / rounds;
+			const double milliseconds =
+				std::chrono::duration<double, std::milli>(Clock::now() - start).count() / rounds;
 			if (sample != 0) {
 				samples.push_back(milliseconds);
 			}
@@ -162,17 +237,20 @@ namespace {
 int main() {
 	std::unique_ptr<Device> device;
 	Check(Device::Create({.applicationName = "Resource tracking pattern benchmarks",
-							.shaderDirectory = ".",
-							.enableDebug = false,
-							.enableProfiling = false,
-							.enableValidationLayers = false,
-							.debugCallback = CaptureDebugMessage}, device) == Result::Success,
+							 .shaderDirectory = ".",
+							 .enableDebug = false,
+							 .enableProfiling = false,
+							 .enableValidationLayers = false,
+							 .debugCallback = CaptureDebugMessage},
+			  device) == Result::Success,
 		"Create benchmark device");
 
 	std::cerr << "Device: " << device->GetCapabilities().name << "; one warmup, " << s_Samples
-		<< " measured samples; native allocations, command-list recycling, and GPU execution excluded.\n";
+			  << " measured samples; native allocations, command-list recycling, and GPU execution excluded; "
+			  << "fragmented-state timings include locking, prediction copy, validation/merge, and destruction; "
+			  << "setup submission excluded; predictions discarded without commit.\n";
 	std::cout << std::fixed << std::setprecision(6)
-		<< "workload,resources,operations,median_ms,min_ms,max_ms\n";
+			  << "workload,resources,operations,median_ms,min_ms,max_ms,tracked_ranges\n";
 
 	for (std::string_view workload : {"retain_unique", "retain_duplicate", "retain_cycle_16"}) {
 		for (uint32_t operations : {1u, 8u, 32u, 128u, 1024u, 8192u, 65536u}) {
@@ -184,6 +262,7 @@ int main() {
 	for (uint32_t count : {1u, 8u, 32u, 128u, 1024u, 8192u}) {
 		MeasureReverseRanges(native, count);
 		MeasureInterleavedBuffers(native, count);
+		MeasureFragmentedState(native, count);
 	}
 
 	device->WaitIdle();

@@ -154,6 +154,21 @@ For depth/stencil resolves, set `DepthStencilAttachment::resolveTarget` and the 
 
 Declare both the source and resolve target in render graph pass resources. Color resolve targets use `ColorAttachment` layout and `ColorAttachmentOutput`/`ColorAttachmentWrite` state. Depth/stencil resolve targets use **the same stage/access state**, with `DepthStencilAttachment` layout: Vulkan performs depth/stencil resolve writes at color output. Include those writes in the source state of subsequent barriers as well. Source depth/stencil attachments continue to use early/late fragment tests and depth/stencil access.
 
+## Resource-tracking benchmarks
+
+Enable the optional benchmarks in a release build:
+
+```powershell
+cmake --preset windows-release -DREALRHI_BUILD_BENCHMARKS=ON
+cmake --build --preset windows-release --target ResourceTrackingBenchmarks ResourceTrackingPatternBenchmarks
+./out/build/windows-release/ResourceTrackingBenchmarks.exe > resource-tracking.csv
+./out/build/windows-release/ResourceTrackingPatternBenchmarks.exe > resource-tracking-patterns.csv
+```
+
+Both executables require a Vulkan device and report CPU timings in milliseconds: one warmup followed by seven measured samples, with median, minimum, and maximum. Validation and profiling are disabled. Native allocations and GPU execution are outside the timed sections; these measurements describe tracking overhead, not rendering performance.
+
+The pattern benchmark includes already-fragmented submitted buffer state. Setup submits barriers for alternating 16-byte regions, leaving the gaps unclaimed so adjacent states cannot merge, even on devices with one queue family. Each measured transaction validates either one region near the end or the whole buffer, then discards its prediction. Timings include locking, copying the submitted range vector, validation and merging, and transaction destruction. Setup and GPU waits are excluded. The `tracked_ranges` column identifies the initial range count for these cases; zero indicates other workloads where this count is not reported.
+
 ## Configuration options
 
 | Option | Default | Purpose |
@@ -162,6 +177,7 @@ Declare both the source and resolve target in render graph pass resources. Color
 | `BUILD_EXAMPLES` | Same as Vulkan option | Build all examples. Requires the backend. |
 | `REALRHI_BUILD_TESTS` | `ON` | Build and register tests. |
 | `REALRHI_BUILD_GPU_TESTS` | `ON` when backend and tests are enabled | Build device-creating tests. Requires both options. |
+| `REALRHI_BUILD_BENCHMARKS` | `OFF` | Build CPU resource-tracking benchmarks. Requires the Vulkan backend and a device to run. |
 
 Presets set these options explicitly. For example, a library-only build uses:
 

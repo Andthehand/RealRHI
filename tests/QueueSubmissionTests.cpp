@@ -33,6 +33,76 @@ namespace {
 		}
 	}
 
+	class RetainedObject final : public RealRHI::RefCounted {
+	public:
+		explicit RetainedObject(uint32_t& destructions)
+			: m_Destructions(destructions) { }
+
+		~RetainedObject() override { ++m_Destructions; }
+
+	private:
+		uint32_t& m_Destructions;
+	};
+
+	void TestRetentionAcrossReset(RealRHI::Device& device, RealRHI::CommandAllocator& allocator) {
+		using namespace RealRHI;
+		// Cross the indexed retention threshold and reuse the exact same pointers.
+		std::array<uint32_t, 256> destructions{};
+		std::array<Ref<RetainedObject>, 256> resources;
+		for (size_t i = 0; i < resources.size(); ++i) {
+			resources[i] = Ref<RetainedObject>::Create(destructions[i]);
+		}
+
+		Ref<CommandList> commands;
+		Expect(device.CreateCommandList(&allocator, commands) == Result::Success, "Create retention reset list");
+		auto* queue = device.GetGraphicsCommandQueue();
+		const auto errorsBefore = g_ProgrammerErrors;
+		for (uint32_t recording = 0; recording < 3; ++recording) {
+			Expect(commands->Begin() == Result::Success, "Begin retention reset recording");
+			for (auto& resource : resources) {
+				Expect(resource->GetRefCount() == 1, "Previous reset released the recording reference");
+				commands->RetainResource(resource.Raw());
+			}
+			for (auto it = resources.rbegin(); it != resources.rend(); ++it) {
+				commands->RetainResource(it->Raw());
+			}
+			for (auto& resource : resources) {
+				commands->RetainResource(resource.Raw());
+				Expect(resource->GetRefCount() == 2, "Repeated retention adds exactly one recording reference");
+			}
+			Expect(commands->End() == Result::Success, "End retention reset recording");
+			if (recording == 2) {
+				for (auto& resource : resources) {
+					resource.Reset();
+				}
+			}
+			const auto token = queue->Submit(*commands);
+			Expect(token.IsValid(), "Submit retention reset recording");
+			queue->Wait(token);
+			for (size_t i = 0; i < resources.size(); ++i) {
+				Expect(destructions[i] == 0, "Recorded resources survive caller release and submission completion");
+				if (resources[i]) {
+					Expect(resources[i]->GetRefCount() == 2, "Completed recording retains exactly one reference");
+				}
+			}
+			Expect(commands->Reset() == Result::Success, "Reset retention recording");
+			for (size_t i = 0; i < resources.size(); ++i) {
+				if (resources[i]) {
+					Expect(resources[i]->GetRefCount() == 1 && destructions[i] == 0,
+						"Reset releases only the recording reference");
+				}
+				else {
+					Expect(destructions[i] == 1, "Reset destroys each exclusively retained object exactly once");
+				}
+			}
+		}
+		commands.Reset();
+		for (const auto count : destructions) {
+			Expect(count == 1, "Destroying the reset command list releases no additional objects");
+		}
+		Expect(g_ProgrammerErrors == errorsBefore, "Retention and reuse produce no programmer errors");
+	}
+
 	void TestRejectedBarrierBatch(RealRHI::Device& device, RealRHI::CommandAllocator& allocator) {
 		using namespace RealRHI;
 		Ref<Texture> texture;
@@ -146,6 +216,7 @@ int main() {
 	Expect(listA->Reset() == RealRHI::Result::Success, "Reset list A after combined completion");
 	Expect(listB->Reset() == RealRHI::Result::Success, "Reset list B after combined completion");
 	TestRejectedBarrierBatch(*device, *allocator);
+	TestRetentionAcrossReset(*device, *allocator);
 
 	// Every submission form uses the same validation and rolls back retained refs.
 	{

@@ -5,7 +5,7 @@ project(RealRHI VERSION 1.0.0 LANGUAGES CXX)
 option(REALRHI_BUILD_VULKAN "Build the Vulkan backend" ON)
 option(BUILD_EXAMPLES "Build example applications" ${REALRHI_BUILD_VULKAN})
 option(REALRHI_BUILD_TESTS "Build RealRHI tests" ON)
-option(REALRHI_BUILD_BENCHMARKS "Build Vulkan resource-tracking CPU benchmarks" ON)
+option(REALRHI_BUILD_BENCHMARKS "Build Vulkan resource-tracking CPU benchmarks" OFF)
 
 set(realrhi_gpu_tests_default OFF)
 if(REALRHI_BUILD_VULKAN AND REALRHI_BUILD_TESTS)
