@@ -54,6 +54,10 @@ namespace RealRHI {
 
 		TimingStatistics uploadStaging;
 		TimingStatistics submissions;
+		// Nested CPU portions of submissions; these are not GPU execution times.
+		// Validation measures resource-log replay after locking, excluding state commit.
+		TimingStatistics resourceStateValidation;
+		TimingStatistics nativeSubmissions;
 		TimingStatistics graphicsPipelineCreation;
 		TimingStatistics computePipelineCreation;
 		uint64_t stagedUploadBytes = 0;

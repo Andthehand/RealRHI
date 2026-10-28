@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <map>
 #include <numeric>
@@ -342,13 +343,22 @@ namespace RealRHI {
 	Result RenderGraph::AllocateResources(Device& device,
 		std::span<const QueueId> queues,
 		TransientResourcePool* pool,
-		std::span<const uint8_t> poolingAllowed) {
+		std::span<const uint8_t> poolingAllowed,
+		double* compileMilliseconds) {
 		Invalidate();
 		ReleaseCreatedResources();
+		std::chrono::steady_clock::time_point compileStart{};
+		if (compileMilliseconds) {
+			compileStart = std::chrono::steady_clock::now();
+		}
 		std::string error;
 		if (!Compile(error)) {
 			Report(error);
 			return Result::InvalidParameter;
+		}
+		if (compileMilliseconds) {
+			*compileMilliseconds =
+				std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - compileStart).count();
 		}
 
 		BuildAliasPlan(queues, poolingAllowed);
@@ -1167,7 +1177,22 @@ namespace RealRHI {
 		commands.EndGpuTiming(timing);
 	}
 
-	Result RenderGraph::Execute(Device& device, CommandList& commands, TransientResourcePool* pool) {
+	Result RenderGraph::Execute(Device& device,
+		CommandList& commands,
+		TransientResourcePool* pool,
+		RenderGraphExecutionTimings* timings) {
+		using Clock = std::chrono::steady_clock;
+		Clock::time_point start{};
+		if (timings) {
+			*timings = {};
+			start = Clock::now();
+		}
+		auto elapsed = [&] {
+			const auto end = Clock::now();
+			const auto milliseconds = std::chrono::duration<double, std::milli>(end - start).count();
+			start = end;
+			return milliseconds;
+		};
 		if (m_FrameSwapchain) {
 			Report("Graphs importing a backbuffer require Submit to synchronize and present the acquired image.");
 			return Result::InvalidParameter;
@@ -1177,9 +1202,16 @@ namespace RealRHI {
 			return Result::InvalidParameter;
 		}
 		const std::vector<QueueId> queues(m_Resources.size(), commands.GetQueueId());
-		const Result result = AllocateResources(device, queues, pool);
+		double* compileMilliseconds = nullptr;
+		if (timings) {
+			compileMilliseconds = &timings->compileMilliseconds;
+		}
+		const Result result = AllocateResources(device, queues, pool, {}, compileMilliseconds);
 		if (result != Result::Success) {
 			return result;
+		}
+		if (timings) {
+			timings->allocationMilliseconds = elapsed() - timings->compileMilliseconds;
 		}
 		for (size_t i = 0; i < m_Plan.size(); ++i) {
 			m_Plan[i].nativeQueue = commands.GetQueueId();
@@ -1187,6 +1219,9 @@ namespace RealRHI {
 		}
 		commands.ClearResourceDeclarations();
 		commands.Barrier(m_FinalBarriers);
+		if (timings) {
+			timings->recordingMilliseconds = elapsed();
+		}
 		return Result::Success;
 	}
 	bool RenderGraphSubmission::IsComplete(Device& device) const {

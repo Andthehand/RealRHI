@@ -9,7 +9,10 @@
       "installRoot": "${projectDir}\\out\\install\\${name}",
       "cmakeCommandArgs": "",
       "buildCommandArgs": "",
-      "ctestCommandArgs": ""
+      "ctestCommandArgs": "",
+      "variables": [
+        { "name": "REALRHI_BUILD_BENCHMARKS", "value": "ON", "type": "BOOL" }
+      ]
     },
     {
       "name": "x64-Release",
@@ -21,7 +24,9 @@
       "buildCommandArgs": "",
       "ctestCommandArgs": "",
       "inheritEnvironments": [ "msvc_x64_x64" ],
-      "variables": []
+      "variables": [
+        { "name": "REALRHI_BUILD_BENCHMARKS", "value": "ON", "type": "BOOL" }
+      ]
     }
   ]
 }

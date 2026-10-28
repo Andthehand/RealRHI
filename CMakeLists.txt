@@ -5,7 +5,7 @@ project(RealRHI VERSION 1.0.0 LANGUAGES CXX)
 option(REALRHI_BUILD_VULKAN "Build the Vulkan backend" ON)
 option(BUILD_EXAMPLES "Build example applications" ${REALRHI_BUILD_VULKAN})
 option(REALRHI_BUILD_TESTS "Build RealRHI tests" ON)
-option(REALRHI_BUILD_BENCHMARKS "Build Vulkan resource-tracking CPU benchmarks" OFF)
+option(REALRHI_BUILD_BENCHMARKS "Build resource-tracking and scene CPU benchmarks" OFF)
 
 set(realrhi_gpu_tests_default OFF)
 if(REALRHI_BUILD_VULKAN AND REALRHI_BUILD_TESTS)
@@ -178,6 +178,13 @@ if(REALRHI_BUILD_BENCHMARKS)
 
     add_executable(ResourceTrackingPatternBenchmarks benchmarks/ResourceTrackingPatternBenchmarks.cpp)
     target_link_libraries(ResourceTrackingPatternBenchmarks PRIVATE RealRHI)
+
+    add_executable(SceneResourceBenchmarks benchmarks/SceneResourceBenchmarks.cpp examples/SceneExample/SceneRenderer.cpp)
+    target_link_libraries(SceneResourceBenchmarks PRIVATE RealRHI)
+    target_compile_definitions(SceneResourceBenchmarks PRIVATE
+        REALRHI_SCENE_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/examples/SceneExample/shaders"
+        REALRHI_BENCHMARK_CONFIGURATION="$<CONFIG>"
+        REALRHI_BENCHMARK_COMPILER="${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}")
 endif()
 
 if(REALRHI_BUILD_TESTS)

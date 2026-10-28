@@ -32,6 +32,8 @@ namespace RealRHI {
 	enum class VulkanProfiledOperation {
 		UploadStaging,
 		Submission,
+		ResourceStateValidation,
+		NativeSubmission,
 		GraphicsPipeline,
 		ComputePipeline
 	};

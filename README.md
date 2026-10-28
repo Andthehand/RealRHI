@@ -169,6 +169,113 @@ Both executables require a Vulkan device and report CPU timings in milliseconds:
 
 The pattern benchmark includes already-fragmented submitted buffer state. Setup submits barriers for alternating 16-byte regions, leaving the gaps unclaimed so adjacent states cannot merge, even on devices with one queue family. Each measured transaction validates either one region near the end or the whole buffer, then discards its prediction. Timings include locking, copying the submitted range vector, validation and merging, and transaction destruction. Setup and GPU waits are excluded. The `tracked_ranges` column identifies the initial range count for these cases; zero indicates other workloads where this count is not reported.
 
+## Resource-heavy scene benchmark
+
+`SceneResourceBenchmarks` reuses the scene renderer offscreen at 960x640 with shadows.
+It draws a fixed grid using either one shared asset set (`--shared`) or a separate
+vertex buffer, index buffer, and 32x32 texture for each object. Each draw has its own
+material tint; pipelines and explicitly bound samplers are shared. Sampled textures
+also allocate an implicit default sampler. `--stream N` overwrites N distinct
+vertex buffers and textures per frame, rotating through the asset sets. Each streamed
+asset uploads 5,120 bytes. Shared mode permits at most one streamed asset per frame.
+
+In Visual Studio, select the `windows-release` configuration (or `x64-Release` with
+`CMakeSettings.json`), select **SceneResourceBenchmarks.exe** as the startup target,
+and use **Start Without Debugging**. Benchmark targets are enabled in the Windows
+presets and both Visual Studio configurations. Running with no arguments executes
+the full comparison suite directly in C++; no external runner is needed.
+
+The executable validates all three workloads, then rotates their order across three
+repeats at 64, 256, and 768 objects. Each run has one initialization frame, 60
+warmup frames, and 300 measured frames. Streaming updates 16 asset sets per frame.
+Results go into `scene-resources/` beneath the working directory; the console prints
+its absolute location. This includes per-frame CSVs, `summary.csv`, and
+`methodology.txt` with device/build information, settings, measurement scopes, and
+completion status. Run it without other GPU tests or benchmarks active.
+
+For a shorter suite, set these command arguments in Visual Studio's debug settings:
+
+```text
+--suite --objects 64 --frames 30 --warmup 5 --repeats 1
+```
+
+`--output <directory>` changes the suite report folder. `--objects` selects one size;
+otherwise the suite uses all three defaults. Suite mode always streams up to 16 asset
+sets per frame. For one custom workload, use arguments such as:
+
+```text
+--objects 256 --frames 300 --warmup 60 --stream 16 --csv scene-resources.csv
+```
+
+Add `--validation` for correctness checks; validation is off by default for timing.
+Every run reads back the final image outside measurement and checks for opaque output
+and visible geometry. The executable returns failure on RHI/Vulkan errors, including
+cleanup errors. Numeric options reject invalid ranges; object count is capped at 8,192.
+
+The current backend reserves 1,024 sampler slots. On the RTX 4060 Laptop GPU used for
+the initial baseline, 1,024 unique objects fail initialization with
+`AllocateSamplerDescriptor: Sampler descriptor heap is full.` Each sampled object
+texture consumes a default sampler even though the shader uses a shared explicit
+sampler. The default sweep therefore stops at 768. CSVs include sampler usage and
+capacity so that this limit remains visible; larger workloads may require sampler
+reuse or optional default-sampler creation in the RHI.
+
+CSV timings are CPU milliseconds per frame. `record_total_ms` includes graph building,
+compilation, allocation, recording, and destruction. The three graph columns separate
+compilation, allocation/pool lookup/alias planning/barrier resolution, and pass recording.
+`queue_submit_ms` covers render and streaming submissions; `state_validate_ms` measures
+resource-log replay after the queue/device locks, excluding commit, and `native_submit_ms`
+measures the native queue call. Those two columns are nested within submission time.
+`stream_cpu_ms` includes upload staging and submission, so categories must not be summed.
+`frame_cpu_ms` excludes the separately reported GPU completion wait. Profiling and GPU
+timestamps are enabled equally for all workloads.
+
+Live and peak memory columns report native VMA allocation sizes, including internal
+descriptor heaps and staging. Peaks include initialization; pool memory is already part
+of the buffer/texture totals. These do not measure process RAM or all driver memory.
+Frames wait for GPU completion before the next frame can overwrite assets. This makes
+the benchmark suitable for CPU/resource scaling comparisons; it does not measure
+presentation, frames-in-flight overlap, or establish GPU/FPS speedup.
+
+`RenderGraph::Execute` accepts an optional `RenderGraphExecutionTimings*` after its pool
+argument. It measures the execution phases without enabling device profiling. Passing
+no pointer avoids its clock reads. Device profiling exposes `resourceStateValidation`
+and `nativeSubmissions` alongside the existing inclusive `submissions` statistics.
+
+The initial baseline uses MSVC RelWithDebInfo and an NVIDIA GeForce RTX 4060 Laptop
+GPU. Values below average the three run means (900 measured frames per row). Raw
+per-run summaries from that earlier measurement remain under
+`out/test-results/scene-resources/` when available locally. The table preserves those
+initial results; the built-in suite writes fresh reports to its selected output folder.
+
+| Objects | Assets | CPU/frame ms | Graph compile ms | Pass recording ms | State validation ms |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 64 | Shared | 0.175 | 0.012 | 0.103 | 0.010 |
+| 64 | Unique | 0.522 | 0.203 | 0.169 | 0.028 |
+| 64 | Unique + streaming | 0.629 | 0.202 | 0.164 | 0.036 |
+| 256 | Shared | 0.271 | 0.011 | 0.191 | 0.027 |
+| 256 | Unique | 3.436 | 2.254 | 0.517 | 0.125 |
+| 256 | Unique + streaming | 3.381 | 2.137 | 0.480 | 0.128 |
+| 768 | Shared | 0.609 | 0.012 | 0.472 | 0.073 |
+| 768 | Unique | 35.877 | 29.525 | 3.700 | 0.742 |
+| 768 | Unique + streaming | 38.329 | 31.404 | 3.840 | 0.791 |
+
+At 768 unique objects, graph compilation accounts for about 82% of measured CPU
+work. The three run means range from 34.884 to 36.893 ms per frame; streaming ranges
+from 35.261 to 39.916 ms. Small differences between variants can reflect run variance.
+Live buffer plus texture allocations are about 43.08 MiB shared, 46.96 MiB unique,
+and 50.96 MiB unique with streaming; the transient pool stays at 8.69 MiB. Streaming
+uploads 81,920 bytes per measured frame. The unique variants use 773/1,024 sampler
+slots, compared with six for shared assets.
+
+The next performance investigation should isolate graph validation: `ValidateResources`
+compares each import against earlier resources, and `ValidatePasses` searches a growing
+list for duplicate declarations. These pairwise scans are candidates for indexing by
+resource identity and dense handle IDs. The measurements establish compilation as the
+dominant phase; they do not separately attribute its cost to those functions. Sampler
+reuse or optional default samplers are a separate capacity improvement needed before
+the 1,024-object unique workload can run.
+
 ## Configuration options
 
 | Option | Default | Purpose |
@@ -177,7 +284,7 @@ The pattern benchmark includes already-fragmented submitted buffer state. Setup 
 | `BUILD_EXAMPLES` | Same as Vulkan option | Build all examples. Requires the backend. |
 | `REALRHI_BUILD_TESTS` | `ON` | Build and register tests. |
 | `REALRHI_BUILD_GPU_TESTS` | `ON` when backend and tests are enabled | Build device-creating tests. Requires both options. |
-| `REALRHI_BUILD_BENCHMARKS` | `OFF` | Build CPU resource-tracking benchmarks. Requires the Vulkan backend and a device to run. |
+| `REALRHI_BUILD_BENCHMARKS` | `OFF` | Build resource-tracking and scene CPU benchmarks. Requires the Vulkan backend and a device to run. |
 
 Presets set these options explicitly. For example, a library-only build uses:
 

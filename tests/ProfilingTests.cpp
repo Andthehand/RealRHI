@@ -783,10 +783,19 @@ namespace {
 			TestTimestampWraparound(*device);
 		}
 		device->WaitIdle();
+		if (profiling) {
+			const auto statistics = device->GetStatistics();
+			Expect(statistics.resourceStateValidation.sampleCount >= statistics.submissions.sampleCount &&
+					statistics.nativeSubmissions.sampleCount >= statistics.submissions.sampleCount &&
+					statistics.submissions.sampleCount > 0,
+				"Successful queue submissions include state validation and native submission CPU samples");
+		}
 		if (!profiling) {
 			const auto statistics = device->GetStatistics();
 			Expect(statistics.gpuTimings.empty() && statistics.uploadStaging.sampleCount == 0 &&
 					statistics.submissions.sampleCount == 0 && statistics.graphicsPipelineCreation.sampleCount == 0 &&
+					statistics.resourceStateValidation.sampleCount == 0 &&
+					statistics.nativeSubmissions.sampleCount == 0 &&
 					statistics.computePipelineCreation.sampleCount == 0,
 				"Disabled profiling records no timing samples");
 		}

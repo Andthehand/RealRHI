@@ -127,6 +127,13 @@ namespace RealRHI {
 		BarrierDesc presentationBarriers;
 	};
 
+	// Optional CPU measurements for Execute. Recording includes pass callbacks and barriers.
+	struct RenderGraphExecutionTimings {
+		double compileMilliseconds = 0;
+		double allocationMilliseconds = 0;
+		double recordingMilliseconds = 0;
+	};
+
 	struct RenderGraphSubmission {
 		// One token per successful batch, in diagnostic batch order, including the
 		// queued prefix when Submit fails. A batch may contain several passes.
@@ -207,7 +214,10 @@ namespace RealRHI {
 		// discarded and require initialization. Debug names do not affect pool identity;
 		// the first allocation names the shared resource. The pool belongs to device.
 		// Validation/allocation failures return before recording any passes.
-		Result Execute(Device& device, CommandList& commands, TransientResourcePool* pool = nullptr);
+		Result Execute(Device& device,
+			CommandList& commands,
+			TransientResourcePool* pool = nullptr,
+			RenderGraphExecutionTimings* timings = nullptr);
 		// Batch consecutive passes sharing a native queue when no new cross-queue wait
 		// or earlier cross-queue signal is needed. Record all lists before submitting any work.
 		// External waits apply to all submissions; matching release/acquire pairs handle exclusive ownership.
@@ -271,7 +281,8 @@ namespace RealRHI {
 		Result AllocateResources(Device& device,
 			std::span<const QueueId> queues,
 			TransientResourcePool* pool,
-			std::span<const uint8_t> poolingAllowed = {});
+			std::span<const uint8_t> poolingAllowed = {},
+			double* compileMilliseconds = nullptr);
 		bool IsValid(RenderGraphResource resource) const;
 		bool IsValid(RenderGraphPass pass) const;
 		bool ValidateResources(std::string& error) const;

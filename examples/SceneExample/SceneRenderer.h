@@ -26,7 +26,18 @@ namespace RealRHI::Examples {
 			uint32_t height = 0;
 		};
 
+		struct ObjectAssets {
+			Ref<Buffer> vertices;
+			Ref<Buffer> indices;
+			Ref<Texture> pattern;
+		};
+
 	public:
+		// Call before Init. Zero retains the original demonstration scene.
+		void ConfigureWorkload(uint32_t objectCount, bool uniqueAssets);
+		// Benchmark callers wait for the preceding frame before overwriting these assets.
+		Result StreamAssets(uint32_t count, uint32_t frame, UploadSubmission& outUpload);
+		TransientResourcePoolStatistics GetPoolStatistics() const;
 		Result Init(Device& device, TextureFormat outputFormat, uint32_t frameCount, UploadSubmission& outUpload);
 
 		// Set dimensions for the next frame recording; allocation happens inside Record.
@@ -36,7 +47,8 @@ namespace RealRHI::Examples {
 			TextureView* output,
 			float rotation,
 			const UploadSubmission& pendingUpload,
-			bool shadowsEnabled = true);
+			bool shadowsEnabled = true,
+			RenderGraphExecutionTimings* timings = nullptr);
 
 		Result Submit(Swapchain& swapchain,
 			const FrameContext& frame,
@@ -56,8 +68,8 @@ namespace RealRHI::Examples {
 		Result SelectDepthFormat();
 		Result CreatePipelines(TextureFormat outputFormat);
 		Result UploadAssets(UploadSubmission& outUpload);
-		Result CreateGeometry(UploadContext& uploads);
-		Result CreatePattern(UploadContext& uploads);
+		Result CreateGeometry(UploadContext& uploads, Ref<Buffer>& vertices, Ref<Buffer>& indices);
+		Result CreatePattern(UploadContext& uploads, Ref<Texture>& pattern, bool mipmapped = true, uint32_t seed = 0);
 
 		void DrawShadowMap(CommandList& commands, FrameTargets& targets, float rotation, bool shadowsEnabled);
 		void DrawGeometry(CommandList& commands,
@@ -88,5 +100,9 @@ namespace RealRHI::Examples {
 		uint32_t m_ShadowResolution = 1024;
 
 		std::vector<FrameSize> m_Frames;
+		std::vector<ObjectAssets> m_ObjectAssets;
+		std::unique_ptr<UploadContext> m_StreamingUploads;
+		uint32_t m_ObjectCount = 0;
+		bool m_UniqueAssets = false;
 	};
 }

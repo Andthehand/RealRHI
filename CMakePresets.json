@@ -43,6 +43,7 @@
       "cacheVariables": {
         "REALRHI_BUILD_VULKAN": true,
         "REALRHI_BUILD_GPU_TESTS": true,
+        "REALRHI_BUILD_BENCHMARKS": true,
         "BUILD_EXAMPLES": true
       },
       "environment": {

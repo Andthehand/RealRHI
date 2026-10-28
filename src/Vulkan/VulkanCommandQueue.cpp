@@ -99,8 +99,7 @@ namespace RealRHI {
 					.semaphore = swapchain->GetRenderFinishedSemaphore(request.frame.imageIndex),
 					.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT});
 		}
-		const auto token = SubmitTracked(
-			submitInfo.commandLists, waits, signals, submitInfo.waitFor, swapchain);
+		const auto token = SubmitTracked(submitInfo.commandLists, waits, signals, submitInfo.waitFor, swapchain);
 		swapchain->FinishSubmission(request, token);
 		return token;
 	}
@@ -196,11 +195,13 @@ namespace RealRHI {
 		const uint64_t submissionValue = m_NextFrameValue;
 		const SubmissionToken submission{.queue = GetQueueId(), .value = submissionValue};
 		VulkanResourceStateTransaction transaction(m_Device, submission, waitSemaphoreInfos);
+		const VulkanCpuTimer validationTimer(m_Device);
 		for (CommandList* commandList : trackedLists) {
 			if (!static_cast<VulkanCommandList*>(commandList)->ReplayResources(transaction)) {
 				return {};
 			}
 		}
+		validationTimer.Finish(VulkanProfiledOperation::ResourceStateValidation);
 		signalInfos.push_back({
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
 			.semaphore = m_TimelineSemaphore,
@@ -224,7 +225,10 @@ namespace RealRHI {
 			}
 		}
 
-		if (vkQueueSubmit2(m_Queue, 1, &submitInfo2, VK_NULL_HANDLE) != VK_SUCCESS) {
+		const VulkanCpuTimer nativeTimer(m_Device);
+		const auto nativeResult = vkQueueSubmit2(m_Queue, 1, &submitInfo2, VK_NULL_HANDLE);
+		nativeTimer.Finish(VulkanProfiledOperation::NativeSubmission);
+		if (nativeResult != VK_SUCCESS) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
 				"Failed to submit Vulkan command buffers to the queue.");

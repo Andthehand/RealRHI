@@ -703,14 +703,8 @@ namespace RealRHI {
 
 		std::array<CommandList*, 1> tracked = {commandList};
 
-		const SubmissionToken token =
-			m_GraphicsCommandQueue->SubmitTracked(tracked,
-				{&waitInfo, 1},
-				{&signalInfo, 1},
-				waitFor,
-				swapchain,
-				preTransition,
-				postTransition);
+		const SubmissionToken token = m_GraphicsCommandQueue->SubmitTracked(
+			tracked, {&waitInfo, 1}, {&signalInfo, 1}, waitFor, swapchain, preTransition, postTransition);
 		vulkanSwapchain->FinishFrameSubmission(frame.frameIndex, token);
 		if (!token.IsValid()) {
 			return Result::Failed;
@@ -1381,6 +1375,12 @@ namespace RealRHI {
 				break;
 			case VulkanProfiledOperation::Submission:
 				AddTiming(m_Statistics.submissions, milliseconds);
+				break;
+			case VulkanProfiledOperation::ResourceStateValidation:
+				AddTiming(m_Statistics.resourceStateValidation, milliseconds);
+				break;
+			case VulkanProfiledOperation::NativeSubmission:
+				AddTiming(m_Statistics.nativeSubmissions, milliseconds);
 				break;
 			case VulkanProfiledOperation::GraphicsPipeline:
 				AddTiming(m_Statistics.graphicsPipelineCreation, milliseconds);

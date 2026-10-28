@@ -218,7 +218,7 @@ namespace RealRHI::Examples {
 			m_PostprocessPipeline);
 	}
 
-	Result SceneRenderer::CreateGeometry(UploadContext& uploads) {
+	Result SceneRenderer::CreateGeometry(UploadContext& uploads, Ref<Buffer>& vertices, Ref<Buffer>& indices) {
 		const Geometry geometry = BuildGeometry();
 		const uint64_t vertexBytes = geometry.vertices.size() * sizeof(Vertex);
 		const uint64_t indexBytes = geometry.indices.size() * sizeof(uint32_t);
@@ -229,21 +229,21 @@ namespace RealRHI::Examples {
 				.usage = BufferUsage::Vertex | BufferUsage::TransferDst,
 				.debugName = "Scene vertices",
 			},
-			m_VertexBuffer);
+			vertices);
 		if (result != Result::Success) {
 			return result;
 		}
 
 		result = m_Device->CreateBuffer(
 			{.size = indexBytes, .usage = BufferUsage::Index | BufferUsage::TransferDst, .debugName = "Scene indices"},
-			m_IndexBuffer);
+			indices);
 		if (result != Result::Success) {
 			return result;
 		}
 
 		result = uploads.UploadBuffer(
 			{
-				.destination = m_VertexBuffer.Raw(),
+				.destination = vertices.Raw(),
 				.finalState = {PipelineStage::VertexInput, ResourceAccess::VertexAttributeRead},
 			},
 			geometry.vertices.data(),
@@ -254,24 +254,28 @@ namespace RealRHI::Examples {
 
 		return uploads.UploadBuffer(
 			{
-				.destination = m_IndexBuffer.Raw(),
+				.destination = indices.Raw(),
 				.finalState = {PipelineStage::VertexInput, ResourceAccess::IndexRead},
 			},
 			geometry.indices.data(),
 			indexBytes);
 	}
 
-	Result SceneRenderer::CreatePattern(UploadContext& uploads) {
+	Result SceneRenderer::CreatePattern(UploadContext& uploads, Ref<Texture>& pattern, bool mipmapped, uint32_t seed) {
+		uint32_t mipLevels = 1;
+		if (mipmapped) {
+			mipLevels = 6;
+		}
 		Result result = m_Device->CreateTexture(
 			{
 				.width = 32,
 				.height = 32,
-				.mipLevels = 6,
+				.mipLevels = mipLevels,
 				.format = TextureFormat::RGBA8_UNorm,
 				.usage = TextureUsage::ShaderResource | TextureUsage::TransferSrc | TextureUsage::TransferDst,
 				.debugName = "Scene checkerboard",
 			},
-			m_Pattern);
+			pattern);
 		if (result != Result::Success) {
 			return result;
 		}
@@ -285,18 +289,24 @@ namespace RealRHI::Examples {
 				}
 
 				const size_t offset = (y * 32 + x) * 4;
-				pixels[offset] = shade;
+				pixels[offset] = static_cast<uint8_t>(shade - seed % 64);
 				pixels[offset + 1] = shade;
 				pixels[offset + 2] = shade;
 				pixels[offset + 3] = 255;
 			}
 		}
 
+		TextureLayout finalLayout = TextureLayout::ShaderRead;
+		ResourceState finalState{PipelineStage::FragmentShader, ResourceAccess::ShaderRead};
+		if (mipmapped) {
+			finalLayout = TextureLayout::TransferDst;
+			finalState = {PipelineStage::Transfer, ResourceAccess::TransferWrite};
+		}
 		return uploads.UploadTexture(
 			{
-				.destination = m_Pattern.Raw(),
-				.finalLayout = TextureLayout::TransferDst,
-				.finalState = {PipelineStage::Transfer, ResourceAccess::TransferWrite},
+				.destination = pattern.Raw(),
+				.finalLayout = finalLayout,
+				.finalState = finalState,
 			},
 			pixels.data(),
 			pixels.size());
@@ -314,14 +324,33 @@ namespace RealRHI::Examples {
 			return result;
 		}
 
-		result = CreateGeometry(*uploads);
+		result = CreateGeometry(*uploads, m_VertexBuffer, m_IndexBuffer);
 		if (result != Result::Success) {
 			return result;
 		}
 
-		result = CreatePattern(*uploads);
+		result = CreatePattern(*uploads, m_Pattern);
 		if (result != Result::Success) {
 			return result;
+		}
+
+		if (m_ObjectCount != 0) {
+			uint32_t assetCount = 1;
+			if (m_UniqueAssets) {
+				assetCount = m_ObjectCount;
+			}
+			m_ObjectAssets.resize(assetCount);
+			for (uint32_t i = 0; i < assetCount; ++i) {
+				auto& assets = m_ObjectAssets[i];
+				result = CreateGeometry(*uploads, assets.vertices, assets.indices);
+				if (result != Result::Success) {
+					return result;
+				}
+				result = CreatePattern(*uploads, assets.pattern, false, i);
+				if (result != Result::Success) {
+					return result;
+				}
+			}
 		}
 
 		result = m_Device->CreateSampler({.debugName = "Scene linear sampler"}, m_Sampler);
@@ -345,6 +374,63 @@ namespace RealRHI::Examples {
 		}
 
 		return uploads->Submit(outUpload);
+	}
+
+	void SceneRenderer::ConfigureWorkload(uint32_t objectCount, bool uniqueAssets) {
+		m_ObjectCount = objectCount;
+		m_UniqueAssets = uniqueAssets;
+	}
+
+	TransientResourcePoolStatistics SceneRenderer::GetPoolStatistics() const {
+		return m_TransientResources->GetStatistics();
+	}
+
+	Result SceneRenderer::StreamAssets(uint32_t count, uint32_t frame, UploadSubmission& outUpload) {
+		outUpload = {};
+		if (count == 0 || m_ObjectAssets.empty()) {
+			return Result::Success;
+		}
+		if (!m_StreamingUploads) {
+			const auto result = m_Device->CreateUploadContext({.queueType = QueueType::Graphics}, m_StreamingUploads);
+			if (result != Result::Success) {
+				return result;
+			}
+		}
+		auto result = m_StreamingUploads->BeginBatch();
+		if (result != Result::Success) {
+			return result;
+		}
+		const auto geometry = BuildGeometry();
+		std::array<uint8_t, 32 * 32 * 4> pixels;
+		pixels.fill(static_cast<uint8_t>(100 + frame % 120));
+		for (size_t i = 3; i < pixels.size(); i += 4) {
+			pixels[i] = 255;
+		}
+		const uint32_t assetCount = static_cast<uint32_t>(m_ObjectAssets.size());
+		count = std::min(count, assetCount);
+		for (uint32_t i = 0; i < count; ++i) {
+			auto& assets = m_ObjectAssets[(static_cast<uint64_t>(frame) * count + i) % assetCount];
+			result = m_StreamingUploads->UploadBuffer(
+				{.destination = assets.vertices.Raw(),
+					.before = {PipelineStage::VertexInput, ResourceAccess::VertexAttributeRead},
+					.finalState = {PipelineStage::VertexInput, ResourceAccess::VertexAttributeRead}},
+				geometry.vertices.data(),
+				geometry.vertices.size() * sizeof(Vertex));
+			if (result == Result::Success) {
+				result = m_StreamingUploads->UploadTexture(
+					{.destination = assets.pattern.Raw(),
+						.oldLayout = TextureLayout::ShaderRead,
+						.before = {PipelineStage::FragmentShader, ResourceAccess::ShaderRead},
+						.finalState = {PipelineStage::FragmentShader, ResourceAccess::ShaderRead}},
+					pixels.data(),
+					pixels.size());
+			}
+			if (result != Result::Success) {
+				m_StreamingUploads->CancelBatch();
+				return result;
+			}
+		}
+		return m_StreamingUploads->Submit(outUpload);
 	}
 
 	Result SceneRenderer::ResizeTargets(uint32_t frameIndex, uint32_t width, uint32_t height) {
@@ -388,6 +474,31 @@ namespace RealRHI::Examples {
 			.shadowTexelSize = 1.f / m_ShadowResolution,
 			.shadowsEnabled = static_cast<uint32_t>(shadowsEnabled),
 		};
+		if (m_ObjectCount != 0) {
+			const uint32_t side = static_cast<uint32_t>(std::ceil(std::sqrt(m_ObjectCount)));
+			const float spacing = 4.5f / side;
+			for (uint32_t i = 0; i < m_ObjectCount; ++i) {
+				auto& assets = m_ObjectAssets[i % m_ObjectAssets.size()];
+				commands.BindVertexBuffer(assets.vertices.Raw());
+				commands.BindIndexBuffer(assets.indices.Raw());
+				// Keep declarations local to each draw so tracking reflects its actual material.
+				commands.ClearResourceDeclarations();
+				if (pass == GeometryPass::Lighting) {
+					commands.UseResource(assets.pattern.Raw());
+					commands.UseResource(m_Sampler.Raw());
+					commands.UseResource(targets.shadow);
+					commands.UseResource(m_ShadowSampler.Raw());
+				}
+				parameters.textureIndex = assets.pattern->GetSampledImageDescriptorIndex();
+				parameters.translationAndScale = {
+					(i % side + 0.5f) * spacing - 2.25f, -0.4f, (i / side + 0.5f) * spacing - 2.25f, spacing * 0.7f
+				};
+				parameters.tint = {0.3f + (i % 7) * 0.1f, 0.4f + (i % 5) * 0.1f, 0.8f, 1};
+				commands.SetPushConstants(&parameters, sizeof(parameters));
+				commands.DrawIndexed(36, 1, 6, 4);
+			}
+			return;
+		}
 		commands.SetPushConstants(&parameters, sizeof(parameters));
 		commands.DrawIndexed(36, 1, 6, 4);
 
@@ -470,14 +581,15 @@ namespace RealRHI::Examples {
 		TextureView* output,
 		float rotation,
 		const UploadSubmission& pendingUpload,
-		bool shadowsEnabled) {
+		bool shadowsEnabled,
+		RenderGraphExecutionTimings* timings) {
 		RenderGraph graph;
 		const auto built = BuildGraph(graph, frameIndex, output, rotation, pendingUpload, shadowsEnabled);
 		if (built != Result::Success) {
 			return built;
 		}
 		commands.BeginDebugLabel("Scene frame");
-		const auto result = graph.Execute(*m_Device, commands, m_TransientResources.get());
+		const auto result = graph.Execute(*m_Device, commands, m_TransientResources.get(), timings);
 		commands.EndDebugLabel();
 		return result;
 	}
@@ -559,6 +671,23 @@ namespace RealRHI::Examples {
 		const ResourceState indexState{PipelineStage::VertexInput, ResourceAccess::IndexRead};
 		const auto vertices = graph.ImportBuffer(m_VertexBuffer.Raw(), vertexState);
 		const auto indices = graph.ImportBuffer(m_IndexBuffer.Raw(), indexState);
+		std::vector<RenderGraphUse> objectGeometry;
+		std::vector<RenderGraphUse> objectTextures;
+		for (auto& assets : m_ObjectAssets) {
+			objectGeometry.push_back({graph.ImportBuffer(assets.vertices.Raw(), vertexState), vertexState});
+			objectGeometry.push_back({graph.ImportBuffer(assets.indices.Raw(), indexState), indexState});
+			objectTextures.push_back(
+				{graph.ImportTexture(assets.pattern.Raw(), TextureLayout::ShaderRead, sampled),
+					sampled,
+					TextureLayout::ShaderRead});
+		}
+		auto withObjects = [&](std::vector<RenderGraphUse> resources, bool textures) {
+			resources.insert(resources.end(), objectGeometry.begin(), objectGeometry.end());
+			if (textures) {
+				resources.insert(resources.end(), objectTextures.begin(), objectTextures.end());
+			}
+			return resources;
+		};
 
 		const auto setup = graph.AddPass({.name = "Frame setup"}, [this, pendingUpload, sampled](CommandList& list) {
 			if (pendingUpload.completion.IsValid()) {
@@ -570,12 +699,13 @@ namespace RealRHI::Examples {
 		// Initialize the sampled map for every execution, including disabled shadows.
 		graph.AddPass(
 			{.name = "Shadows",
-				.resources =
+				.resources = withObjects(
 					{
 						{shadow, depthAttachment, TextureLayout::DepthStencilAttachment, RenderGraphAccess::Write},
 						{vertices, vertexState},
 						{indices, indexState},
 					},
+					false),
 				.dependsOn = {setup}},
 			[this, resolveTargets, rotation, shadowsEnabled](CommandList& list) {
 				auto targets = resolveTargets();
@@ -584,7 +714,7 @@ namespace RealRHI::Examples {
 
 		graph.AddPass(
 			{.name = "Scene",
-				.resources =
+				.resources = withObjects(
 					{
 						{color, colorAttachment, TextureLayout::ColorAttachment, RenderGraphAccess::Write},
 						{depth, depthAttachment, TextureLayout::DepthStencilAttachment, RenderGraphAccess::Write},
@@ -592,7 +722,8 @@ namespace RealRHI::Examples {
 						{pattern, sampled, TextureLayout::ShaderRead},
 						{vertices, vertexState},
 						{indices, indexState},
-					}},
+					},
+					true)},
 			[this, resolveTargets, rotation, shadowsEnabled](CommandList& list) {
 				auto targets = resolveTargets();
 				list.SetViewport(
