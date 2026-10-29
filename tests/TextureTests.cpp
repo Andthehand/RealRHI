@@ -4,11 +4,13 @@
 
 #include <algorithm>
 #include <array>
+#include <barrier>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -821,7 +823,8 @@ namespace {
 		Expect(view->GetSampledImageDescriptorIndex() == viewIndex, "Failed image descriptor slot is reclaimed");
 
 		Ref<Sampler> sampler;
-		Expect(device.CreateSampler({}, sampler) == Result::Success, "Create reusable sampler descriptor");
+		const SamplerDesc samplerDesc{.minLod = 0.5f};
+		Expect(device.CreateSampler(samplerDesc, sampler) == Result::Success, "Create reusable sampler descriptor");
 		const uint32_t samplerIndex = sampler->GetDescriptorIndex();
 		sampler.Release();
 
@@ -829,13 +832,13 @@ namespace {
 		vkWriteSamplerDescriptorsEXT = FailSamplerDescriptor;
 		ExpectRejected(
 			[&] {
-				Expect(
-					device.CreateSampler({}, sampler) == Result::Failed && !sampler, "Failed sampler is not published");
+				Expect(device.CreateSampler(samplerDesc, sampler) == Result::Failed && !sampler,
+					"Failed sampler is not published");
 			},
 			"Failed to write Vulkan sampler descriptor");
 		vkWriteSamplerDescriptorsEXT = writeSampler;
 
-		Expect(device.CreateSampler({}, sampler) == Result::Success, "Retry sampler allocation");
+		Expect(device.CreateSampler(samplerDesc, sampler) == Result::Success, "Retry sampler allocation");
 		Expect(sampler->GetDescriptorIndex() == samplerIndex, "Failed sampler descriptor slot is reclaimed");
 
 		auto target = MakeTexture(device, 4, 4, 1, 1, 1, TextureUsage::RenderTarget);
@@ -907,6 +910,149 @@ namespace {
 			"Create volume view of selected mips");
 	}
 
+	void TestSamplerSharing(Device& device) {
+		const auto baseline = device.GetStatistics().descriptors.samplerCount;
+		const SamplerDesc desc{.maxLod = 16};
+		Ref<Sampler> first;
+		Ref<Sampler> alias;
+		Expect(device.CreateSampler(desc, first) == Result::Success, "Create first shared sampler");
+		auto named = desc;
+		named.debugName = "Another sampler name";
+		Expect(device.CreateSampler(named, alias) == Result::Success &&
+				alias->GetDescriptorIndex() == first->GetDescriptorIndex(),
+			"Names do not split identical sampler settings");
+		const uint32_t sharedIndex = first->GetDescriptorIndex();
+		Ref<Sampler> signedZero;
+		auto zero = desc;
+		zero.minLod = -0.0f;
+		zero.mipLodBias = -0.0f;
+		Expect(device.CreateSampler(zero, signedZero) == Result::Success &&
+				signedZero->GetDescriptorIndex() == sharedIndex,
+			"Positive and negative zero LOD settings share a descriptor");
+		Expect(
+			device.GetStatistics().descriptors.samplerCount == baseline + 1, "Aliases occupy one native sampler slot");
+
+		std::array<SamplerDesc, 12> variants;
+		variants.fill(desc);
+		variants[0].minFilter = Filter::Nearest;
+		variants[1].magFilter = Filter::Nearest;
+		variants[2].mipFilter = Filter::Nearest;
+		variants[3].addressU = SamplerAddressMode::ClampToEdge;
+		variants[4].addressV = SamplerAddressMode::MirroredRepeat;
+		variants[5].addressW = SamplerAddressMode::ClampToBorder;
+		variants[6].mipLodBias = 0.5f;
+		variants[7].minLod = 1;
+		variants[8].maxLod = 8;
+		variants[9].compareEnable = true;
+		variants[10].compareOp = CompareOp::Less;
+		variants[11].borderColor = SamplerBorderColor::OpaqueWhite;
+		std::vector<Ref<Sampler>> distinct;
+		for (const auto& variant : variants) {
+			Ref<Sampler> sampler;
+			Expect(device.CreateSampler(variant, sampler) == Result::Success, "Create sampler with a changed setting");
+			Expect(sampler->GetDescriptorIndex() != sharedIndex,
+				"Every sampler setting participates in descriptor identity");
+			for (const auto& previous : distinct) {
+				Expect(sampler->GetDescriptorIndex() != previous->GetDescriptorIndex(),
+					"Different settings retain distinct slots");
+			}
+			distinct.push_back(std::move(sampler));
+		}
+		Expect(device.GetStatistics().descriptors.samplerCount == baseline + 13, "Count unique sampler descriptions");
+		distinct.clear();
+		Expect(device.GetStatistics().descriptors.samplerCount == baseline + 1,
+			"Unused settings release their descriptors");
+
+		{
+			Ref<Sampler> defaults;
+			Expect(device.CreateSampler({}, defaults) == Result::Success, "Create explicit default sampler");
+			auto texture = MakeTexture(device, 4, 4, 1, 1, 1, TextureUsage::ShaderResource);
+			auto otherTexture = MakeTexture(device, 4, 4, 1, 1, 1, TextureUsage::ShaderResource);
+			const auto index = defaults->GetDescriptorIndex();
+			Expect(texture->GetSamplerDescriptorIndex() == index && otherTexture->GetSamplerDescriptorIndex() == index,
+				"Sampled textures share their default sampler with explicit identical samplers");
+			defaults.Release();
+			texture.Release();
+			Expect(device.GetStatistics().descriptors.samplerCount == baseline + 2,
+				"Remaining texture keeps the default descriptor alive");
+		}
+		Expect(device.GetStatistics().descriptors.samplerCount == baseline + 1,
+			"Last texture releases its default descriptor");
+
+		auto commands = MakeList(device);
+		commands->UseResource(first.Raw());
+		first.Release();
+		alias.Release();
+		signedZero.Release();
+		SubmitAndWait(device, *commands);
+		Expect(device.GetStatistics().descriptors.samplerCount == baseline + 1,
+			"GPU completion keeps sampler descriptors retained until recording reset");
+		Expect(device.CreateSampler(desc, alias) == Result::Success && alias->GetDescriptorIndex() == sharedIndex,
+			"A retained recording's sampler can acquire another descriptor owner");
+		Expect(commands->Reset() == Result::Success, "Reset sampler retention recording");
+		Expect(device.GetStatistics().descriptors.samplerCount == baseline + 1,
+			"Releasing recording does not free a live alias");
+		alias.Release();
+		Expect(device.GetStatistics().descriptors.samplerCount == baseline, "Last sampler owner frees its slot");
+		Expect(
+			device.CreateSampler(variants[0], first) == Result::Success && first->GetDescriptorIndex() == sharedIndex,
+			"A freed sampler slot is reusable by different settings");
+		Expect(device.CreateSampler(desc, alias) == Result::Success && alias->GetDescriptorIndex() != sharedIndex,
+			"Released cache entries cannot alias a slot reused for different settings");
+		first.Release();
+		alias.Release();
+		Expect(device.GetStatistics().descriptors.samplerCount == baseline,
+			"Sampler sharing leaves no retained cache entries");
+	}
+
+	void TestConcurrentSamplerSharing(Device& device) {
+		const auto baseline = device.GetStatistics().descriptors.samplerCount;
+		constexpr uint32_t threadCount = 8;
+		std::array<std::vector<Ref<Sampler>>, threadCount> samplers;
+		std::array<std::thread, threadCount> threads;
+		std::barrier start(threadCount);
+		for (uint32_t index = 0; index < threadCount; ++index) {
+			threads[index] = std::thread([&, index] {
+				start.arrive_and_wait();
+				for (uint32_t i = 0; i < 64; ++i) {
+					Ref<Sampler> sampler;
+					Expect(device.CreateSampler({.maxLod = 14}, sampler) == Result::Success,
+						"Create concurrent sampler alias");
+					samplers[index].push_back(std::move(sampler));
+				}
+			});
+		}
+		for (auto& thread : threads) {
+			thread.join();
+		}
+		const auto descriptor = samplers.front().front()->GetDescriptorIndex();
+		for (const auto& batch : samplers) {
+			for (const auto& sampler : batch) {
+				Expect(
+					sampler->GetDescriptorIndex() == descriptor, "Concurrent requests publish one shared descriptor");
+			}
+		}
+		Expect(device.GetStatistics().descriptors.samplerCount == baseline + 1,
+			"512 concurrent sampler owners use one slot");
+		for (uint32_t index = 0; index < threadCount; ++index) {
+			threads[index] = std::thread([&, index] {
+				start.arrive_and_wait();
+				samplers[index].clear();
+				for (uint32_t i = 0; i < 32; ++i) {
+					Ref<Sampler> temporary;
+					Expect(device.CreateSampler({.maxLod = 14}, temporary) == Result::Success,
+						"Concurrent creation and final release keep descriptor ownership consistent");
+					std::this_thread::yield();
+				}
+			});
+		}
+		for (auto& thread : threads) {
+			thread.join();
+		}
+		Expect(device.GetStatistics().descriptors.samplerCount == baseline,
+			"Concurrent final releases reclaim the shared slot");
+	}
+
 	void RunTests(bool graphicsOnly) {
 		TextureTestDevice device(graphicsOnly);
 		Expect(device.Init({
@@ -920,6 +1066,8 @@ namespace {
 			   }) == Result::Success,
 			"Initialize test device");
 
+		TestSamplerSharing(device);
+		TestConcurrentSamplerSharing(device);
 		TestMipGeneration(device, 7, 5, 1, 2);
 		TestMipGeneration(device, 4, 2, 2, 1);
 		TestFilteredMipRange(device);

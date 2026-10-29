@@ -175,7 +175,8 @@ The pattern benchmark includes already-fragmented submitted buffer state. Setup 
 It draws a fixed grid using either one shared asset set (`--shared`) or a separate
 vertex buffer, index buffer, and 32x32 texture for each object. Each draw has its own
 material tint; pipelines and explicitly bound samplers are shared. Sampled textures
-also allocate an implicit default sampler. `--stream N` overwrites N distinct
+also own an implicit default sampler, whose descriptor is shared with identical
+sampler settings across the device. `--stream N` overwrites N distinct
 vertex buffers and textures per frame, rotating through the asset sets. Each streamed
 asset uploads 5,120 bytes. Shared mode permits at most one streamed asset per frame.
 
@@ -186,7 +187,7 @@ presets and both Visual Studio configurations. Running with no arguments execute
 the full comparison suite directly in C++; no external runner is needed.
 
 The executable validates all three workloads, then rotates their order across three
-repeats at 64, 256, and 768 objects. Each run has one initialization frame, 60
+repeats at 64, 256, 768, and 1,024 objects. Each run has one initialization frame, 60
 warmup frames, and 300 measured frames. Streaming updates 16 asset sets per frame.
 Results go into `scene-resources/` beneath the working directory; the console prints
 its absolute location. This includes per-frame CSVs, `summary.csv`, and
@@ -200,7 +201,7 @@ For a shorter suite, set these command arguments in Visual Studio's debug settin
 ```
 
 `--output <directory>` changes the suite report folder. `--objects` selects one size;
-otherwise the suite uses all three defaults. Suite mode always streams up to 16 asset
+otherwise the suite uses all four defaults. Suite mode always streams up to 16 asset
 sets per frame. For one custom workload, use arguments such as:
 
 ```text
@@ -212,13 +213,12 @@ Every run reads back the final image outside measurement and checks for opaque o
 and visible geometry. The executable returns failure on RHI/Vulkan errors, including
 cleanup errors. Numeric options reject invalid ranges; object count is capped at 8,192.
 
-The current backend reserves 1,024 sampler slots. On the RTX 4060 Laptop GPU used for
-the initial baseline, 1,024 unique objects fail initialization with
-`AllocateSamplerDescriptor: Sampler descriptor heap is full.` Each sampled object
-texture consumes a default sampler even though the shader uses a shared explicit
-sampler. The default sweep therefore stops at 768. CSVs include sampler usage and
-capacity so that this limit remains visible; larger workloads may require sampler
-reuse or optional default-sampler creation in the RHI.
+The backend reserves 1,024 sampler slots. The initial 1,024-object unique workload
+exhausted those slots because every sampled texture allocated an identical default
+sampler descriptor. Descriptors are now shared by matching settings, so the default
+sweep includes 1,024 objects. CSVs count unique live descriptor slots rather than
+sampler objects; the heap can still fill when too many distinct sampler settings are
+live at once.
 
 CSV timings are CPU milliseconds per frame. `record_total_ms` includes graph building,
 compilation, allocation, recording, and destruction. The three graph columns separate
@@ -265,8 +265,8 @@ work. The three run means range from 34.884 to 36.893 ms per frame; streaming ra
 from 35.261 to 39.916 ms. Small differences between variants can reflect run variance.
 Live buffer plus texture allocations are about 43.08 MiB shared, 46.96 MiB unique,
 and 50.96 MiB unique with streaming; the transient pool stays at 8.69 MiB. Streaming
-uploads 81,920 bytes per measured frame. The unique variants use 773/1,024 sampler
-slots, compared with six for shared assets.
+uploads 81,920 bytes per measured frame. Before sampler sharing, the unique variants
+used 773/1,024 sampler slots, compared with six for shared assets.
 
 Graph validation now groups imports by resource identity. Buffer imports use ordered
 intervals and check only their insertion neighbors; texture imports compare mip/layer
@@ -304,8 +304,27 @@ interval boundaries, texture mip/layer overlap, and large pass declaration sets.
 Detailed comparison CSVs, per-frame results, executable hashes and methodology are
 saved locally under `out/test-results/graph-validation/`.
 
-Sampler reuse or optional default samplers remain a separate capacity improvement
-needed before the 1,024-object unique workload can run.
+Sampler descriptor reuse now covers all identical sampler settings, including texture
+defaults and explicitly created samplers. Requests remain validated before lookup;
+filters, address modes, LOD values, comparison settings and border color all contribute
+to identity. Signed zero is normalized; other float values use their exact bits.
+Debug names do not split identity, and the first name stays associated with the slot.
+Unknown native extension chains bypass sharing.
+
+Allocation, lookup, owner counts and release share the descriptor manager's mutex.
+Each sampler object owns one reference to its slot; texture and command-list retention
+work as before. The final sampler object's destruction erases the shared entry and
+returns the slot for reuse. Completed command recordings retain their samplers until
+reset. No device-lifetime sampler cache keeps unused descriptors alive.
+
+The extended default C++ suite completed 36 runs (10,800 measured frames), including
+the 1,024-object unique and streaming workloads, using two sampler descriptor slots
+in every workload. The saved baseline still reproduces sampler exhaustion at 1,024
+objects; at 768 unique objects it uses 773 slots, versus two with sharing. All seven
+paired final-image checksums at 768 objects match exactly, including the shared,
+unique, streaming and validation cases. Debug and Release each pass all 19 tests;
+both builds also pass 1,024-object streaming validation. Detailed results and
+verification metadata are saved locally under `out/test-results/sampler-sharing/`.
 
 ## Configuration options
 

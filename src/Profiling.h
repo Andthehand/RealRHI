@@ -22,6 +22,7 @@ namespace RealRHI {
 	struct DescriptorStatistics {
 		uint64_t bufferCount = 0;
 		uint64_t imageCount = 0;
+		// Unique live sampler descriptor slots, including those shared by several sampler objects.
 		uint64_t samplerCount = 0;
 		uint64_t resourceBytes = 0;
 		// Cursor reservation includes freed slots retained for reuse; it can exceed live usage.

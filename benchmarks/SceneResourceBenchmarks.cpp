@@ -422,7 +422,7 @@ namespace {
 	bool RunSuite(const Options& settings) {
 		std::filesystem::create_directories(settings.outputDirectory);
 		std::cout << "Suite reports: " << std::filesystem::absolute(settings.outputDirectory) << '\n';
-		std::vector<uint32_t> counts{64, 256, 768};
+		std::vector<uint32_t> counts{64, 256, 768, 1024};
 		if (settings.customObjectCount) {
 			counts = {settings.objects};
 		}

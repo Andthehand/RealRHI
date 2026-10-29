@@ -264,7 +264,8 @@ namespace {
 					   },
 					   view) == Result::Success,
 				"Create a named custom view");
-			Expect(device.CreateSampler({.debugName = samplerName.c_str()}, sampler) == Result::Success,
+			Expect(device.CreateSampler({.minFilter = Filter::Nearest, .debugName = samplerName.c_str()}, sampler) ==
+					Result::Success,
 				"Create a named sampler descriptor");
 			bufferName.assign("changed");
 			textureName.assign("changed");
@@ -306,7 +307,8 @@ namespace {
 			for (uint32_t index = 0; index < 64; ++index) {
 				const std::string name = "Temporary sampler " + std::to_string(index);
 				Ref<Sampler> temporary;
-				Expect(device.CreateSampler({.debugName = name.c_str()}, temporary) == Result::Success,
+				Expect(
+					device.CreateSampler({.mipLodBias = 0.5f, .debugName = name.c_str()}, temporary) == Result::Success,
 					"Name identical descriptors while reusing a slot");
 			}
 		}
@@ -420,8 +422,8 @@ namespace {
 			Expect(current.pipelines.liveCount == before.pipelines.liveCount + 2, "Both pipeline types are counted");
 			Expect(current.descriptors.bufferCount == before.descriptors.bufferCount + 1 &&
 					current.descriptors.imageCount == before.descriptors.imageCount + 3 &&
-					current.descriptors.samplerCount == before.descriptors.samplerCount + 2,
-				"Descriptors include custom views, storage images, and default and independent samplers");
+					current.descriptors.samplerCount == before.descriptors.samplerCount + 1,
+				"Descriptors include views and storage images; default and identical explicit samplers share one slot");
 			Expect(current.descriptors.resourceBytes > before.descriptors.resourceBytes &&
 					current.descriptors.resourceCapacityBytes >= current.descriptors.resourceReservedBytes,
 				"Live descriptor bytes and reserved capacity are consistent");
@@ -461,7 +463,7 @@ namespace {
 			after.buffers.peakCount > before.buffers.liveCount && after.textures.peakBytes > before.textures.liveBytes,
 			"Resource high-water marks survive destruction");
 		Expect(after.descriptors.peakResourceBytes >= after.descriptors.resourceBytes &&
-				after.descriptors.peakSamplerCount >= 2,
+				after.descriptors.peakSamplerCount >= before.descriptors.samplerCount + 1,
 			"Descriptor high-water marks survive slot reuse");
 	}
 

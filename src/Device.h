@@ -70,6 +70,8 @@ namespace RealRHI {
 		virtual Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) const = 0;
 		virtual Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const = 0;
 		virtual Result CreateTextureView(Texture* texture, const TextureViewDesc& desc, Ref<TextureView>& outView) const = 0;
+		// Thread-safe. Identical settings may share a descriptor; the first owner's debug name is retained.
+		// Sampler objects remain independently owned; the slot is freed after its final owner is released.
 		virtual Result CreateSampler(const SamplerDesc& desc, Ref<Sampler>& outSampler) const = 0;
 		virtual Result CreateUploadContext(const UploadContextDesc& desc, std::unique_ptr<UploadContext>& outContext) const = 0;
 		virtual Result CreateCommandAllocator(QueueType type, Ref<CommandAllocator>& outAllocator) const = 0;

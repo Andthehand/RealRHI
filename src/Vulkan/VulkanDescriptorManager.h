@@ -4,9 +4,12 @@
 #include "VulkanDescriptorHeaps.h"
 #include "VulkanDevice.h"
 
+#include <array>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -37,6 +40,17 @@ namespace RealRHI {
 		DescriptorStatistics GetStatistics() const;
 
 	private:
+		using SamplerKey = std::array<uint32_t, 16>;
+		struct SamplerKeyHash {
+			size_t operator()(const SamplerKey& key) const noexcept;
+		};
+		struct SamplerDescriptor {
+			std::optional<SamplerKey> key;
+			uint64_t references = 1;
+		};
+
+	private:
+		static SamplerKey MakeSamplerKey(const VkSamplerCreateInfo& info);
 		void FreeDescriptor(uint32_t index,
 			std::unordered_set<uint32_t>& allocatedDescriptors,
 			std::vector<uint32_t>& freeDescriptors);
@@ -65,7 +79,9 @@ namespace RealRHI {
 
 		VkDeviceSize m_SamplerDescriptorSize;
 		std::vector<uint32_t> m_FreeSamplerDescriptors;
-		std::unordered_set<uint32_t> m_AllocatedSamplerDescriptors;
+		// Descriptor references belong to sampler wrappers, including texture defaults and retained recordings.
+		std::unordered_map<uint32_t, SamplerDescriptor> m_AllocatedSamplerDescriptors;
+		std::unordered_map<SamplerKey, uint32_t, SamplerKeyHash> m_SharedSamplers;
 		uint32_t m_NextSamplerDescriptorIndex;
 		uint64_t m_PeakResourceBytes = 0;
 		uint64_t m_PeakSamplerCount = 0;

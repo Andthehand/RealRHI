@@ -4,8 +4,45 @@
 #include "VulkanConversions.h"
 
 #include <algorithm>
+#include <bit>
 
 namespace RealRHI {
+	size_t VulkanDescriptorManager::SamplerKeyHash::operator()(const SamplerKey& key) const noexcept {
+		size_t hash = 0;
+		for (uint32_t field : key) {
+			hash ^= std::hash<uint32_t>{}(field) + 0x9e3779b9u + (hash << 6) + (hash >> 2);
+		}
+		return hash;
+	}
+
+	VulkanDescriptorManager::SamplerKey VulkanDescriptorManager::MakeSamplerKey(const VkSamplerCreateInfo& info) {
+		auto floatBits = [](float value) {
+			// Signed zero has the same sampling behavior and must have the same cache key.
+			if (value == 0.0f) {
+				return uint32_t{0};
+			}
+			return std::bit_cast<uint32_t>(value);
+		};
+		return {
+			info.flags,
+			static_cast<uint32_t>(info.magFilter),
+			static_cast<uint32_t>(info.minFilter),
+			static_cast<uint32_t>(info.mipmapMode),
+			static_cast<uint32_t>(info.addressModeU),
+			static_cast<uint32_t>(info.addressModeV),
+			static_cast<uint32_t>(info.addressModeW),
+			floatBits(info.mipLodBias),
+			info.anisotropyEnable,
+			floatBits(info.maxAnisotropy),
+			info.compareEnable,
+			static_cast<uint32_t>(info.compareOp),
+			floatBits(info.minLod),
+			floatBits(info.maxLod),
+			static_cast<uint32_t>(info.borderColor),
+			info.unnormalizedCoordinates
+		};
+	}
+
 	VulkanDescriptorManager::VulkanDescriptorManager(const VulkanDevice* device)
 		: m_Device(device) { }
 
@@ -90,9 +127,9 @@ namespace RealRHI {
 			return UINT32_MAX;
 		}
 
-		if (m_DescriptorHeaps->GetResourceHeap().buffer->WriteData(
-				descriptorMemory.data(), m_BufferDescriptorSize, bufferDescriptorIndex * m_BufferDescriptorSize) !=
-			Result::Success) {
+		if (m_DescriptorHeaps->GetResourceHeap().buffer->WriteData(descriptorMemory.data(),
+				m_BufferDescriptorSize,
+				bufferDescriptorIndex * m_BufferDescriptorSize) != Result::Success) {
 			m_FreeBufferDescriptors.push_back(bufferDescriptorIndex);
 			return UINT32_MAX;
 		}
@@ -166,9 +203,9 @@ namespace RealRHI {
 			return UINT32_MAX;
 		}
 
-		if (m_DescriptorHeaps->GetResourceHeap().buffer->WriteData(
-				descriptorMemory.data(), m_ImageDescriptorSize, imageDescriptorIndex * m_ImageDescriptorSize) !=
-			Result::Success) {
+		if (m_DescriptorHeaps->GetResourceHeap().buffer->WriteData(descriptorMemory.data(),
+				m_ImageDescriptorSize,
+				imageDescriptorIndex * m_ImageDescriptorSize) != Result::Success) {
 			m_FreeImageDescriptors.push_back(imageDescriptorIndex);
 			return UINT32_MAX;
 		}
@@ -185,6 +222,16 @@ namespace RealRHI {
 	uint32_t VulkanDescriptorManager::AllocateSamplerDescriptor(const VkSamplerCreateInfo& samplerCI,
 		const char* debugName) {
 		std::scoped_lock lock(m_DescriptorMutex);
+		std::optional<SamplerKey> key;
+		// Extension chains may change sampling behavior; only the fully represented base description is shared.
+		if (samplerCI.pNext == nullptr) {
+			key = MakeSamplerKey(samplerCI);
+			const auto cached = m_SharedSamplers.find(*key);
+			if (cached != m_SharedSamplers.end()) {
+				++m_AllocatedSamplerDescriptors.at(cached->second).references;
+				return cached->second;
+			}
+		}
 		uint32_t samplerDescriptorIndex;
 		if (!m_FreeSamplerDescriptors.empty()) {
 			samplerDescriptorIndex = m_FreeSamplerDescriptors.back();
@@ -228,20 +275,39 @@ namespace RealRHI {
 			return UINT32_MAX;
 		}
 
-		if (m_DescriptorHeaps->GetSamplerHeap().buffer->WriteData(
-				descriptorMemory.data(), m_SamplerDescriptorSize, samplerDescriptorIndex * m_SamplerDescriptorSize) !=
-			Result::Success) {
+		if (m_DescriptorHeaps->GetSamplerHeap().buffer->WriteData(descriptorMemory.data(),
+				m_SamplerDescriptorSize,
+				samplerDescriptorIndex * m_SamplerDescriptorSize) != Result::Success) {
 			m_FreeSamplerDescriptors.push_back(samplerDescriptorIndex);
 			return UINT32_MAX;
 		}
-		m_AllocatedSamplerDescriptors.insert(samplerDescriptorIndex);
+		m_AllocatedSamplerDescriptors.emplace(samplerDescriptorIndex, SamplerDescriptor{key});
+		if (key) {
+			m_SharedSamplers.emplace(*key, samplerDescriptorIndex);
+		}
 		UpdateHighWaterMarks();
 		return samplerDescriptorIndex;
 	}
 
 	void VulkanDescriptorManager::FreeSamplerDescriptor(uint32_t index) {
 		std::scoped_lock lock(m_DescriptorMutex);
-		FreeDescriptor(index, m_AllocatedSamplerDescriptors, m_FreeSamplerDescriptors);
+		if (index == UINT32_MAX) {
+			return;
+		}
+		const auto entry = m_AllocatedSamplerDescriptors.find(index);
+		if (entry == m_AllocatedSamplerDescriptors.end()) {
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "Invalid or duplicate descriptor free.");
+			return;
+		}
+		if (--entry->second.references != 0) {
+			return;
+		}
+		if (entry->second.key) {
+			m_SharedSamplers.erase(*entry->second.key);
+		}
+		m_AllocatedSamplerDescriptors.erase(entry);
+		m_FreeSamplerDescriptors.push_back(index);
 	}
 
 	void VulkanDescriptorManager::FreeDescriptor(uint32_t index,
