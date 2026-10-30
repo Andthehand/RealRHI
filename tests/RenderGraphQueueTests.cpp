@@ -482,7 +482,7 @@ namespace {
 	void TestSwapchain(Device& device) {
 		Ref<Window> window;
 		Ref<Swapchain> swapchain;
-		Expect(device.CreateWindow({.Title = "Graph swapchain synchronization", .Width = 64, .Height = 64}, window) ==
+		Expect(device.CreateWindow({.title = "Graph swapchain synchronization", .width = 64, .height = 64}, window) ==
 					Result::Success &&
 				device.CreateSwapchain({.window = window.Raw()}, swapchain) == Result::Success,
 			"Create graph swapchain");

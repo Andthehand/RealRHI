@@ -392,7 +392,7 @@ int main() {
 	{
 		Ref<Window> window;
 		Ref<Swapchain> swapchain;
-		Expect(device->CreateWindow({.Title = "Swapchain load synchronization", .Width = 64, .Height = 64}, window) ==
+		Expect(device->CreateWindow({.title = "Swapchain load synchronization", .width = 64, .height = 64}, window) ==
 				Result::Success,
 			"Create swapchain load test window");
 		Expect(device->CreateSwapchain({.window = window.Raw()}, swapchain) == Result::Success,

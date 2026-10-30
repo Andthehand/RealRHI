@@ -1,0 +1,1 @@
+realrhi_add_example(RenderGraphExample RenderGraphExample.cpp)

@@ -3,9 +3,9 @@
 
 namespace RealRHI {
 	struct WindowDesc {
-		const char* Title = "RealRHI Window";
+		const char* title = "RealRHI Window";
 
-		uint32_t Width = 800;
-		uint32_t Height = 600;
+		uint32_t width = 800;
+		uint32_t height = 600;
 	};
 }

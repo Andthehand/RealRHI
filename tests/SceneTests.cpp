@@ -279,7 +279,7 @@ namespace {
 		constexpr const char* title = "RealRHI Scene Lifecycle Test";
 		Ref<Window> window;
 		Ref<Swapchain> swapchain;
-		Expect(device.CreateWindow({.Title = title, .Width = 320, .Height = 240}, window) == Result::Success,
+		Expect(device.CreateWindow({.title = title, .width = 320, .height = 240}, window) == Result::Success,
 			"Create lifecycle window");
 		Expect(device.CreateSwapchain({.window = window.Raw()}, swapchain) == Result::Success,
 			"Create lifecycle swapchain");

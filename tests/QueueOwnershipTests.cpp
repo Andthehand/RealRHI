@@ -337,7 +337,7 @@ namespace {
 
 		Ref<Window> window;
 		Ref<Swapchain> swapchain;
-		Expect(device.CreateWindow({.Title = "RealRHI ownership test", .Width = 64, .Height = 64}, window) ==
+		Expect(device.CreateWindow({.title = "RealRHI ownership test", .width = 64, .height = 64}, window) ==
 				Result::Success,
 			"Create presentation window");
 		Expect(device.CreateSwapchain({.window = window.Raw()}, swapchain) == Result::Success,

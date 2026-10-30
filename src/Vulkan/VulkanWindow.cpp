@@ -22,7 +22,7 @@ namespace RealRHI {
 	}
 
 	Result VulkanWindow::Init(const WindowDesc& desc) {
-		m_Window = SDL_CreateWindow(desc.Title, desc.Width, desc.Height, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+		m_Window = SDL_CreateWindow(desc.title, desc.width, desc.height, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
 		if (!m_Window) {
 			m_Device->SendDebugMessage(DebugSeverity::Error, DebugMessageType::General, "Failed to create SDL window.");
 			return Result::Failed;

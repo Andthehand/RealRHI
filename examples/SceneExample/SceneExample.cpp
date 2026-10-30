@@ -33,7 +33,7 @@ namespace {
 			}
 
 			if (m_Device->CreateWindow(
-					{.Title = "RealRHI Scene Example - S: toggle shadows", .Width = 960, .Height = 640}, m_Window) !=
+					{.title = "RealRHI Scene Example - S: toggle shadows", .width = 960, .height = 640}, m_Window) !=
 					Result::Success ||
 				m_Device->CreateSwapchain({.window = m_Window.Raw()}, m_Swapchain) != Result::Success) {
 				return false;

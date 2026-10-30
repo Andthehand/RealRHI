@@ -84,6 +84,27 @@ Pop-Location
 
 The other example directories are `TriangleExample`, `TextureExample`, and `ComputeExample`.
 
+`RenderGraphExample` is a focused two-pass introduction to the render graph:
+**Draw triangle → Postprocess → Present**. The first pass initializes a graph-created
+RGBA8 texture; the second samples it with a vignette and writes the imported backbuffer.
+Resource declarations establish the dependency and layout transition automatically.
+`Submit` handles acquisition synchronization and presentation. A persistent 64 MiB
+transient pool reuses idle textures across frames, including after window resizing.
+The example enables pass culling, prints the first frame's graph plan, and reports
+texture allocations and reuse on exit. Writing the imported backbuffer keeps both
+passes alive without explicit dependencies or side-effect flags.
+
+```powershell
+cmake --build --preset windows-release --target RenderGraphExample
+Push-Location out/build/windows-release/examples/RenderGraphExample
+./RenderGraphExample.exe --frames 6
+Pop-Location
+```
+
+Omit `--frames` to keep the window open. Resize or minimize it to exercise frame
+acquisition and extent-dependent transient targets. Source and shaders live under
+`examples/RenderGraphExample/`.
+
 ## Presenting a render graph
 
 Acquire a frame, import its backbuffer, and declare that resource in the passes that render to it:

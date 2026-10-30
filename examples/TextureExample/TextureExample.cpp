@@ -148,7 +148,7 @@ namespace {
 	private:
 		void CreateSwapChain() {
 			RealRHI::Result result = m_Device->CreateWindow(
-				{.Title = "RealRHI Texture Example", .Width = s_WindowWidth, .Height = s_WindowHeight}, m_Window);
+				{.title = "RealRHI Texture Example", .width = s_WindowWidth, .height = s_WindowHeight}, m_Window);
 			if (result != RealRHI::Result::Success) {
 				std::cerr << "Failed to create window" << std::endl;
 				return;
