@@ -168,9 +168,11 @@ namespace RealRHI {
 		const TextureSubresourceRange destinationRange{
 			region.destinationMipLevel, 1, region.destinationBaseArrayLayer, region.layerCount
 		};
+		const auto format = source ? Utils::VkFormatToTextureFormat(source->GetFormat()) : TextureFormat::Unknown;
 		if (!source || !destination || source == destination || !Any(source->GetUsage() & TextureUsage::TransferSrc) ||
 			!Any(destination->GetUsage() & TextureUsage::TransferDst) ||
-			source->GetFormat() != destination->GetFormat() || source->GetFormat() != VK_FORMAT_R8G8B8A8_UNORM ||
+			source->GetFormat() != destination->GetFormat() || format == TextureFormat::Unknown ||
+			Utils::TextureFormatToVkImageAspect(format) != VK_IMAGE_ASPECT_COLOR_BIT ||
 			!IsSubresourceRangeValid(source, sourceRange) || !IsSubresourceRangeValid(destination, destinationRange) ||
 			!m_Resources.HasRecordedLayout(source,
 				region.sourceMipLevel,

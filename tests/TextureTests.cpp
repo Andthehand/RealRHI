@@ -637,6 +637,53 @@ namespace {
 			"Zero layers, unsupported texel sizes, and multiplication overflow are rejected");
 	}
 
+	void TestTextureCopyFormats(Device& device) {
+		for (auto format : {TextureFormat::BGRA8_UNorm,
+				 TextureFormat::RGBA8_SRGB,
+				 TextureFormat::RGBA16_Float,
+				 TextureFormat::R32_Float,
+				 TextureFormat::D32_Float}) {
+			const TextureDesc desc{
+				.width = 4,
+				.height = 4,
+				.format = format,
+				.usage = TextureUsage::TransferSrc | TextureUsage::TransferDst,
+			};
+			Ref<Texture> source;
+			Ref<Texture> destination;
+			Expect(device.CreateTexture(desc, source) == Result::Success, "Create format copy source");
+			Expect(device.CreateTexture(desc, destination) == Result::Success, "Create format copy destination");
+			auto list = MakeList(device);
+			Transition(*list, destination.Raw(), TextureLayout::Undefined, TextureLayout::TransferDst, {});
+			if (format == TextureFormat::D32_Float) {
+				Transition(*list, source.Raw(), TextureLayout::Undefined, TextureLayout::TransferSrc, {});
+				ExpectRejected(
+					[&] {
+						list->CopyTexture(source.Raw(), destination.Raw(), {.width = 4, .height = 4});
+					},
+					"formats");
+			}
+			else {
+				// Exercise the native copy with initialized data and Vulkan validation enabled.
+				auto staging = MakeBuffer(device, 128, BufferUsage::TransferSrc, MemoryUsage::CPUToGPU);
+				const std::array<uint8_t, 128> input{};
+				Expect(staging->WriteData(input.data(), input.size()) == Result::Success, "Write format copy data");
+				Transition(*list, source.Raw(), TextureLayout::Undefined, TextureLayout::TransferDst, {});
+				list->CopyBufferToTexture(staging.Raw(), source.Raw(), {.width = 4, .height = 4});
+				Transition(*list, source.Raw(), TextureLayout::TransferDst, TextureLayout::TransferSrc, {});
+				list->CopyTexture(source.Raw(), destination.Raw(), {.width = 4, .height = 4});
+				auto differentFormat = MakeTexture(device, 4, 4, 1, 1, 1, TextureUsage::TransferDst);
+				Transition(*list, differentFormat.Raw(), TextureLayout::Undefined, TextureLayout::TransferDst, {});
+				ExpectRejected(
+					[&] {
+						list->CopyTexture(source.Raw(), differentFormat.Raw(), {.width = 4, .height = 4});
+					},
+					"formats");
+			}
+			SubmitAndWait(device, *list);
+		}
+	}
+
 	void TestTransferValidation(Device& device) {
 		auto source = MakeTexture(device, 4, 4, 1, 2, 2, TextureUsage::TransferSrc | TextureUsage::TransferDst);
 		auto destination = MakeTexture(device, 4, 4, 1, 2, 2, TextureUsage::TransferSrc | TextureUsage::TransferDst);
@@ -1076,6 +1123,7 @@ namespace {
 		TestAttachmentView(device);
 		TestValidation(device);
 		TestTransferValidation(device);
+		TestTextureCopyFormats(device);
 		TestCreationFailures(device);
 		TestViewTypes(device);
 		device.WaitIdle();
