@@ -515,6 +515,8 @@ namespace {
 			}
 			const auto frame = swapchain->BeginFrame();
 			Expect(swapchain->IsFrameReady(frame) && frame.acquisitionId != 0, "Acquire a fresh graph frame");
+			Expect(frame.backBufferView->GetStorageImageDescriptorIndex() == UINT32_MAX,
+				"Default swapchains do not allocate storage descriptors");
 			if (iteration > 0) {
 				Expect(frame.acquisitionId != stale.acquisitionId && !swapchain->IsFrameReady(stale),
 					"Old acquisition IDs never become valid again");
@@ -592,8 +594,8 @@ namespace {
 			Expect(info.batches.back().presentation && info.batches[acquire].waitForAcquire &&
 					info.passes[before.index].batchIndex < acquire &&
 					!info.batches[info.passes[before.index].batchIndex].waitForAcquire &&
-					info.presentationBarriers.textures.size() == 1 &&
-					info.presentationBarriers.textures[0].releaseToPresent,
+					!info.presentationBarriers.textures.empty() &&
+					info.presentationBarriers.textures.back().releaseToPresent,
 				"Diagnostics expose an acquire boundary and a final presentation join");
 			for (size_t i = 0; i < info.batches.size(); ++i) {
 				Expect(s_BinaryWaits[i] == uint32_t(i == acquire) &&

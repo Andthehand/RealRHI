@@ -1408,6 +1408,25 @@ namespace RealRHI {
 			}
 			BarrierDesc barriers;
 			if (i == m_BackBuffer) {
+				// Join presentation on graphics. A foreign family must release the image
+				// and graphics must acquire it before transitioning it for presentation.
+				const auto source = m_Plan[lastUse[i]].queue;
+				if (device.GetCommandQueue(source)->GetQueueId().familyIndex !=
+					device.GetGraphicsCommandQueue()->GetQueueId().familyIndex) {
+					BarrierDesc ownership;
+					states[i].used = false;
+					Transition(i,
+						{PipelineStage::AllCommands, ResourceAccess::MemoryRead},
+						states[i].layout,
+						states[i],
+						ownership);
+					for (auto& barrier : ownership.textures) {
+						barrier.sourceQueue = source;
+						barrier.destinationQueue = QueueType::Graphics;
+					}
+					AppendBarriers(m_Plan[lastUse[i]].afterBarriers, ownership);
+					AppendBarriers(m_PresentationBarriers, ownership);
+				}
 				states[i].used = false;
 			}
 			Transition(i, resource.finalState, resource.finalLayout, states[i], barriers);
@@ -1473,9 +1492,6 @@ namespace RealRHI {
 				return use.resource.index == m_BackBuffer;
 			});
 			const bool firstBackBufferUse = backBuffer && !acquired;
-			if (backBuffer) {
-				presentationQueue = step.queue;
-			}
 			bool merge = false;
 			if (!m_Batches.empty()) {
 				const auto& previous = m_Batches.back();
@@ -1603,7 +1619,11 @@ namespace RealRHI {
 				RecordPass(*commands[i], position);
 			}
 			if (batch.presentation) {
-				commands[i]->Barrier(m_PresentationBarriers);
+				// Ownership acquisition and the following presentation transition touch
+				// the same image and must execute as separate dependencies.
+				for (const auto& barrier : m_PresentationBarriers.textures) {
+					commands[i]->Barrier({.textures = {barrier}});
+				}
 			}
 			const auto ended = commands[i]->End();
 			if (ended != Result::Success) {

@@ -94,6 +94,8 @@ namespace RealRHI {
 		std::vector<VkImageLayout> m_ImageLayouts;
 		TextureFormat m_SwapchainImageFormat = TextureFormat::Unknown;
 		VkExtent2D m_SwapchainExtent = {.width = 0, .height = 0};
+		// To enable descriptor access
+		bool m_EnableStorage = false;
 
 		std::vector<FrameSync> m_FrameSync;
 		std::vector<VkSemaphore> m_RenderFinishedSemaphores;

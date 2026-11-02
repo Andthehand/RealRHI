@@ -53,6 +53,13 @@ namespace RealRHI {
 	}
 
 	Result VulkanSwapchain::Init(const SwapchainDesc& desc) {
+		if (!desc.window) {
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "CreateSwapchain: Provide a window.");
+			return Result::InvalidParameter;
+		}
+
+		m_EnableStorage = desc.enableStorage;
 		m_Window = static_cast<VulkanWindow*>(desc.window);
 		if (!m_Window->CreateVulkanSurface(&m_Surface)) {
 			m_Device->SendDebugMessage(
@@ -134,6 +141,28 @@ namespace RealRHI {
 
 	VkSurfaceFormatKHR VulkanSwapchain::ChooseSwapSurfaceFormat(
 		const std::vector<VkSurfaceFormatKHR>& availableFormats) {
+		if (m_EnableStorage) {
+			// Storage images cannot use sRGB formats. Prefer RGBA8 so typed rgba8 shaders
+			// can also use the selected format; BGRA8 requires formatless shader access.
+			for (VkFormat format : {VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_B8G8R8A8_UNORM}) {
+				const TextureDesc desc{
+					.width = 1,
+					.height = 1,
+					.format = Utils::VkFormatToTextureFormat(format),
+					.usage = TextureUsage::RenderTarget | TextureUsage::Storage,
+				};
+				if (!m_Device->SupportsTexture(desc)) {
+					continue;
+				}
+				for (const auto& available : availableFormats) {
+					if ((available.format == format || available.format == VK_FORMAT_UNDEFINED) &&
+						available.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+						return {format, available.colorSpace};
+					}
+				}
+			}
+			return {VK_FORMAT_UNDEFINED, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+		}
 		for (const auto& availableFormat : availableFormats) {
 			if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB &&
 				availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
@@ -186,6 +215,18 @@ namespace RealRHI {
 		}
 
 		const VkSurfaceFormatKHR surfaceFormat = ChooseSwapSurfaceFormat(support.formats);
+		TextureUsage usage = TextureUsage::RenderTarget;
+		if (m_EnableStorage) {
+			usage |= TextureUsage::Storage;
+		}
+		const VkImageUsageFlags imageUsage = Utils::TextureUsageToVkImageUsage(usage);
+		if ((support.capabilities.supportedUsageFlags & imageUsage) != imageUsage ||
+			surfaceFormat.format == VK_FORMAT_UNDEFINED) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				"CreateSwapchain: Surface does not support the requested backbuffer usage or a compatible format.");
+			return Result::Failed;
+		}
 		const VkPresentModeKHR presentMode = ChooseSwapPresentMode(support.presentModes);
 		const VkExtent2D extent = ChooseSwapExtent(support.capabilities, requestedExtent);
 		if (extent.width == 0 || extent.height == 0) {
@@ -205,7 +246,7 @@ namespace RealRHI {
 			.imageColorSpace = surfaceFormat.colorSpace,
 			.imageExtent = extent,
 			.imageArrayLayers = 1,
-			.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+			.imageUsage = imageUsage,
 			.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
 			.preTransform = support.capabilities.currentTransform,
 			.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
@@ -233,8 +274,8 @@ namespace RealRHI {
 
 		std::vector<Ref<VulkanTexture>> newImages(imageCount);
 		for (uint32_t i = 0; i < imageCount; ++i) {
-			if (VulkanTexture::CreateFromSwapChain(m_Device, surfaceFormat.format, images[i], extent, newImages[i]) !=
-				Result::Success) {
+			if (VulkanTexture::CreateFromSwapChain(
+					m_Device, surfaceFormat.format, images[i], extent, usage, newImages[i]) != Result::Success) {
 				newImages.clear();
 				vkDestroySwapchainKHR(m_Device->GetDevice(), newSwapchain, nullptr);
 				return Result::Failed;

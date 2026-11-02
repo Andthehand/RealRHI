@@ -1101,8 +1101,11 @@ namespace RealRHI {
 					return;
 				}
 				if (barrier.acquireFromPresent) {
-					sourceFamily = m_Device->GetPresentQueueFamily();
 					destinationFamily = m_QueueId.familyIndex;
+					// Discarding the image implicitly acquires it, including images that
+					// have never been presented and therefore have no previous owner.
+					sourceFamily = barrier.oldLayout == TextureLayout::Undefined ? destinationFamily
+																				 : m_Device->GetPresentQueueFamily();
 				}
 				else {
 					sourceFamily = m_QueueId.familyIndex;

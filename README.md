@@ -32,7 +32,7 @@ To run just the tests that need no GPU after building the full backend:
 ctest --preset windows-release-cpu
 ```
 
-This runs `CoreTests`, `RenderGraphPlanningTests`, and `ShaderTests`. The planning tests cover resource hazards, deterministic scheduling, culling, stale handles, and texture initialization without creating a device. `ShaderTests` compiles shaders through Slang without creating a Vulkan device. All 16 device-creating tests carry the `gpu;integration` labels and can be run with:
+This runs `CoreTests`, `RenderGraphPlanningTests`, and `ShaderTests`. The planning tests cover resource hazards, deterministic scheduling, culling, stale handles, and texture initialization without creating a device. `ShaderTests` compiles shaders through Slang without creating a Vulkan device. Device-creating tests carry the `gpu;integration` labels and can be run with:
 
 ```powershell
 ctest --preset windows-release-gpu
@@ -62,7 +62,7 @@ The device must outlive its resources, queues, graphs holding resources, and poo
 
 Within the Vulkan backend, `VulkanCommandList` owns command recording, binding state, and retained resources. `VulkanCommandTimestamps` owns timestamp queries and results; `VulkanCommandResourceTracker` owns recording-local layouts and the ordered resource log. A queue batch replays every list into one `VulkanResourceStateTransaction`, then commits submitted resource state only after native submission succeeds. The queue retains the existing submission/device lock ordering, while the command list collects timing results before publishing completion and releases retained resources outside its state lock during reset.
 
-`VulkanTransferValidation` prepares native copy descriptions before recording or retaining copy resources. Buffer/image copies share checks for mip and layer bounds, extents, alignment, and capacity. Copy recording and upload batches use the same overflow-safe packed byte calculation; mip generation and uploads share final-layout usage checks. Copies require an active recording outside rendering. Buffer self-copies require disjoint byte ranges. Readback and texture-to-texture copies retain their RGBA8_UNorm restriction.
+`VulkanTransferValidation` prepares native copy descriptions before recording or retaining copy resources. Buffer/image copies share checks for mip and layer bounds, extents, alignment, and capacity. Copy recording and upload batches use the same overflow-safe packed byte calculation; mip generation and uploads share final-layout usage checks. Copies require an active recording outside rendering. Buffer self-copies require disjoint byte ranges. Readback retains its RGBA8_UNorm restriction; texture-to-texture copies accept matching supported color formats.
 
 Queue backends implement `Submit(const SubmitInfo&)`; the single-list and list-span overloads have shared default implementations. `SubmitInfo::commandLists` and the span overload use `std::span<CommandList* const>`, allowing const arrays while keeping command-list objects mutable. Derived backends should expose the convenience overloads with `using CommandQueue::Submit`. Vulkan validates, retains, and submits the same list collection through one internal path, including swapchain transition buffers when needed.
 
@@ -83,6 +83,37 @@ Pop-Location
 ```
 
 The other example directories are `TriangleExample`, `TextureExample`, and `ComputeExample`.
+
+`ComputeBackbufferExample` writes a gradient directly into the acquired backbuffer using a compute shader:
+
+```powershell
+cmake --build --preset windows-release --target ComputeBackbufferExample
+Push-Location out/build/windows-release/examples/ComputeBackbufferExample
+./ComputeBackbufferExample.exe --frames 6
+Pop-Location
+```
+
+Create the swapchain with `{.window = window.Raw(), .enableStorage = true}`.
+Each acquired `frame.backBufferView` then exposes `GetStorageImageDescriptorIndex()`.
+Import the frame with `RenderGraph::ImportBackBuffer`, declare a compute pass with
+`ComputeShader`/`ShaderWrite`, `TextureLayout::General`, and `RenderGraphAccess::Write`,
+then bind the pipeline, call `UseResource(frame.backBufferView)`, pass the storage
+descriptor to an `RWTexture2D<float4>` handle, and dispatch. `graph.Submit` waits for
+acquisition, transfers ownership between queue families, and presents automatically.
+The example uses `QueueType::Compute`; dispatching on `QueueType::Graphics` also works.
+The final presentation batch joins on graphics, including when the last image use is on compute or transfer.
+
+Storage is opt-in and requires surface storage support and a compatible UNorm format;
+creation fails with a diagnostic if either is unavailable. The backend prefers RGBA8_UNorm
+and falls back to BGRA8_UNorm. Use the existing descriptor-heap shader handles as in the
+example, and query `GetBackBufferFormat()` when creating graphics pipelines for this swapchain.
+UNorm storage writes do not apply sRGB encoding: compute shaders should output display-encoded
+colors (or explicitly encode linear colors). Default swapchains retain their existing format
+selection and attachment-only usage. `Device::Submit` retains its color-attachment transitions;
+use the render graph for automatic compute backbuffer transitions.
+
+`ComputeBackbufferTests` checks actual image pixels on graphics and compute queues,
+storage descriptors after resizing, and rejection of unsupported surface usages/formats.
 
 `RenderGraphExample` is a focused two-pass introduction to the render graph:
 **Draw triangle → Postprocess → Present**. The first pass initializes a graph-created

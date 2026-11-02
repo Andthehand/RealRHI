@@ -216,6 +216,9 @@ if(REALRHI_BUILD_GPU_TESTS)
     realrhi_add_test(ShaderPipelineTests tests/ShaderPipelineTests.cpp)
     realrhi_add_test(ProfilingTests tests/ProfilingTests.cpp)
     realrhi_add_test(TextureTests tests/TextureTests.cpp)
+    realrhi_add_test(ComputeBackbufferTests tests/ComputeBackbufferTests.cpp)
+    target_compile_definitions(ComputeBackbufferTests PRIVATE
+        REALRHI_TEST_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/examples/ComputeBackbufferExample/shaders")
     realrhi_add_test(ResourceSafetyTests tests/ResourceSafetyTests.cpp)
     realrhi_add_test(QueueSubmissionTests tests/QueueSubmissionTests.cpp)
     realrhi_add_test(QueueOwnershipTests tests/QueueOwnershipTests.cpp)
@@ -232,7 +235,7 @@ if(REALRHI_BUILD_GPU_TESTS)
     target_compile_definitions(SceneTests PRIVATE
         REALRHI_SCENE_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/examples/SceneExample/shaders")
 
-    foreach(name IN ITEMS RenderGraphQueueTests TransientResourcePoolTests RenderGraphTests CacheTests IndirectTests CapabilitiesTests PipelineStateTests ShaderPipelineTests ProfilingTests TextureTests ResourceSafetyTests QueueSubmissionTests QueueOwnershipTests UploadTests SceneTests DrawTests)
+    foreach(name IN ITEMS RenderGraphQueueTests TransientResourcePoolTests RenderGraphTests CacheTests IndirectTests CapabilitiesTests PipelineStateTests ShaderPipelineTests ProfilingTests TextureTests ComputeBackbufferTests ResourceSafetyTests QueueSubmissionTests QueueOwnershipTests UploadTests SceneTests DrawTests)
         set_tests_properties(${name} PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
     endforeach()
 endif()

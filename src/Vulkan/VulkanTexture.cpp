@@ -271,9 +271,10 @@ namespace RealRHI {
 		VkFormat format,
 		VkImage image,
 		VkExtent2D extent,
+		TextureUsage usage,
 		Ref<VulkanTexture>& outTexture) {
 		Ref<VulkanTexture> texture = Ref<VulkanTexture>::Create(device);
-		Result res = texture->InitSwapChainTexture(format, image, extent);
+		Result res = texture->InitSwapChainTexture(format, image, extent, usage);
 		if (res != Result::Success) {
 			return res;
 		}
@@ -282,11 +283,11 @@ namespace RealRHI {
 		return Result::Success;
 	}
 
-	Result VulkanTexture::InitSwapChainTexture(VkFormat format, VkImage image, VkExtent2D extent) {
+	Result VulkanTexture::InitSwapChainTexture(VkFormat format, VkImage image, VkExtent2D extent, TextureUsage usage) {
 		m_IsExternal = true;
 		m_ImageExtent = {extent.width, extent.height, 1};
 		m_SubresourceStates.resize(1);
-		m_Usage = TextureUsage::RenderTarget;
+		m_Usage = usage;
 		m_Format = format;
 		m_Image = image;
 

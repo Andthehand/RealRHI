@@ -78,8 +78,9 @@ namespace RealRHI {
 			VkFormat format,
 			VkImage image,
 			VkExtent2D extent,
+			TextureUsage usage,
 			Ref<VulkanTexture>& outTexture);
-		Result InitSwapChainTexture(VkFormat format, VkImage image, VkExtent2D extent);
+		Result InitSwapChainTexture(VkFormat format, VkImage image, VkExtent2D extent, TextureUsage usage);
 
 	private:
 		const VulkanDevice* m_Device = nullptr;
