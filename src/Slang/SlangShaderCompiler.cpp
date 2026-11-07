@@ -5,6 +5,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <unordered_set>
 #include <spirv/unified1/spirv.h>
 
 namespace RealRHI {
@@ -76,6 +77,11 @@ namespace RealRHI {
 			}
 			key += ";";
 		}
+		key += "|defines:" + std::to_string(desc.preprocessorDefinitions.size()) + ":";
+		for (const auto& definition : desc.preprocessorDefinitions) {
+			key += std::to_string(definition.name.size()) + ":" + definition.name;
+			key += std::to_string(definition.value.size()) + ":" + definition.value;
+		}
 		return key;
 	}
 
@@ -111,6 +117,22 @@ namespace RealRHI {
 			return Result::InvalidParameter;
 		}
 
+		std::unordered_set<std::string> names;
+		for (const auto& definition : desc.preprocessorDefinitions) {
+			const auto isIdentifierStart = [](char c) {
+				return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+			};
+			bool validName = !definition.name.empty() && isIdentifierStart(definition.name[0]);
+			for (char c : definition.name) {
+				validName &= isIdentifierStart(c) || (c >= '0' && c <= '9');
+			}
+			if (!validName || definition.value.find('\0') != std::string::npos ||
+				!names.insert(definition.name).second) {
+				Check(SLANG_FAIL, {}, context + " requires unique preprocessor identifiers and values without null bytes");
+				return Result::InvalidParameter;
+			}
+		}
+
 		if (!m_GlobalSession) {
 			Check(SLANG_FAIL, {}, context + " compilation session initialization failed");
 			return Result::Failed;
@@ -131,12 +153,19 @@ namespace RealRHI {
 		// imports/includes after source edits or a previously failed compilation.
 		const slang::TargetDesc target{.format = SLANG_SPIRV, .profile = m_GlobalSession->findProfile("spirv_1_6")};
 		const char* directory = m_Directory.c_str();
+		std::vector<slang::PreprocessorMacroDesc> macros;
+		macros.reserve(desc.preprocessorDefinitions.size());
+		for (const auto& definition : desc.preprocessorDefinitions) {
+			macros.push_back({definition.name.c_str(), definition.value.c_str()});
+		}
 		const slang::SessionDesc sessionDesc{
 			.targets = &target,
 			.targetCount = 1,
 			.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR,
 			.searchPaths = &directory,
 			.searchPathCount = 1,
+			.preprocessorMacros = macros.data(),
+			.preprocessorMacroCount = static_cast<SlangInt>(macros.size()),
 			.compilerOptionEntries = m_CompilerOptions.data(),
 			.compilerOptionEntryCount = static_cast<uint32_t>(m_CompilerOptions.size()),
 		};
