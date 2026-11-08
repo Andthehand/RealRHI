@@ -3,7 +3,6 @@
 #include "VulkanBuffer.h"
 #include "VulkanCommandAllocator.h"
 #include "VulkanCommandResourceTracker.h"
-#include "VulkanCommandTimestamps.h"
 #include "VulkanDevice.h"
 #include "VulkanPipeline.h"
 #include "VulkanResourceState.h"
@@ -34,11 +33,6 @@ namespace RealRHI {
 		void BeginDebugLabel(const char* name) override;
 		void EndDebugLabel() override;
 		void InsertDebugLabel(const char* name) override;
-		bool SupportsTimestamps() const override { return m_Timestamps.IsSupported(); }
-		void WriteTimestamp(const char* name) override;
-		uint32_t BeginGpuTiming(const char* name) override;
-		void EndGpuTiming(uint32_t timing) override;
-		Result GetTimestampResults(std::vector<GpuTimestamp>& outTimestamps) const override;
 
 		void BeginRendering(const RenderingInfo& renderingInfo) override;
 		void EndRendering() override;
@@ -96,7 +90,6 @@ namespace RealRHI {
 		VkCommandBuffer GetCommandBuffer() const { return m_CommandBuffer; }
 
 	private:
-		void PrepareSubmission();
 		void OnSubmitted();
 		void OnCompleted();
 		void ResetRecordingState();
@@ -149,6 +142,5 @@ namespace RealRHI {
 
 		VkCommandBuffer m_CommandBuffer = VK_NULL_HANDLE;
 
-		VulkanCommandTimestamps m_Timestamps;
 	};
 }

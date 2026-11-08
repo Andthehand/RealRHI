@@ -1,7 +1,7 @@
 #include "VulkanUploadContext.h"
 
 #include "VulkanConversions.h"
-#include "VulkanCpuTimer.h"
+#include "Detail/CpuProfiling.h"
 #include "VulkanTexture.h"
 #include "VulkanTransferValidation.h"
 
@@ -65,14 +65,13 @@ namespace RealRHI {
 		if (result == Result::Success) {
 			m_ActiveBatchIndex = index;
 			m_FinalBarriersRecorded = false;
-			m_Batches[index].commandList->WriteTimestamp("Upload");
 		}
 
 		return result;
 	}
 
 	Result VulkanUploadContext::UploadBuffer(const BufferUploadDesc& desc, const void* data, uint64_t size) {
-		const VulkanCpuTimer timer(m_Device);
+		REALRHI_CPU_ZONE("RealRHI: Upload buffer");
 		Result result = ValidateBufferUpload(desc, data, size);
 		if (result != Result::Success) {
 			return result;
@@ -123,13 +122,13 @@ namespace RealRHI {
 			m_AcquireBarriers.buffers.push_back(final);
 		}
 		m_BatchBytes += size;
-		timer.Finish(VulkanProfiledOperation::UploadStaging, size);
+		m_Device->RecordUploadStaging(size);
 
 		return Result::Success;
 	}
 
 	Result VulkanUploadContext::UploadTexture(const TextureUploadDesc& desc, const void* data, uint64_t size) {
-		const VulkanCpuTimer timer(m_Device);
+		REALRHI_CPU_ZONE("RealRHI: Upload texture");
 		TextureUploadInfo upload;
 		Result result = PrepareTextureUpload(desc, data, size, upload);
 		if (result != Result::Success) {
@@ -182,12 +181,13 @@ namespace RealRHI {
 			m_AcquireBarriers.textures.push_back(final);
 		}
 		m_BatchBytes += upload.byteSize;
-		timer.Finish(VulkanProfiledOperation::UploadStaging, upload.byteSize);
+		m_Device->RecordUploadStaging(upload.byteSize);
 
 		return Result::Success;
 	}
 
 	Result VulkanUploadContext::Submit(UploadSubmission& outSubmission, std::span<const SubmissionToken> waitFor) {
+		REALRHI_CPU_ZONE("RealRHI: Submit upload batch");
 		outSubmission = {};
 
 		if (m_ActiveBatchIndex == SIZE_MAX || (m_FinalBarriers.buffers.empty() && m_FinalBarriers.textures.empty())) {
@@ -203,7 +203,6 @@ namespace RealRHI {
 		// End or submission can fail. A retry must not record these barriers twice.
 		if (!m_FinalBarriersRecorded) {
 			batch.commandList->Barrier(m_FinalBarriers);
-			batch.commandList->WriteTimestamp("Upload end");
 			m_FinalBarriersRecorded = true;
 		}
 

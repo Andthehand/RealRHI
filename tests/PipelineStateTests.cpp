@@ -792,7 +792,6 @@ int main() {
 	Expect(RealRHI::Device::Create({.applicationName = "PipelineStateTests",
 										   .shaderDirectory = REALRHI_TEST_SHADER_DIRECTORY,
 										   .enableDebug = true,
-										   .enableProfiling = false,
 										   .enableValidationLayers = true,
 										   .debugCallback = Capture},
 			   device) == RealRHI::Result::Success,

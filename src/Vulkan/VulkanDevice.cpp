@@ -2,6 +2,8 @@
 #define VMA_IMPLEMENTATION
 #include "VulkanDevice.h"
 
+#include "Detail/CpuProfiling.h"
+
 #include "VulkanBuffer.h"
 #include "VulkanCommandAllocator.h"
 #include "VulkanCommandList.h"
@@ -154,8 +156,8 @@ namespace RealRHI {
 	}
 
 	Result VulkanDevice::Init(const DeviceDesc& desc) {
+		REALRHI_CPU_ZONE("RealRHI: Initialize device");
 		m_EnableDebug = desc.enableDebug;
-		m_EnableProfiling = desc.enableProfiling;
 		m_ShaderDirectory = desc.shaderDirectory;
 		m_DebugCallback = DefaultDebugCallback;
 		if (desc.debugCallback != nullptr) {
@@ -736,6 +738,7 @@ namespace RealRHI {
 	}
 
 	void VulkanDevice::WaitIdle() {
+		REALRHI_CPU_ZONE("RealRHI: Wait for device idle");
 		for (const auto& [id, queue] : m_Queues) {
 			queue->WaitIdle();
 		}
@@ -779,7 +782,7 @@ namespace RealRHI {
 			.pEnabledValidationFeatures = &syncValidation,
 		};
 
-		if (enableValidationLayer || m_EnableDebug || m_EnableProfiling) {
+		if (enableValidationLayer || m_EnableDebug) {
 			uint32_t count = 0;
 			if (vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr) != VK_SUCCESS) {
 				SendDebugMessage(DebugSeverity::Error,
@@ -1154,8 +1157,6 @@ namespace RealRHI {
 		m_Capabilities.features.wireframe = supportedFeatures.features.fillModeNonSolid == VK_TRUE;
 		m_Capabilities.features.independentBlend = supportedFeatures.features.independentBlend == VK_TRUE;
 		m_Capabilities.features.depthBiasClamp = supportedFeatures.features.depthBiasClamp == VK_TRUE;
-		m_SupportsHostQueryReset = supportedVk12Features.hostQueryReset == VK_TRUE;
-		enabledVk12Features.hostQueryReset = supportedVk12Features.hostQueryReset;
 
 		VkPhysicalDeviceFeatures deviceFeatures{
 			.independentBlend = supportedFeatures.features.independentBlend,
@@ -1317,23 +1318,18 @@ namespace RealRHI {
 	}
 
 	namespace {
-		ResourceStatistics& SelectResource(DeviceStatistics& statistics, VulkanProfiledResource type) {
+		ResourceStatistics& SelectResource(DeviceStatistics& statistics, VulkanResourceKind type) {
 			switch (type) {
-				case VulkanProfiledResource::Buffer:
+				case VulkanResourceKind::Buffer:
 					return statistics.buffers;
-				case VulkanProfiledResource::Texture:
+				case VulkanResourceKind::Texture:
 					return statistics.textures;
-				case VulkanProfiledResource::Pipeline:
+				case VulkanResourceKind::Pipeline:
 					return statistics.pipelines;
 			}
 			return statistics.buffers;
 		}
 
-		void AddTiming(TimingStatistics& timing, double milliseconds) {
-			++timing.sampleCount;
-			timing.totalMilliseconds += milliseconds;
-			timing.maximumMilliseconds = std::max(timing.maximumMilliseconds, milliseconds);
-		}
 	}
 
 	DeviceStatistics VulkanDevice::GetStatistics() const {
@@ -1350,7 +1346,7 @@ namespace RealRHI {
 		return snapshot;
 	}
 
-	void VulkanDevice::RecordResourceCreated(VulkanProfiledResource type, uint64_t bytes) const {
+	void VulkanDevice::RecordResourceCreated(VulkanResourceKind type, uint64_t bytes) const {
 		std::scoped_lock lock(m_StatisticsMutex);
 		auto& usage = SelectResource(m_Statistics, type);
 		++usage.liveCount;
@@ -1359,63 +1355,22 @@ namespace RealRHI {
 		usage.peakBytes = std::max(usage.peakBytes, usage.liveBytes);
 	}
 
-	void VulkanDevice::RecordResourceDestroyed(VulkanProfiledResource type, uint64_t bytes) const {
+	void VulkanDevice::RecordResourceDestroyed(VulkanResourceKind type, uint64_t bytes) const {
 		std::scoped_lock lock(m_StatisticsMutex);
 		auto& usage = SelectResource(m_Statistics, type);
 		--usage.liveCount;
 		usage.liveBytes -= bytes;
 	}
 
-	void VulkanDevice::RecordCpuTiming(VulkanProfiledOperation operation, double milliseconds, uint64_t bytes) const {
+	void VulkanDevice::RecordUploadStaging(uint64_t bytes) const {
 		std::scoped_lock lock(m_StatisticsMutex);
-		switch (operation) {
-			case VulkanProfiledOperation::UploadStaging:
-				AddTiming(m_Statistics.uploadStaging, milliseconds);
-				m_Statistics.stagedUploadBytes += bytes;
-				break;
-			case VulkanProfiledOperation::Submission:
-				AddTiming(m_Statistics.submissions, milliseconds);
-				break;
-			case VulkanProfiledOperation::ResourceStateValidation:
-				AddTiming(m_Statistics.resourceStateValidation, milliseconds);
-				break;
-			case VulkanProfiledOperation::NativeSubmission:
-				AddTiming(m_Statistics.nativeSubmissions, milliseconds);
-				break;
-			case VulkanProfiledOperation::GraphicsPipeline:
-				AddTiming(m_Statistics.graphicsPipelineCreation, milliseconds);
-				break;
-			case VulkanProfiledOperation::ComputePipeline:
-				AddTiming(m_Statistics.computePipelineCreation, milliseconds);
-				break;
-		}
+		m_Statistics.stagedUploadBytes += bytes;
 	}
 
 	void VulkanDevice::RecordUploadBatch(uint64_t bytes) const {
-		if (!m_EnableProfiling) {
-			return;
-		}
-
 		std::scoped_lock lock(m_StatisticsMutex);
 		++m_Statistics.uploadBatchCount;
 		m_Statistics.submittedUploadBytes += bytes;
 	}
 
-	void VulkanDevice::RecordGpuTimings(QueueId queue, std::span<const GpuTimestamp> timestamps) const {
-		std::scoped_lock lock(m_StatisticsMutex);
-		for (size_t index = 1; index < timestamps.size(); ++index) {
-			const auto& begin = timestamps[index - 1];
-			const double milliseconds = timestamps[index].milliseconds - begin.milliseconds;
-			auto found =
-				std::find_if(m_Statistics.gpuTimings.begin(), m_Statistics.gpuTimings.end(), [&](const auto& timing) {
-					return timing.name == begin.name && timing.queue == queue;
-				});
-			if (found == m_Statistics.gpuTimings.end()) {
-				m_Statistics.gpuTimings.push_back({.name = begin.name, .queue = queue});
-				found = m_Statistics.gpuTimings.end() - 1;
-			}
-
-			AddTiming(found->timing, milliseconds);
-		}
-	}
 }

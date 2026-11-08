@@ -24,7 +24,6 @@ namespace {
 				.applicationName = "RealRHI Scene Example",
 				.shaderDirectory = "shaders",
 				.enableDebug = true,
-				.enableProfiling = true,
 				.enableValidationLayers = validation,
 				.debugCallback = Examples::CaptureDebugMessage,
 			};
@@ -91,17 +90,6 @@ namespace {
 		void PrintStatistics() const {
 			const auto statistics = m_Device->GetStatistics();
 			std::cout << std::fixed << std::setprecision(4);
-			std::cout << "CPU timings (includes any enabled validation):\n";
-			PrintTiming("Upload staging", statistics.uploadStaging);
-			PrintTiming("Queue submission", statistics.submissions);
-			PrintTiming("Graphics pipeline creation", statistics.graphicsPipelineCreation);
-
-			std::cout << "GPU intervals:\n";
-			for (const auto& interval : statistics.gpuTimings) {
-				std::cout << "  Queue " << interval.queue.familyIndex << ':' << interval.queue.queueIndex << ' ';
-				PrintTiming(interval.name.c_str(), interval.timing);
-			}
-
 			std::cout << "Uploaded " << statistics.submittedUploadBytes << " bytes in " << statistics.uploadBatchCount
 					  << " batches\n";
 			std::cout << "Buffers: " << statistics.buffers.liveCount << " live, " << statistics.buffers.peakBytes
@@ -113,14 +101,6 @@ namespace {
 					  << statistics.descriptors.resourceCapacityBytes << " capacity bytes\n";
 			std::cout << "Samplers: " << statistics.descriptors.samplerCount << " / "
 					  << statistics.descriptors.samplerCapacity << '\n';
-		}
-
-		static void PrintTiming(const char* name, const TimingStatistics& timing) {
-			if (timing.sampleCount != 0) {
-				std::cout << "  " << name << ": " << timing.sampleCount << " samples, "
-						  << timing.totalMilliseconds / timing.sampleCount << " ms average, "
-						  << timing.maximumMilliseconds << " ms maximum\n";
-			}
 		}
 
 		bool DrawFrame(const FrameContext& frame, float rotation) {

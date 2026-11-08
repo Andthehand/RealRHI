@@ -237,7 +237,6 @@ namespace {
 		Expect(Device::Create({.applicationName = "CacheTests",
 								  .shaderDirectory = s_Directory,
 								  .enableDebug = true,
-								  .enableProfiling = true,
 								  .enableValidationLayers = true,
 								  .debugCallback = Capture},
 				   device) == Result::Success,
@@ -272,9 +271,7 @@ namespace {
 				hit == first,
 			"Device reuses compute pipeline independently of debug name");
 		const auto after = device->GetStatistics();
-		Expect(after.computePipelineCreation.sampleCount == before.computePipelineCreation.sampleCount &&
-				after.pipelines.liveCount == before.pipelines.liveCount,
-			"Cache hits create no native pipeline or timing sample");
+		Expect(after.pipelines.liveCount == before.pipelines.liveCount, "Cache hits create no native pipeline");
 
 		Write("cache_value.slangh", "#define CACHE_VALUE 29\n");
 		Expect(device->CreateShader(ComputeDesc(), repeated) == Result::Success && repeated != shader,

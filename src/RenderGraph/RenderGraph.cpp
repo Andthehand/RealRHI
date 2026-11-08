@@ -1,12 +1,12 @@
 #include "RenderGraph.h"
 
 #include "Device.h"
+#include "Detail/CpuProfiling.h"
 #include "TransientResourcePool.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <chrono>
 #include <functional>
 #include <iterator>
 #include <map>
@@ -345,22 +345,14 @@ namespace RealRHI {
 	Result RenderGraph::AllocateResources(Device& device,
 		std::span<const QueueId> queues,
 		TransientResourcePool* pool,
-		std::span<const uint8_t> poolingAllowed,
-		double* compileMilliseconds) {
+		std::span<const uint8_t> poolingAllowed) {
 		Invalidate();
 		ReleaseCreatedResources();
-		std::chrono::steady_clock::time_point compileStart{};
-		if (compileMilliseconds) {
-			compileStart = std::chrono::steady_clock::now();
-		}
+		REALRHI_CPU_ZONE("RealRHI: Allocate graph resources");
 		std::string error;
 		if (!Compile(error)) {
 			Report(error);
 			return Result::InvalidParameter;
-		}
-		if (compileMilliseconds) {
-			*compileMilliseconds =
-				std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - compileStart).count();
 		}
 
 		BuildAliasPlan(queues, poolingAllowed);
@@ -911,6 +903,7 @@ namespace RealRHI {
 	}
 
 	bool RenderGraph::Compile(std::string& error) {
+		REALRHI_CPU_ZONE("RealRHI: Compile graph");
 		Invalidate();
 		error.clear();
 		if (!ValidateResources(error) || !ValidatePasses(error) || !BuildOrder(error)) {
@@ -1161,6 +1154,8 @@ namespace RealRHI {
 	}
 
 	void RenderGraph::RecordPass(CommandList& commands, size_t position) {
+		REALRHI_CPU_ZONE("RealRHI: Record graph pass");
+		REALRHI_CPU_ZONE_TEXT(m_Plan[position].name.data(), m_Plan[position].name.size());
 		const auto& step = m_Plan[position];
 		commands.ClearResourceDeclarations();
 		for (const auto& use : m_Passes[m_Order[position]].desc.resources) {
@@ -1172,36 +1167,18 @@ namespace RealRHI {
 				commands.RetainResource(resource.buffer.Raw());
 			}
 		}
-		uint32_t timing = UINT32_MAX;
-		if (m_Options.enableGpuTimings) {
-			const auto name = "RenderGraph: " + step.name;
-			timing = commands.BeginGpuTiming(name.c_str());
-		}
 		commands.Barrier(step.barriers);
 		commands.BeginDebugLabel(step.name.c_str());
 		m_Passes[m_Order[position]].record(commands);
 		commands.EndDebugLabel();
 		commands.ClearResourceDeclarations();
 		commands.Barrier(step.afterBarriers);
-		commands.EndGpuTiming(timing);
 	}
 
 	Result RenderGraph::Execute(Device& device,
 		CommandList& commands,
-		TransientResourcePool* pool,
-		RenderGraphExecutionTimings* timings) {
-		using Clock = std::chrono::steady_clock;
-		Clock::time_point start{};
-		if (timings) {
-			*timings = {};
-			start = Clock::now();
-		}
-		auto elapsed = [&] {
-			const auto end = Clock::now();
-			const auto milliseconds = std::chrono::duration<double, std::milli>(end - start).count();
-			start = end;
-			return milliseconds;
-		};
+		TransientResourcePool* pool) {
+		REALRHI_CPU_ZONE("RealRHI: Execute graph");
 		if (m_FrameSwapchain) {
 			Report("Graphs importing a backbuffer require Submit to synchronize and present the acquired image.");
 			return Result::InvalidParameter;
@@ -1211,16 +1188,9 @@ namespace RealRHI {
 			return Result::InvalidParameter;
 		}
 		const std::vector<QueueId> queues(m_Resources.size(), commands.GetQueueId());
-		double* compileMilliseconds = nullptr;
-		if (timings) {
-			compileMilliseconds = &timings->compileMilliseconds;
-		}
-		const Result result = AllocateResources(device, queues, pool, {}, compileMilliseconds);
+		const Result result = AllocateResources(device, queues, pool);
 		if (result != Result::Success) {
 			return result;
-		}
-		if (timings) {
-			timings->allocationMilliseconds = elapsed() - timings->compileMilliseconds;
 		}
 		for (size_t i = 0; i < m_Plan.size(); ++i) {
 			m_Plan[i].nativeQueue = commands.GetQueueId();
@@ -1228,9 +1198,6 @@ namespace RealRHI {
 		}
 		commands.ClearResourceDeclarations();
 		commands.Barrier(m_FinalBarriers);
-		if (timings) {
-			timings->recordingMilliseconds = elapsed();
-		}
 		return Result::Success;
 	}
 	bool RenderGraphSubmission::IsComplete(Device& device) const {
@@ -1548,6 +1515,7 @@ namespace RealRHI {
 		RenderGraphSubmission& outSubmission,
 		TransientResourcePool* pool,
 		std::span<const SubmissionToken> waitFor) {
+		REALRHI_CPU_ZONE("RealRHI: Submit graph");
 		outSubmission.completions.clear();
 		if (m_FrameSwapchain && !m_FrameSwapchain->IsFrameReady(m_Frame)) {
 			Report("Submit requires a current unsubmitted swapchain frame; acquire another frame before rebuilding the "

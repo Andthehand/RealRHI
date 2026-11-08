@@ -1,16 +1,7 @@
 #pragma once
-#include "Queue.h"
-
 #include <cstdint>
-#include <string>
-#include <vector>
 
 namespace RealRHI {
-	struct TimingStatistics {
-		uint64_t sampleCount = 0;
-		double totalMilliseconds = 0;
-		double maximumMilliseconds = 0;
-	};
 
 	struct ResourceStatistics {
 		uint64_t liveCount = 0;
@@ -33,18 +24,6 @@ namespace RealRHI {
 		uint64_t peakSamplerCount = 0;
 	};
 
-	struct GpuTimestamp {
-		std::string name;
-		// Relative to the first marker in this recording, after timestampPeriod conversion.
-		double milliseconds = 0;
-	};
-
-	struct GpuTimingStatistics {
-		std::string name;
-		QueueId queue;
-		TimingStatistics timing;
-	};
-
 	struct DeviceStatistics {
 		// Owned native allocations, including internal staging and descriptor heap buffers.
 		// External swapchain images are excluded. Bytes are VMA allocation sizes.
@@ -53,20 +32,9 @@ namespace RealRHI {
 		ResourceStatistics pipelines;
 		DescriptorStatistics descriptors;
 
-		TimingStatistics uploadStaging;
-		TimingStatistics submissions;
-		// Nested CPU portions of submissions; these are not GPU execution times.
-		// Validation measures resource-log replay after locking, excluding state commit.
-		TimingStatistics resourceStateValidation;
-		TimingStatistics nativeSubmissions;
-		TimingStatistics graphicsPipelineCreation;
-		TimingStatistics computePipelineCreation;
+		// Successful staging includes cancelled batches; submission counts only successful batches.
 		uint64_t stagedUploadBytes = 0;
 		uint64_t submittedUploadBytes = 0;
 		uint64_t uploadBatchCount = 0;
-
-		// Explicit WriteTimestamp markers contribute adjacent intervals. Paired GPU timings
-		// contribute their complete begin/end duration, independently of intervening markers.
-		std::vector<GpuTimingStatistics> gpuTimings;
 	};
 }

@@ -123,7 +123,6 @@ int main() {
 	Check(Device::Create({.applicationName = "Resource tracking CPU benchmarks",
 							.shaderDirectory = ".",
 							.enableDebug = false,
-							.enableProfiling = false,
 							.enableValidationLayers = false,
 							.debugCallback = CaptureDebugMessage}, device) == Result::Success,
 		"Create benchmark device");

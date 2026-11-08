@@ -8,7 +8,7 @@
 #include "FrameContext.h"
 #include "Pipeline.h"
 #include "PipelineDesc.h"
-#include "Profiling.h"
+#include "Statistics.h"
 #include "Queue.h"
 #include "RefCounted.h"
 #include "Result.h"
@@ -48,8 +48,7 @@ namespace RealRHI {
 
 		virtual std::filesystem::path GetShaderDirectory() const = 0;
 		virtual bool IsDebugEnabled() const = 0;
-		virtual bool IsProfilingEnabled() const = 0;
-		// Snapshot only; poll completion tokens or WaitIdle first to include completed GPU intervals.
+		// Resource, descriptor, and upload counters; CPU timing is available through optional Tracy instrumentation.
 		virtual DeviceStatistics GetStatistics() const = 0;
 
 		// Optional debugName strings need only survive the creation call. Names are ignored

@@ -2,7 +2,6 @@
 #include "BarrierDesc.h"
 #include "Buffer.h"
 #include "Pipeline.h"
-#include "Profiling.h"
 #include "RefCounted.h"
 #include "RenderingInfo.h"
 #include "Result.h"
@@ -98,17 +97,6 @@ namespace RealRHI {
 		virtual void BeginDebugLabel(const char* name) = 0;
 		virtual void EndDebugLabel() = 0;
 		virtual void InsertDebugLabel(const char* name) = 0;
-
-		virtual bool SupportsTimestamps() const = 0;
-		// Up to 128 markers per recording. Disabled or unsupported timestamps are a no-op.
-		virtual void WriteTimestamp(const char* name) = 0;
-		// Paired intervals remain accurate with nested/manual markers. UINT32_MAX means
-		// unavailable or out of query capacity; EndGpuTiming accepts it as a no-op.
-		// A successful begin reserves its end marker. Results aggregate in DeviceStatistics.
-		virtual uint32_t BeginGpuTiming(const char* name) = 0;
-		virtual void EndGpuTiming(uint32_t timing) = 0;
-		// Nonblocking; read after submission completion and before Reset/Begin discards the recording.
-		virtual Result GetTimestampResults(std::vector<GpuTimestamp>& outTimestamps) const = 0;
 
 		virtual void BeginRendering(const RenderingInfo& renderingInfo) = 0;
 		virtual void EndRendering() = 0;

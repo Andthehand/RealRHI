@@ -28,7 +28,7 @@ namespace RealRHI {
 		if (!m_IsExternal) {
 			vmaDestroyImage(m_Device->GetAllocator(), m_Image, m_Allocation);
 			if (m_AllocationBytes != 0) {
-				m_Device->RecordResourceDestroyed(VulkanProfiledResource::Texture, m_AllocationBytes);
+				m_Device->RecordResourceDestroyed(VulkanResourceKind::Texture, m_AllocationBytes);
 			}
 		}
 	}
@@ -106,7 +106,7 @@ namespace RealRHI {
 		VmaAllocationInfo allocationInfo{};
 		vmaGetAllocationInfo(m_Device->GetAllocator(), m_Allocation, &allocationInfo);
 		m_AllocationBytes = allocationInfo.size;
-		m_Device->RecordResourceCreated(VulkanProfiledResource::Texture, m_AllocationBytes);
+		m_Device->RecordResourceCreated(VulkanResourceKind::Texture, m_AllocationBytes);
 		const Result nameResult = m_Device->SetDebugName(VK_OBJECT_TYPE_IMAGE, m_Image, desc.debugName);
 		if (nameResult != Result::Success) {
 			return nameResult;

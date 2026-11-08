@@ -9,7 +9,7 @@ namespace RealRHI {
 
 	VulkanBuffer::~VulkanBuffer() {
 		if (m_Buffer != VK_NULL_HANDLE) {
-			m_Device->RecordResourceDestroyed(VulkanProfiledResource::Buffer, m_AllocInfo.size);
+			m_Device->RecordResourceDestroyed(VulkanResourceKind::Buffer, m_AllocInfo.size);
 		}
 		if (m_DescriptorIndex != UINT32_MAX) {
 			m_Device->GetDescriptorManager()->FreeBufferDescriptor(m_DescriptorIndex);
@@ -55,7 +55,7 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
-		m_Device->RecordResourceCreated(VulkanProfiledResource::Buffer, m_AllocInfo.size);
+		m_Device->RecordResourceCreated(VulkanResourceKind::Buffer, m_AllocInfo.size);
 		const Result nameResult = m_Device->SetDebugName(VK_OBJECT_TYPE_BUFFER, m_Buffer, desc.debugName);
 		if (nameResult != Result::Success) {
 			return nameResult;

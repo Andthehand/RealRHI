@@ -1,7 +1,7 @@
 #include "VulkanCommandQueue.h"
 
 #include "VulkanCommandList.h"
-#include "VulkanCpuTimer.h"
+#include "Detail/CpuProfiling.h"
 #include "VulkanDevice.h"
 #include "VulkanResourceStateTransaction.h"
 #include "VulkanSwapchain.h"
@@ -111,7 +111,7 @@ namespace RealRHI {
 		Swapchain* retainedSwapchain,
 		VkCommandBuffer preTransition,
 		VkCommandBuffer postTransition) {
-		const VulkanCpuTimer timer(m_Device);
+		REALRHI_CPU_ZONE("RealRHI: Queue submission");
 
 		std::vector<VkSemaphoreSubmitInfo> waitSemaphoreInfos(waitSemaphores.begin(), waitSemaphores.end());
 		std::unordered_map<VulkanCommandQueue*, uint64_t> dependencyValues;
@@ -195,13 +195,14 @@ namespace RealRHI {
 		const uint64_t submissionValue = m_NextFrameValue;
 		const SubmissionToken submission{.queue = GetQueueId(), .value = submissionValue};
 		VulkanResourceStateTransaction transaction(m_Device, submission, waitSemaphoreInfos);
-		const VulkanCpuTimer validationTimer(m_Device);
-		for (CommandList* commandList : trackedLists) {
-			if (!static_cast<VulkanCommandList*>(commandList)->ReplayResources(transaction)) {
-				return {};
+		{
+			REALRHI_CPU_ZONE("RealRHI: Resource state validation");
+			for (CommandList* commandList : trackedLists) {
+				if (!static_cast<VulkanCommandList*>(commandList)->ReplayResources(transaction)) {
+					return {};
+				}
 			}
 		}
-		validationTimer.Finish(VulkanProfiledOperation::ResourceStateValidation);
 		signalInfos.push_back({
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
 			.semaphore = m_TimelineSemaphore,
@@ -218,16 +219,11 @@ namespace RealRHI {
 			.signalSemaphoreInfoCount = static_cast<uint32_t>(signalInfos.size()),
 			.pSignalSemaphoreInfos = signalInfos.data(),
 		};
-
-		if (m_Device->IsProfilingEnabled()) {
-			for (CommandList* commandList : trackedLists) {
-				static_cast<VulkanCommandList*>(commandList)->PrepareSubmission();
-			}
+		VkResult nativeResult;
+		{
+			REALRHI_CPU_ZONE("RealRHI: Native queue submission");
+			nativeResult = vkQueueSubmit2(m_Queue, 1, &submitInfo2, VK_NULL_HANDLE);
 		}
-
-		const VulkanCpuTimer nativeTimer(m_Device);
-		const auto nativeResult = vkQueueSubmit2(m_Queue, 1, &submitInfo2, VK_NULL_HANDLE);
-		nativeTimer.Finish(VulkanProfiledOperation::NativeSubmission);
 		if (nativeResult != VK_SUCCESS) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
@@ -248,7 +244,6 @@ namespace RealRHI {
 		}
 
 		submitLock.unlock();
-		timer.Finish(VulkanProfiledOperation::Submission);
 
 		return SubmissionToken{.queue = GetQueueId(), .value = submissionValue};
 	}
@@ -290,6 +285,7 @@ namespace RealRHI {
 	}
 
 	void VulkanCommandQueue::Wait(const SubmissionToken& token) {
+		REALRHI_CPU_ZONE("RealRHI: Wait for queue submission");
 		if (!token.IsValid() || token.queue != GetQueueId()) {
 			return;
 		}
@@ -319,6 +315,7 @@ namespace RealRHI {
 	}
 
 	void VulkanCommandQueue::WaitIdle() {
+		REALRHI_CPU_ZONE("RealRHI: Wait for queue idle");
 		uint64_t lastSubmitted = 0;
 		{
 			std::scoped_lock lock(m_SubmissionMutex);

@@ -1,5 +1,7 @@
 #include "VulkanCommandList.h"
 
+#include "Detail/CpuProfiling.h"
+
 #include "VulkanBarrierConversions.h"
 #include "VulkanBuffer.h"
 #include "VulkanCommandQueue.h"
@@ -19,8 +21,7 @@ namespace RealRHI {
 	VulkanCommandList::VulkanCommandList(const VulkanDevice* device, Ref<VulkanCommandAllocator> allocator)
 		: m_Device(device),
 		  m_Allocator(std::move(allocator)),
-		  m_QueueId{m_Allocator->GetQueueFamilyIndex(), 0},
-		  m_Timestamps(device, m_QueueId) { }
+		  m_QueueId{m_Allocator->GetQueueFamilyIndex(), 0} { }
 
 	VulkanCommandList::~VulkanCommandList() {
 		std::scoped_lock lock(m_StateMutex);
@@ -51,10 +52,11 @@ namespace RealRHI {
 			return Result::Failed;
 		}
 
-		return m_Timestamps.Init();
+		return Result::Success;
 	}
 
 	Result VulkanCommandList::Begin() {
+		REALRHI_CPU_ZONE("RealRHI: Begin command list");
 		{
 			std::scoped_lock lock(m_StateMutex);
 			if (m_State == CommandListState::Recording || m_State == CommandListState::Pending) {
@@ -91,6 +93,7 @@ namespace RealRHI {
 	}
 
 	Result VulkanCommandList::End() {
+		REALRHI_CPU_ZONE("RealRHI: End command list");
 		if (m_Rendering) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
@@ -157,6 +160,7 @@ namespace RealRHI {
 	}
 
 	Result VulkanCommandList::Reset() {
+		REALRHI_CPU_ZONE("RealRHI: Reset command list");
 		CommandListState state = GetState();
 		if (state == CommandListState::Pending || state == CommandListState::Recording) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
@@ -203,7 +207,6 @@ namespace RealRHI {
 		m_ShaderBuffers.clear();
 		m_VertexBuffers.clear();
 		m_IndexBuffer = nullptr;
-		m_Timestamps.Reset();
 	}
 
 	bool VulkanCommandList::ValidateAttachmentView(const VulkanTextureView* view,
@@ -1222,45 +1225,6 @@ namespace RealRHI {
 		vkCmdPipelineBarrier2(m_CommandBuffer, &dependencyInfo);
 	}
 
-	void VulkanCommandList::WriteTimestamp(const char* name) {
-		if (!SupportsTimestamps()) {
-			return;
-		}
-		if (GetState() != CommandListState::Recording) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"WriteTimestamp: Requires recording, a nonempty name, and fewer than 128 recorded markers.");
-			return;
-		}
-		m_Timestamps.WriteTimestamp(m_CommandBuffer, name);
-	}
-
-	uint32_t VulkanCommandList::BeginGpuTiming(const char* name) {
-		if (!SupportsTimestamps()) {
-			return UINT32_MAX;
-		}
-		if (GetState() != CommandListState::Recording) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"BeginGpuTiming: Requires an active recording and a nonempty name.");
-			return UINT32_MAX;
-		}
-		return m_Timestamps.BeginGpuTiming(m_CommandBuffer, name);
-	}
-
-	void VulkanCommandList::EndGpuTiming(uint32_t timing) {
-		if (timing == UINT32_MAX) {
-			return;
-		}
-		if (GetState() != CommandListState::Recording) {
-			m_Device->SendDebugMessage(DebugSeverity::Error,
-				DebugMessageType::General,
-				"EndGpuTiming: Requires an active recording and an open interval from this recording.");
-			return;
-		}
-		m_Timestamps.EndGpuTiming(m_CommandBuffer, timing);
-	}
-
 	bool VulkanCommandList::ReplayResources(VulkanResourceStateTransaction& transaction) const {
 		return m_ResourceTracker.Replay(transaction);
 	}
@@ -1271,14 +1235,8 @@ namespace RealRHI {
 		return m_ResourceTracker.GetExpectedLayout(texture, mip, layer);
 	}
 
-	void VulkanCommandList::PrepareSubmission() {
-		std::scoped_lock lock(m_StateMutex);
-		m_Timestamps.PrepareSubmission();
-	}
-
 	void VulkanCommandList::OnSubmitted() {
 		std::scoped_lock lock(m_StateMutex);
-		m_Timestamps.OnSubmitted();
 		m_State = CommandListState::Pending;
 	}
 
@@ -1287,23 +1245,7 @@ namespace RealRHI {
 		if (m_State != CommandListState::Pending) {
 			return;
 		}
-		if (m_Device->IsProfilingEnabled()) {
-			// Collect before publishing Executable: another thread may immediately recycle this recording.
-			m_Timestamps.OnCompleted();
-		}
 		m_State = CommandListState::Executable;
-	}
-
-	Result VulkanCommandList::GetTimestampResults(std::vector<GpuTimestamp>& outTimestamps) const {
-		std::scoped_lock lock(m_StateMutex);
-		outTimestamps.clear();
-		if (!SupportsTimestamps()) {
-			return Result::Success;
-		}
-		if (m_State != CommandListState::Executable) {
-			return Result::NotReady;
-		}
-		return m_Timestamps.GetResults(outTimestamps);
 	}
 
 	bool VulkanCommandList::ValidateDebugLabel(const char* operation, const char* name) const {

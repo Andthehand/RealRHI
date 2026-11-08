@@ -24,18 +24,10 @@ namespace RealRHI {
 	class VulkanDescriptorManager;
 	class VulkanCommandQueue;
 
-	enum class VulkanProfiledResource {
+	enum class VulkanResourceKind {
 		Buffer,
 		Texture,
 		Pipeline
-	};
-	enum class VulkanProfiledOperation {
-		UploadStaging,
-		Submission,
-		ResourceStateValidation,
-		NativeSubmission,
-		GraphicsPipeline,
-		ComputePipeline
 	};
 
 	struct QueueFamilyIndices {
@@ -75,9 +67,7 @@ namespace RealRHI {
 
 		std::filesystem::path GetShaderDirectory() const override { return m_ShaderDirectory; }
 		bool IsDebugEnabled() const override { return m_EnableDebug; }
-		bool IsProfilingEnabled() const override { return m_EnableProfiling; }
 		bool SupportsDebugLabels() const { return m_DebugLabelsEnabled; }
-		bool SupportsHostQueryReset() const { return m_SupportsHostQueryReset; }
 
 		template <typename Handle>
 		Result SetDebugName(VkObjectType type, Handle handle, const char* name) const {
@@ -97,10 +87,9 @@ namespace RealRHI {
 		}
 
 		DeviceStatistics GetStatistics() const override;
-		void RecordResourceCreated(VulkanProfiledResource type, uint64_t bytes = 0) const;
-		void RecordResourceDestroyed(VulkanProfiledResource type, uint64_t bytes = 0) const;
-		void RecordCpuTiming(VulkanProfiledOperation operation, double milliseconds, uint64_t bytes = 0) const;
-		void RecordGpuTimings(QueueId queue, std::span<const GpuTimestamp> timestamps) const;
+		void RecordResourceCreated(VulkanResourceKind type, uint64_t bytes = 0) const;
+		void RecordResourceDestroyed(VulkanResourceKind type, uint64_t bytes = 0) const;
+		void RecordUploadStaging(uint64_t bytes) const;
 		void RecordUploadBatch(uint64_t bytes) const;
 		void SendDebugMessage(DebugSeverity severity, DebugMessageType type, const char* message) const {
 			m_DebugCallback({.severity = severity, .type = type, .message = message});
@@ -195,9 +184,7 @@ namespace RealRHI {
 		std::filesystem::path m_ShaderDirectory;
 		DebugCallback m_DebugCallback;
 		bool m_EnableDebug;
-		bool m_EnableProfiling = false;
 		bool m_DebugLabelsEnabled = false;
-		bool m_SupportsHostQueryReset = false;
 
 		mutable std::mutex m_StatisticsMutex;
 		mutable DeviceStatistics m_Statistics;

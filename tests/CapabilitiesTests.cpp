@@ -199,7 +199,6 @@ int main() {
 	std::unique_ptr<RealRHI::Device> device;
 	Expect(RealRHI::Device::Create({.applicationName = "CapabilitiesTests",
 											   .enableDebug = true,
-											   .enableProfiling = true,
 											   .enableValidationLayers = true,
 											   .debugCallback = Capture},
 			   device) == RealRHI::Result::Success,

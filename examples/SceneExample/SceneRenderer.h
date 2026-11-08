@@ -47,8 +47,7 @@ namespace RealRHI::Examples {
 			TextureView* output,
 			float rotation,
 			const UploadSubmission& pendingUpload,
-			bool shadowsEnabled = true,
-			RenderGraphExecutionTimings* timings = nullptr);
+			bool shadowsEnabled = true);
 
 		Result Submit(Swapchain& swapchain,
 			const FrameContext& frame,

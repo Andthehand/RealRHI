@@ -602,7 +602,6 @@ int main() {
 	std::unique_ptr<RealRHI::Device> device;
 	Expect(RealRHI::Device::Create({.applicationName = "TransientResourcePoolTests",
 										   .enableDebug = true,
-										   .enableProfiling = false,
 										   .enableValidationLayers = true,
 										   .debugCallback = Capture},
 			   device) == RealRHI::Result::Success,

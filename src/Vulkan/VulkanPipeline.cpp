@@ -1,7 +1,7 @@
 #include "VulkanPipeline.h"
 
 #include "VulkanConversions.h"
-#include "VulkanCpuTimer.h"
+#include "Detail/CpuProfiling.h"
 #include "VulkanShader.h"
 
 #include <algorithm>
@@ -15,7 +15,7 @@ namespace RealRHI {
 	VulkanPipeline::~VulkanPipeline() {
 		vkDestroyPipeline(m_Device->GetDevice(), m_Pipeline, nullptr);
 		if (m_BindPoint != VK_PIPELINE_BIND_POINT_MAX_ENUM) {
-			m_Device->RecordResourceDestroyed(VulkanProfiledResource::Pipeline);
+			m_Device->RecordResourceDestroyed(VulkanResourceKind::Pipeline);
 		}
 	}
 
@@ -46,7 +46,7 @@ namespace RealRHI {
 	}
 
 	Result VulkanPipeline::InitCompute(const ComputePipelineDesc& desc) {
-		const VulkanCpuTimer timer(m_Device);
+		REALRHI_CPU_ZONE("RealRHI: Create compute pipeline");
 		const auto* shader = static_cast<const VulkanShader*>(desc.shader);
 		if (shader == nullptr) {
 			return Result::Failed;
@@ -85,12 +85,11 @@ namespace RealRHI {
 		}
 
 		m_BindPoint = VK_PIPELINE_BIND_POINT_COMPUTE;
-		m_Device->RecordResourceCreated(VulkanProfiledResource::Pipeline);
+		m_Device->RecordResourceCreated(VulkanResourceKind::Pipeline);
 		const Result nameResult = m_Device->SetDebugName(VK_OBJECT_TYPE_PIPELINE, m_Pipeline, desc.debugName);
 		if (nameResult != Result::Success) {
 			return nameResult;
 		}
-		timer.Finish(VulkanProfiledOperation::ComputePipeline);
 
 		return Result::Success;
 	}
@@ -244,7 +243,7 @@ namespace RealRHI {
 	}
 
 	Result VulkanPipeline::InitGraphics(const PipelineDesc& desc) {
-		const VulkanCpuTimer timer(m_Device);
+		REALRHI_CPU_ZONE("RealRHI: Create graphics pipeline");
 		const auto* shader = static_cast<const VulkanShader*>(desc.shader);
 		if (shader == nullptr || (desc.rasterState.fillMode == FillMode::Wireframe && !m_Device->SupportsWireframe())) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
@@ -509,12 +508,11 @@ namespace RealRHI {
 		m_StencilWrites = desc.stencilState.enable &&
 			(writesStencil(desc.stencilState.front) || writesStencil(desc.stencilState.back));
 		m_BindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-		m_Device->RecordResourceCreated(VulkanProfiledResource::Pipeline);
+		m_Device->RecordResourceCreated(VulkanResourceKind::Pipeline);
 		const Result nameResult = m_Device->SetDebugName(VK_OBJECT_TYPE_PIPELINE, m_Pipeline, desc.debugName);
 		if (nameResult != Result::Success) {
 			return nameResult;
 		}
-		timer.Finish(VulkanProfiledOperation::GraphicsPipeline);
 
 		return Result::Success;
 	}

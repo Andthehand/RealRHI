@@ -232,7 +232,6 @@ int main() {
 				   .applicationName = "DrawTests",
 				   .shaderDirectory = REALRHI_TEST_SHADER_DIRECTORY,
 				   .enableDebug = true,
-				   .enableProfiling = false,
 				   .enableValidationLayers = true,
 				   .debugCallback = CaptureDebugMessage,
 			   },

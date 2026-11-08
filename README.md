@@ -60,7 +60,52 @@ Graph scheduling indexes users by resource and groups readers by layout, avoidin
 
 The device must outlive its resources, queues, graphs holding resources, and pools. Command recordings retain referenced objects until reset; GPU completion makes a recording reusable but does not release those references. Deferred deletion processes a snapshot with completion queries and destruction callbacks outside its lock. Cleanup enqueued during processing remains available for a later call.
 
-Within the Vulkan backend, `VulkanCommandList` owns command recording, binding state, and retained resources. `VulkanCommandTimestamps` owns timestamp queries and results; `VulkanCommandResourceTracker` owns recording-local layouts and the ordered resource log. A queue batch replays every list into one `VulkanResourceStateTransaction`, then commits submitted resource state only after native submission succeeds. The queue retains the existing submission/device lock ordering, while the command list collects timing results before publishing completion and releases retained resources outside its state lock during reset.
+Within the Vulkan backend, `VulkanCommandList` owns command recording, binding state, and retained resources. `VulkanCommandResourceTracker` owns recording-local layouts and the ordered resource log. A queue batch replays every list into one `VulkanResourceStateTransaction`, then commits submitted resource state only after native submission succeeds. The queue retains the existing submission/device lock ordering, while the command list releases retained resources outside its state lock during reset.
+
+### Optional Tracy CPU profiling
+
+CPU profiling is enabled at build time with `REALRHI_ENABLE_TRACY=ON` (default `OFF`).
+RealRHI reuses an existing `Tracy::TracyClient` target, or calls
+`find_package(Tracy CONFIG REQUIRED)` to use an installed package. The application
+owns the Tracy version, client lifetime, connection settings, and frame markers.
+RealRHI does not fetch Tracy or change its options. Build the shared client with
+`TRACY_ENABLE=ON`; a disabled client produces a clear compilation error when RealRHI
+profiling is requested.
+
+For an application that includes both projects from source:
+
+```cmake
+set(TRACY_ENABLE ON CACHE BOOL "Enable Tracy")
+set(TRACY_ON_DEMAND ON CACHE BOOL "Collect only while connected") # optional
+add_subdirectory(external/tracy)
+set(REALRHI_ENABLE_TRACY ON CACHE BOOL "Profile RealRHI CPU work")
+add_subdirectory(external/RealRHI)
+target_link_libraries(MyApplication PRIVATE RealRHI Tracy::TracyClient)
+```
+
+For a standalone RealRHI build with an installed, enabled Tracy package, configure
+with `-DREALRHI_ENABLE_TRACY=ON -DCMAKE_PREFIX_PATH=<Tracy-install-prefix>`.
+Use a matching Tracy profiler to capture application and RealRHI zones together.
+Zones cover shader compilation, pipeline creation, uploads, command list lifecycle,
+queue submission (with nested resource validation and native submission), waits,
+and render graph compilation/allocation/execution. Graph pass CPU zones carry the
+pass name as zone text. Failed calls and early returns also close their CPU zones.
+Both `RealRHIGraph` and the Vulkan backend are instrumented; graph-only builds can
+use Tracy without a Vulkan SDK.
+
+When disabled, RealRHI's instrumentation requires no Tracy headers, client, or
+profiling clock reads, even if the application uses Tracy itself. Public RHI headers
+do not expose Tracy types. `Device::GetStatistics()` still reports resource,
+descriptor, and upload byte/batch counters from `Statistics.h`, independently of
+Tracy. Staged bytes include cancelled batches; submitted bytes count successful
+batches only.
+
+This replaces the former profiling API: `DeviceDesc::enableProfiling`,
+`Device::IsProfilingEnabled()`, CPU timing statistics, `RenderGraphExecutionTimings`,
+and command list GPU timestamp/timing methods have been removed. `Execute` no longer
+takes a timings output, and `RenderGraphOptions::enableGpuTimings` is removed.
+GPU profiling is not implemented. Debug labels and object names remain available
+through the existing debug settings.
 
 `VulkanTransferValidation` prepares native copy descriptions before recording or retaining copy resources. Buffer/image copies share checks for mip and layer bounds, extents, alignment, and capacity. Copy recording and upload batches use the same overflow-safe packed byte calculation; mip generation and uploads share final-layout usage checks. Copies require an active recording outside rendering. Buffer self-copies require disjoint byte ranges. Readback retains its RGBA8_UNorm restriction; texture-to-texture copies accept matching supported color formats.
 
@@ -258,11 +303,11 @@ Enable the optional benchmarks in a release build:
 ```powershell
 cmake --preset windows-release -DREALRHI_BUILD_BENCHMARKS=ON
 cmake --build --preset windows-release --target ResourceTrackingBenchmarks ResourceTrackingPatternBenchmarks
-./out/build/windows-release/ResourceTrackingBenchmarks.exe > resource-tracking.csv
-./out/build/windows-release/ResourceTrackingPatternBenchmarks.exe > resource-tracking-patterns.csv
+./out/build/windows-release/benchmarks/ResourceTrackingBenchmarks.exe > resource-tracking.csv
+./out/build/windows-release/benchmarks/ResourceTrackingPatternBenchmarks.exe > resource-tracking-patterns.csv
 ```
 
-Both executables require a Vulkan device and report CPU timings in milliseconds: one warmup followed by seven measured samples, with median, minimum, and maximum. Validation and profiling are disabled. Native allocations and GPU execution are outside the timed sections; these measurements describe tracking overhead, not rendering performance.
+Both executables require a Vulkan device and report CPU timings in milliseconds: one warmup followed by seven measured samples, with median, minimum, and maximum. Validation is disabled; use the default `REALRHI_ENABLE_TRACY=OFF` build for measurements without profiler overhead. Native allocations and GPU execution are outside the timed sections; these measurements describe tracking overhead, not rendering performance.
 
 The pattern benchmark includes already-fragmented submitted buffer state. Setup submits barriers for alternating 16-byte regions, leaving the gaps unclaimed so adjacent states cannot merge, even on devices with one queue family. Each measured transaction validates either one region near the end or the whole buffer, then discards its prediction. Timings include locking, copying the submitted range vector, validation and merging, and transaction destruction. Setup and GPU waits are excluded. The `tracked_ranges` column identifies the initial range count for these cases; zero indicates other workloads where this count is not reported.
 
@@ -318,14 +363,11 @@ sampler objects; the heap can still fill when too many distinct sampler settings
 live at once.
 
 CSV timings are CPU milliseconds per frame. `record_total_ms` includes graph building,
-compilation, allocation, recording, and destruction. The three graph columns separate
-compilation, allocation/pool lookup/alias planning/barrier resolution, and pass recording.
-`queue_submit_ms` covers render and streaming submissions; `state_validate_ms` measures
-resource-log replay after the queue/device locks, excluding commit, and `native_submit_ms`
-measures the native queue call. Those two columns are nested within submission time.
+compilation, allocation, recording, and destruction. Detailed graph and queue phase
+timings are available in optional Tracy captures rather than CSV columns.
 `stream_cpu_ms` includes upload staging and submission, so categories must not be summed.
-`frame_cpu_ms` excludes the separately reported GPU completion wait. Profiling and GPU
-timestamps are enabled equally for all workloads.
+`frame_cpu_ms` excludes the separately reported GPU completion wait. Use the same
+Tracy build setting for all compared workloads; GPU timestamps are not collected.
 
 Live and peak memory columns report native VMA allocation sizes, including internal
 descriptor heaps and staging. Peaks include initialization; pool memory is already part
@@ -333,11 +375,6 @@ of the buffer/texture totals. These do not measure process RAM or all driver mem
 Frames wait for GPU completion before the next frame can overwrite assets. This makes
 the benchmark suitable for CPU/resource scaling comparisons; it does not measure
 presentation, frames-in-flight overlap, or establish GPU/FPS speedup.
-
-`RenderGraph::Execute` accepts an optional `RenderGraphExecutionTimings*` after its pool
-argument. It measures the execution phases without enabling device profiling. Passing
-no pointer avoids its clock reads. Device profiling exposes `resourceStateValidation`
-and `nativeSubmissions` alongside the existing inclusive `submissions` statistics.
 
 The initial baseline uses MSVC RelWithDebInfo and an NVIDIA GeForce RTX 4060 Laptop
 GPU. Values below average the three run means (900 measured frames per row). Raw

@@ -38,10 +38,6 @@ namespace RealRHI {
 
 	struct RenderGraphOptions {
 		bool cullUnusedPasses = false;
-		// Best effort paired pass timings, including per-pass barriers. Requires device
-		// profiling; unsupported/full query pools skip timing without skipping work.
-		// DeviceStatistics reports these intervals as "RenderGraph: <pass name>".
-		bool enableGpuTimings = false;
 		// Reuse an identical physical resource for disjoint logical lifetimes on one
 		// native queue. Exports, imports, host-visible buffers, and cross-queue resources
 		// stay distinct. A retained Ref preserves allocation lifetime, not old contents:
@@ -127,13 +123,6 @@ namespace RealRHI {
 		BarrierDesc presentationBarriers;
 	};
 
-	// Optional CPU measurements for Execute. Recording includes pass callbacks and barriers.
-	struct RenderGraphExecutionTimings {
-		double compileMilliseconds = 0;
-		double allocationMilliseconds = 0;
-		double recordingMilliseconds = 0;
-	};
-
 	struct RenderGraphSubmission {
 		// One token per successful batch, in diagnostic batch order, including the
 		// queued prefix when Submit fails. A batch may contain several passes.
@@ -216,8 +205,7 @@ namespace RealRHI {
 		// Validation/allocation failures return before recording any passes.
 		Result Execute(Device& device,
 			CommandList& commands,
-			TransientResourcePool* pool = nullptr,
-			RenderGraphExecutionTimings* timings = nullptr);
+			TransientResourcePool* pool = nullptr);
 		// Batch consecutive passes sharing a native queue when no new cross-queue wait
 		// or earlier cross-queue signal is needed. Record all lists before submitting any work.
 		// External waits apply to all submissions; matching release/acquire pairs handle exclusive ownership.
@@ -281,8 +269,7 @@ namespace RealRHI {
 		Result AllocateResources(Device& device,
 			std::span<const QueueId> queues,
 			TransientResourcePool* pool,
-			std::span<const uint8_t> poolingAllowed = {},
-			double* compileMilliseconds = nullptr);
+			std::span<const uint8_t> poolingAllowed = {});
 		bool IsValid(RenderGraphResource resource) const;
 		bool IsValid(RenderGraphPass pass) const;
 		bool ValidateResources(std::string& error) const;

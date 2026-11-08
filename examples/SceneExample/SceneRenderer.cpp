@@ -581,15 +581,14 @@ namespace RealRHI::Examples {
 		TextureView* output,
 		float rotation,
 		const UploadSubmission& pendingUpload,
-		bool shadowsEnabled,
-		RenderGraphExecutionTimings* timings) {
+		bool shadowsEnabled) {
 		RenderGraph graph;
 		const auto built = BuildGraph(graph, frameIndex, output, rotation, pendingUpload, shadowsEnabled);
 		if (built != Result::Success) {
 			return built;
 		}
 		commands.BeginDebugLabel("Scene frame");
-		const auto result = graph.Execute(*m_Device, commands, m_TransientResources.get(), timings);
+		const auto result = graph.Execute(*m_Device, commands, m_TransientResources.get());
 		commands.EndDebugLabel();
 		return result;
 	}
@@ -638,7 +637,7 @@ namespace RealRHI::Examples {
 			PipelineStage::EarlyFragmentTests | PipelineStage::LateFragmentTests,
 			ResourceAccess::DepthStencilRead | ResourceAccess::DepthStencilWrite
 		};
-		graph.SetOptions({.cullUnusedPasses = true, .enableGpuTimings = true});
+		graph.SetOptions({.cullUnusedPasses = true});
 		const auto color = graph.CreateTexture(
 			{.width = size.width,
 				.height = size.height,

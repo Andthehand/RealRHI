@@ -110,10 +110,6 @@ namespace {
 		double streamCpu = 0;
 		double recordCpu = 0;
 		double gpuWait = 0;
-		RenderGraphExecutionTimings graph;
-		double submitCpu = 0;
-		double validationCpu = 0;
-		double nativeSubmitCpu = 0;
 		uint64_t uploadedBytes = 0;
 		DeviceStatistics memory;
 		TransientResourcePoolStatistics pool;
@@ -131,7 +127,6 @@ namespace {
 			if (!Check(Device::Create({.applicationName = "Scene resource benchmark",
 										  .shaderDirectory = REALRHI_SCENE_SHADER_DIRECTORY,
 										  .enableDebug = true,
-										  .enableProfiling = true,
 										  .enableValidationLayers = options.validation,
 										  .debugCallback = Examples::CaptureDebugMessage},
 						   m_Device),
@@ -176,11 +171,6 @@ namespace {
 				// RecordAndSubmit reports its wait separately; streaming uses the same native graphics queue.
 				sample.frameCpu = Elapsed(start) - sample.gpuWait;
 				const auto after = m_Device->GetStatistics();
-				sample.submitCpu = after.submissions.totalMilliseconds - before.submissions.totalMilliseconds;
-				sample.validationCpu =
-					after.resourceStateValidation.totalMilliseconds - before.resourceStateValidation.totalMilliseconds;
-				sample.nativeSubmitCpu =
-					after.nativeSubmissions.totalMilliseconds - before.nativeSubmissions.totalMilliseconds;
 				sample.uploadedBytes = after.submittedUploadBytes - before.submittedUploadBytes;
 				sample.memory = after;
 				sample.pool = m_Renderer.GetPoolStatistics();
@@ -213,12 +203,7 @@ namespace {
 					.oldLayout = TextureLayout::Undefined,
 					.newLayout = TextureLayout::ColorAttachment});
 			m_Commands->Barrier(barriers);
-			RenderGraphExecutionTimings* timings = nullptr;
-			if (sample) {
-				timings = &sample->graph;
-			}
-			if (!Check(
-					m_Renderer.Record(*m_Commands, 0, m_Output->GetTextureView(), 0.3f, initialUpload, true, timings),
+			if (!Check(m_Renderer.Record(*m_Commands, 0, m_Output->GetTextureView(), 0.3f, initialUpload, true),
 					"scene recording") ||
 				!Check(m_Commands->End(), "recording end")) {
 				return false;
@@ -294,8 +279,7 @@ namespace {
 				return false;
 			}
 			csv << "frame,mode,objects,asset_sets,streamed_assets,validation,frame_cpu_ms,stream_cpu_ms,record_total_"
-				   "ms,graph_compile_ms,graph_allocate_ms,graph_record_ms,queue_submit_ms,state_validate_ms,native_"
-				   "submit_ms,gpu_wait_ms,uploaded_bytes,buffer_count,buffer_live_bytes,buffer_peak_bytes,texture_"
+				   "ms,gpu_wait_ms,uploaded_bytes,buffer_count,buffer_live_bytes,buffer_peak_bytes,texture_"
 				   "count,texture_live_bytes,texture_peak_bytes,descriptor_live_bytes,descriptor_reserved_bytes,pool_"
 				   "resident_bytes,pool_peak_bytes,sampler_count,sampler_capacity\n";
 			csv << std::fixed << std::setprecision(6);
@@ -310,15 +294,13 @@ namespace {
 				}
 				csv << i << ',' << mode << ',' << options.objects << ',' << assets << ',' << options.stream << ','
 					<< options.validation << ',' << s.frameCpu << ',' << s.streamCpu << ',' << s.recordCpu << ','
-					<< s.graph.compileMilliseconds << ',' << s.graph.allocationMilliseconds << ','
-					<< s.graph.recordingMilliseconds << ',' << s.submitCpu << ',' << s.validationCpu << ','
-					<< s.nativeSubmitCpu << ',' << s.gpuWait << ',' << s.uploadedBytes << ','
-					<< s.memory.buffers.liveCount << ',' << s.memory.buffers.liveBytes << ','
-					<< s.memory.buffers.peakBytes << ',' << s.memory.textures.liveCount << ','
-					<< s.memory.textures.liveBytes << ',' << s.memory.textures.peakBytes << ','
-					<< s.memory.descriptors.resourceBytes << ',' << s.memory.descriptors.resourceReservedBytes << ','
-					<< s.pool.residentBytes << ',' << s.pool.peakResidentBytes << ','
-					<< s.memory.descriptors.samplerCount << ',' << s.memory.descriptors.samplerCapacity << '\n';
+					<< s.gpuWait << ',' << s.uploadedBytes << ',' << s.memory.buffers.liveCount << ','
+					<< s.memory.buffers.liveBytes << ',' << s.memory.buffers.peakBytes << ','
+					<< s.memory.textures.liveCount << ',' << s.memory.textures.liveBytes << ','
+					<< s.memory.textures.peakBytes << ',' << s.memory.descriptors.resourceBytes << ','
+					<< s.memory.descriptors.resourceReservedBytes << ',' << s.pool.residentBytes << ','
+					<< s.pool.peakResidentBytes << ',' << s.memory.descriptors.samplerCount << ','
+					<< s.memory.descriptors.samplerCapacity << '\n';
 				frameTimes.push_back(s.frameCpu);
 			}
 			csv.flush();
@@ -388,24 +370,6 @@ namespace {
 					   return s.recordCpu;
 				   })
 				<< ',' << mean([](const Sample& s) {
-					   return s.graph.compileMilliseconds;
-				   })
-				<< ',' << mean([](const Sample& s) {
-					   return s.graph.allocationMilliseconds;
-				   })
-				<< ',' << mean([](const Sample& s) {
-					   return s.graph.recordingMilliseconds;
-				   })
-				<< ',' << mean([](const Sample& s) {
-					   return s.submitCpu;
-				   })
-				<< ',' << mean([](const Sample& s) {
-					   return s.validationCpu;
-				   })
-				<< ',' << mean([](const Sample& s) {
-					   return s.nativeSubmitCpu;
-				   })
-				<< ',' << mean([](const Sample& s) {
 					   return s.gpuWait;
 				   })
 				<< ',' << last.uploadedBytes << ',' << last.memory.buffers.liveCount << ','
@@ -440,19 +404,19 @@ namespace {
 		for (auto count : counts) {
 			methodology << ' ' << count;
 		}
-		methodology << "\n960x640 offscreen; shadows, profiling and GPU timestamps enabled.\n"
-					<< "Separate validation probes run first. Timed workloads rotate shared/unique/streaming order per "
-					   "repeat.\n"
-					<< "One bootstrap frame precedes warmup; fixed rotation; streaming overwrites vertex buffers and "
-					   "32x32 textures.\n"
-					<< "Each frame waits for GPU completion; CPU frame time excludes the separately reported wait.\n"
-					<< "record_total includes graph construction/destruction and compilation/allocation/recording.\n"
-					<< "state_validate/native_submit are nested in queue_submit; stream_cpu includes upload "
-					   "submission. Do not sum overlapping categories.\n"
-					<< "Memory uses native VMA allocation sizes including descriptors/staging, not process RAM or all "
-					   "driver allocations. Peaks include initialization.\n"
-					<< "Pool bytes are included in buffer/texture totals. Serialized offscreen CPU times do not "
-					   "establish FPS/GPU speedup.\n";
+		methodology
+			<< "\n960x640 offscreen; shadows enabled; optional Tracy CPU profiling follows the build configuration.\n"
+			<< "Separate validation probes run first. Timed workloads rotate shared/unique/streaming order per "
+			   "repeat.\n"
+			<< "One bootstrap frame precedes warmup; fixed rotation; streaming overwrites vertex buffers and "
+			   "32x32 textures.\n"
+			<< "Each frame waits for GPU completion; CPU frame time excludes the separately reported wait.\n"
+			<< "record_total includes graph construction/destruction and compilation/allocation/recording.\n"
+			<< "stream_cpu includes upload submission. Do not sum overlapping categories.\n"
+			<< "Memory uses native VMA allocation sizes including descriptors/staging, not process RAM or all "
+			   "driver allocations. Peaks include initialization.\n"
+			<< "Pool bytes are included in buffer/texture totals. Serialized offscreen CPU times do not "
+			   "establish FPS/GPU speedup.\n";
 		methodology.flush();
 		std::vector<Sample> samples;
 		std::string deviceName;
@@ -478,8 +442,6 @@ namespace {
 		}
 		methodology << "Device: " << deviceName << '\n';
 		summary << "mode,objects,run,frames,cpu_median_ms,cpu_p95_ms,cpu_mean_ms,stream_mean_ms,record_total_mean_ms,"
-				   "compile_mean_ms,allocate_mean_ms,record_mean_ms,submit_mean_ms,state_validate_mean_ms,native_"
-				   "submit_mean_ms,"
 				   "gpu_wait_mean_ms,uploaded_bytes_per_frame,buffer_count,texture_count,buffer_live_bytes,texture_"
 				   "live_bytes,"
 				   "buffer_peak_bytes,texture_peak_bytes,descriptor_live_bytes,descriptor_reserved_bytes,pool_resident_"

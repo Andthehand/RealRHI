@@ -4,7 +4,6 @@
 #include <volk.h>
 
 #include <array>
-#include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -21,8 +20,6 @@ namespace {
 	uint32_t s_BeginLabels = 0;
 	uint32_t s_EndLabels = 0;
 	uint32_t s_InsertLabels = 0;
-	PFN_vkGetPhysicalDeviceQueueFamilyProperties s_GetQueueProperties = nullptr;
-	uint32_t s_TestTimestampBits = 0;
 
 	struct NamedObject {
 		VkObjectType type;
@@ -81,87 +78,11 @@ namespace {
 		s_InsertLabel(commands, label);
 	}
 
-	VKAPI_ATTR VkResult VKAPI_CALL FailSubmit(VkQueue, uint32_t, const VkSubmitInfo2*, VkFence) {
-		return VK_ERROR_OUT_OF_HOST_MEMORY;
-	}
-
 	VKAPI_ATTR VkResult VKAPI_CALL FailDescriptorWrite(VkDevice,
 		uint32_t,
 		const VkResourceDescriptorInfoEXT*,
 		const VkHostAddressRangeEXT*) {
 		return VK_ERROR_OUT_OF_HOST_MEMORY;
-	}
-
-	VKAPI_ATTR void VKAPI_CALL OverrideTimestampBits(VkPhysicalDevice device,
-		uint32_t* count,
-		VkQueueFamilyProperties* properties) {
-		s_GetQueueProperties(device, count, properties);
-		if (properties != nullptr) {
-			for (uint32_t index = 0; index < *count; ++index) {
-				properties[index].timestampValidBits = s_TestTimestampBits;
-			}
-		}
-	}
-
-	VKAPI_ATTR VkResult VKAPI_CALL WrappedQueryResults(VkDevice,
-		VkQueryPool,
-		uint32_t,
-		uint32_t count,
-		size_t,
-		void* data,
-		VkDeviceSize stride,
-		VkQueryResultFlags flags) {
-		Expect(count == 2 && flags == VK_QUERY_RESULT_64_BIT, "Read two completed 64-bit timestamps without waiting");
-		uint64_t maximum = UINT64_MAX;
-		if (s_TestTimestampBits < 64) {
-			maximum = (uint64_t{1} << s_TestTimestampBits) - 1;
-		}
-		*static_cast<uint64_t*>(data) = maximum - 5;
-		*reinterpret_cast<uint64_t*>(static_cast<uint8_t*>(data) + stride) = 5;
-		return VK_SUCCESS;
-	}
-
-	void TestTimestampWraparound(Device& device) {
-		VkPhysicalDeviceProperties properties{};
-		vkGetPhysicalDeviceProperties(static_cast<VulkanDevice&>(device).GetPhysicalDevice(), &properties);
-		for (uint32_t bits : {0u, 8u, 64u}) {
-			Ref<CommandAllocator> allocator;
-			Ref<CommandList> commands;
-			Expect(device.CreateCommandAllocator(QueueType::Graphics, allocator) == Result::Success,
-				"Create wraparound allocator");
-			s_GetQueueProperties = vkGetPhysicalDeviceQueueFamilyProperties;
-			s_TestTimestampBits = bits;
-			vkGetPhysicalDeviceQueueFamilyProperties = OverrideTimestampBits;
-			const Result creation = device.CreateCommandList(allocator.Raw(), commands);
-			vkGetPhysicalDeviceQueueFamilyProperties = s_GetQueueProperties;
-			Expect(creation == Result::Success, "Create query pool with simulated counter width");
-			if (bits == 0) {
-				Expect(
-					!commands->SupportsTimestamps(), "Queue without timestamp support does not allocate a query pool");
-				commands->WriteTimestamp(nullptr);
-				std::vector<GpuTimestamp> unsupported;
-				Expect(commands->GetTimestampResults(unsupported) == Result::Success && unsupported.empty(),
-					"Unsupported timestamps are empty no-ops");
-				continue;
-			}
-			Expect(commands->Begin() == Result::Success, "Begin wraparound recording");
-			commands->WriteTimestamp("Wraparound");
-			commands->WriteTimestamp("Wraparound end");
-			Expect(commands->End() == Result::Success, "End wraparound recording");
-			auto* queue = device.GetGraphicsCommandQueue();
-			const auto completion = queue->Submit(*commands);
-			Expect(completion.IsValid(), "Submit wraparound probe");
-			const auto nativeResults = vkGetQueryPoolResults;
-			vkGetQueryPoolResults = WrappedQueryResults;
-			queue->Wait(completion);
-			vkGetQueryPoolResults = nativeResults;
-			std::vector<GpuTimestamp> timestamps;
-			Expect(commands->GetTimestampResults(timestamps) == Result::Success && timestamps.size() == 2,
-				"Read wrapped timestamp results");
-			const double expected = 11.0 * properties.limits.timestampPeriod / 1'000'000.0;
-			Expect(std::abs(timestamps[1].milliseconds - expected) < 1e-12,
-				"Valid-bit and full-width counter wrap convert to eleven ticks");
-		}
 	}
 
 	void CheckResourcesEqual(const DeviceStatistics& actual, const DeviceStatistics& expected) {
@@ -427,12 +348,6 @@ namespace {
 			Expect(current.descriptors.resourceBytes > before.descriptors.resourceBytes &&
 					current.descriptors.resourceCapacityBytes >= current.descriptors.resourceReservedBytes,
 				"Live descriptor bytes and reserved capacity are consistent");
-			if (device.IsProfilingEnabled()) {
-				Expect(
-					current.graphicsPipelineCreation.sampleCount == before.graphicsPipelineCreation.sampleCount + 1 &&
-						current.computePipelineCreation.sampleCount == before.computePipelineCreation.sampleCount + 1,
-					"Both pipeline creation paths record CPU timings");
-			}
 
 			const auto saved = current;
 			Ref<Buffer> invalid;
@@ -467,245 +382,7 @@ namespace {
 			"Descriptor high-water marks survive slot reuse");
 	}
 
-	bool TestQueueTimestamps(Device& device, QueueType type) {
-		const auto baseline = device.GetStatistics();
-		Ref<CommandAllocator> allocator;
-		Ref<CommandList> commands;
-		Expect(device.CreateCommandAllocator(type, allocator) == Result::Success, "Create profiling allocator");
-		Expect(device.CreateCommandList(allocator.Raw(), commands) == Result::Success, "Create profiling command list");
-		std::vector<GpuTimestamp> timestamps;
-		if (!commands->SupportsTimestamps()) {
-			commands->WriteTimestamp(nullptr);
-			Expect(commands->GetTimestampResults(timestamps) == Result::Success && timestamps.empty(),
-				"Disabled timestamp operations are empty no-ops");
-			return false;
-		}
-
-		Expect(commands->GetTimestampResults(timestamps) == Result::NotReady && timestamps.empty(),
-			"Initial queries are not presented as completed results");
-		ExpectRejected(
-			[&] {
-				commands->WriteTimestamp("Before begin");
-			},
-			"WriteTimestamp:");
-		ExpectRejected(
-			[&] {
-				commands->EndDebugLabel();
-			},
-			"EndDebugLabel:");
-		Expect(commands->Begin() == Result::Success, "Begin timestamped recording");
-		ExpectRejected(
-			[&] {
-				commands->BeginDebugLabel(nullptr);
-			},
-			"BeginDebugLabel:");
-		ExpectRejected(
-			[&] {
-				commands->InsertDebugLabel("");
-			},
-			"InsertDebugLabel:");
-		ExpectRejected(
-			[&] {
-				commands->WriteTimestamp(nullptr);
-			},
-			"WriteTimestamp:");
-		commands->BeginDebugLabel("Copy probe");
-		commands->BeginDebugLabel("Nested probe");
-		commands->InsertDebugLabel("Before copy");
-		commands->WriteTimestamp("Copy probe");
-
-		constexpr uint64_t byteCount = 2 * 1024 * 1024;
-		std::vector<uint8_t> data(byteCount, 0x5a);
-		Ref<Buffer> source;
-		Ref<Buffer> destination;
-		Expect(device.CreateBuffer({.size = byteCount,
-									   .usage = BufferUsage::TransferSrc,
-									   .memoryUsage = MemoryUsage::CPUToGPU,
-									   .initialData = data.data()},
-				   source) == Result::Success,
-			"Create copy source");
-		Expect(device.CreateBuffer(
-				   {.size = byteCount, .usage = BufferUsage::TransferDst, .memoryUsage = MemoryUsage::GPUToCPU},
-				   destination) == Result::Success,
-			"Create copy destination");
-		BarrierDesc barriers;
-		barriers.buffers.push_back({
-			.buffer = destination.Raw(),
-			.before = {PipelineStage::AllCommands, ResourceAccess::MemoryWrite},
-			.after = {PipelineStage::Transfer, ResourceAccess::TransferWrite},
-			.size = byteCount,
-		});
-		commands->Barrier(barriers);
-		commands->CopyBuffer(source.Raw(), destination.Raw(), {.size = byteCount});
-		commands->WriteTimestamp("Copy end");
-		commands->EndDebugLabel();
-		commands->EndDebugLabel();
-		Expect(commands->End() == Result::Success, "End timestamped recording after invalid markers were skipped");
-		Expect(commands->GetTimestampResults(timestamps) == Result::NotReady,
-			"Unsubmitted recording does not expose stale queries");
-
-		auto* queue = device.GetCommandQueue(type);
-		for (uint32_t replay = 0; replay < 2; ++replay) {
-			const SubmissionToken completion = queue->Submit(*commands);
-			Expect(completion.IsValid(), "Submit timestamped recording or replay");
-			Expect(commands->GetTimestampResults(timestamps) == Result::NotReady && timestamps.empty(),
-				"Pending results remain unavailable even when older query values existed");
-			queue->Wait(completion);
-			Expect(commands->GetTimestampResults(timestamps) == Result::Success && timestamps.size() == 2,
-				"Completed recording has exactly two timestamp results");
-			Expect(timestamps[0].name == "Copy probe" && timestamps[1].name == "Copy end" &&
-					timestamps[0].milliseconds == 0 && std::isfinite(timestamps[1].milliseconds) &&
-					timestamps[1].milliseconds >= 0,
-				"Timestamps preserve names and convert to relative milliseconds");
-		}
-		Expect(destination->ReadData(data.data(), byteCount) == Result::Success && data.front() == 0x5a &&
-				data.back() == 0x5a,
-			"Profiling preserves copy results");
-
-		const auto beforeFailure = device.GetStatistics();
-		const auto nativeSubmit = vkQueueSubmit2;
-		vkQueueSubmit2 = FailSubmit;
-		ExpectRejected(
-			[&] {
-				Expect(!queue->Submit(*commands).IsValid(), "Native submit failure returns no token");
-			},
-			"Failed to submit");
-		vkQueueSubmit2 = nativeSubmit;
-		Expect(device.GetStatistics().submissions.sampleCount == beforeFailure.submissions.sampleCount,
-			"Failed submits do not inflate successful submission timings");
-		const SubmissionToken retry = queue->Submit(*commands);
-		Expect(retry.IsValid(), "Retry timestamped submission after native failure");
-		queue->Wait(retry);
-		queue->Wait(retry);
-		const auto after = device.GetStatistics();
-		Expect(after.submissions.sampleCount == baseline.submissions.sampleCount + 3,
-			"Only successful submissions contribute CPU samples");
-		bool found = false;
-		for (const auto& interval : after.gpuTimings) {
-			if (interval.name == "Copy probe" && interval.queue == queue->GetQueueId()) {
-				uint64_t previousSamples = 0;
-				for (const auto& previous : baseline.gpuTimings) {
-					if (previous.name == interval.name && previous.queue == interval.queue) {
-						previousSamples = previous.timing.sampleCount;
-					}
-				}
-				Expect(interval.timing.sampleCount == previousSamples + 3,
-					"Completed intervals are collected exactly once and separated by queue");
-				found = true;
-			}
-		}
-		Expect(found, "GPU interval statistics contain the copy probe");
-
-		source.Reset();
-		destination.Reset();
-		Expect(device.GetStatistics().buffers.liveCount == baseline.buffers.liveCount + 2,
-			"Recorded buffers stay counted after application references are released");
-		Expect(commands->Reset() == Result::Success, "Reset completed timestamped recording");
-		Expect(commands->GetTimestampResults(timestamps) == Result::NotReady && timestamps.empty(),
-			"Reset discards previous query results");
-		CheckResourcesEqual(device.GetStatistics(), baseline);
-
-		Expect(commands->Begin() == Result::Success, "Begin marker capacity test");
-		for (uint32_t marker = 0; marker < 128; ++marker) {
-			commands->WriteTimestamp("Capacity");
-		}
-		ExpectRejected(
-			[&] {
-				commands->WriteTimestamp("Overflow");
-			},
-			"fewer than 128");
-		Expect(commands->End() == Result::Success, "End valid recording after rejecting excess marker");
-		const auto capacity = queue->Submit(*commands);
-		Expect(capacity.IsValid(), "Submit markers up to query pool capacity");
-		queue->Wait(capacity);
-		Expect(commands->GetTimestampResults(timestamps) == Result::Success && timestamps.size() == 128,
-			"Full query pool reads only written markers");
-		return true;
-	}
-
-	void TestGpuIntervals(Device& device) {
-		Ref<CommandAllocator> allocator;
-		Ref<CommandList> commands;
-		Expect(device.CreateCommandAllocator(QueueType::Graphics, allocator) == Result::Success &&
-				device.CreateCommandList(allocator.Raw(), commands) == Result::Success,
-			"Create paired timing recording");
-		if (!commands->SupportsTimestamps()) {
-			Expect(commands->BeginGpuTiming(nullptr) == UINT32_MAX, "Unsupported intervals are no-ops");
-			commands->EndGpuTiming(UINT32_MAX);
-			return;
-		}
-		ExpectRejected(
-			[&] {
-				commands->BeginGpuTiming("Before begin");
-			},
-			"BeginGpuTiming:");
-		Expect(commands->Begin() == Result::Success, "Begin paired timing recording");
-		ExpectRejected(
-			[&] {
-				commands->RetainResource(nullptr);
-			},
-			"RetainResource:");
-		commands->WriteTimestamp("Manual outside");
-		const auto outer = commands->BeginGpuTiming("Outer interval");
-		commands->WriteTimestamp("Manual inside");
-		const auto inner = commands->BeginGpuTiming("Inner interval");
-		commands->EndGpuTiming(inner);
-		commands->EndGpuTiming(outer);
-		commands->WriteTimestamp("Manual finish");
-		ExpectRejected(
-			[&] {
-				commands->EndGpuTiming(outer);
-			},
-			"EndGpuTiming:");
-		Expect(commands->End() == Result::Success, "Invalid interval calls do not poison recording");
-		const auto before = device.GetStatistics();
-		auto* queue = device.GetGraphicsCommandQueue();
-		const auto completion = queue->Submit(*commands);
-		Expect(completion.IsValid(), "Submit nested paired timings");
-		queue->Wait(completion);
-		std::vector<GpuTimestamp> timestamps;
-		Expect(commands->GetTimestampResults(timestamps) == Result::Success && timestamps.size() == 7,
-			"Paired intervals share the marker timeline with manual timestamps");
-		auto check = [&](const char* name, size_t begin, size_t end) {
-			double previous = 0;
-			uint64_t samples = 0;
-			for (const auto& timing : before.gpuTimings) {
-				if (timing.name == name && timing.queue == completion.queue) {
-					previous = timing.timing.totalMilliseconds;
-					samples = timing.timing.sampleCount;
-				}
-			}
-			bool found = false;
-			for (const auto& timing : device.GetStatistics().gpuTimings) {
-				if (timing.name == name && timing.queue == completion.queue) {
-					found = timing.timing.sampleCount == samples + 1 &&
-						std::abs(timing.timing.totalMilliseconds - previous -
-							(timestamps[end].milliseconds - timestamps[begin].milliseconds)) < 1e-9;
-				}
-			}
-			Expect(found, "Paired intervals use their actual endpoints despite nested or manual markers");
-		};
-		check("Outer interval", 1, 5);
-		check("Inner interval", 3, 4);
-		check("Manual outside", 0, 2);
-		check("Manual inside", 2, 6);
-
-		Expect(commands->Begin() == Result::Success, "Reset paired query reservations");
-		const auto reserved = commands->BeginGpuTiming("Capacity interval");
-		for (uint32_t i = 0; i < 126; ++i) {
-			commands->WriteTimestamp("Capacity manual");
-		}
-		Expect(commands->BeginGpuTiming("No room") == UINT32_MAX, "Automatic intervals skip exhausted query capacity");
-		commands->EndGpuTiming(reserved);
-		Expect(commands->End() == Result::Success, "Closing an interval uses its reserved end marker");
-		const auto full = queue->Submit(*commands);
-		Expect(full.IsValid(), "Submit capacity-limited interval");
-		queue->Wait(full);
-		Expect(commands->GetTimestampResults(timestamps) == Result::Success && timestamps.size() == 128,
-			"Reserved end markers remain valid at full capacity");
-	}
-
-	void TestUploads(Device& device, bool supportsTimestamps) {
+	void TestUploads(Device& device) {
 		const auto before = device.GetStatistics();
 		{
 			std::unique_ptr<UploadContext> uploads;
@@ -732,38 +409,24 @@ namespace {
 		}
 		const auto after = device.GetStatistics();
 		CheckResourcesEqual(after, before);
-		if (device.IsProfilingEnabled()) {
-			Expect(after.uploadStaging.sampleCount == before.uploadStaging.sampleCount + 2 &&
-					after.stagedUploadBytes == before.stagedUploadBytes + 512,
-				"Staging measurements include successfully staged bytes even for cancelled batches");
-			Expect(after.uploadBatchCount == before.uploadBatchCount + 1 &&
-					after.submittedUploadBytes == before.submittedUploadBytes + 256,
-				"Only submitted batches count toward upload throughput");
-			bool found = false;
-			for (const auto& interval : after.gpuTimings) {
-				if (interval.name == "Upload") {
-					found = interval.timing.sampleCount == 1;
-				}
-			}
-			Expect(found == supportsTimestamps,
-				"Upload GPU timing survives uploader destruction when the queue supports timestamps");
-		}
+		Expect(after.stagedUploadBytes == before.stagedUploadBytes + 512, "Staging counters include cancelled batches");
+		Expect(after.uploadBatchCount == before.uploadBatchCount + 1 &&
+				after.submittedUploadBytes == before.submittedUploadBytes + 256,
+			"Only successful submissions contribute upload throughput");
 	}
 
-	void RunTests(bool profiling, bool validation) {
+	void RunTests(bool validation) {
 		std::unique_ptr<Device> device;
 		Expect(Device::Create(
 				   {
-					   .applicationName = "ProfilingTests",
+					   .applicationName = "DiagnosticsTests",
 					   .shaderDirectory = REALRHI_TEST_SHADER_DIRECTORY,
 					   .enableDebug = true,
-					   .enableProfiling = profiling,
 					   .enableValidationLayers = validation,
 					   .debugCallback = CaptureDebugMessage,
 				   },
 				   device) == Result::Success,
-			"Create profiling test device");
-		Expect(device->IsProfilingEnabled() == profiling, "Device preserves requested profiling mode");
+			"Create diagnostics test device");
 		Expect(vkCmdBeginDebugUtilsLabelEXT != nullptr && vkCmdEndDebugUtilsLabelEXT != nullptr &&
 				vkCmdInsertDebugUtilsLabelEXT != nullptr,
 			"Debug labels are available independently of validation");
@@ -776,43 +439,33 @@ namespace {
 
 		TestResourceNames(*device);
 		TestUsageCounters(*device);
-		TestGpuIntervals(*device);
-		const bool graphicsTimestamps = TestQueueTimestamps(*device, QueueType::Graphics);
-		TestQueueTimestamps(*device, QueueType::Compute);
-		const bool transferTimestamps = TestQueueTimestamps(*device, QueueType::Transfer);
-		TestUploads(*device, transferTimestamps);
-		if (graphicsTimestamps) {
-			TestTimestampWraparound(*device);
+		{
+			Ref<CommandAllocator> allocator;
+			Ref<CommandList> commands;
+			Expect(device->CreateCommandAllocator(QueueType::Graphics, allocator) == Result::Success &&
+					device->CreateCommandList(allocator.Raw(), commands) == Result::Success &&
+					commands->Begin() == Result::Success,
+				"Begin debug label recording");
+			commands->BeginDebugLabel("Outer");
+			commands->BeginDebugLabel("Inner");
+			commands->InsertDebugLabel("Marker");
+			commands->EndDebugLabel();
+			commands->EndDebugLabel();
+			Expect(commands->End() == Result::Success, "End debug label recording");
 		}
+		TestUploads(*device);
 		device->WaitIdle();
-		if (profiling) {
-			const auto statistics = device->GetStatistics();
-			Expect(statistics.resourceStateValidation.sampleCount >= statistics.submissions.sampleCount &&
-					statistics.nativeSubmissions.sampleCount >= statistics.submissions.sampleCount &&
-					statistics.submissions.sampleCount > 0,
-				"Successful queue submissions include state validation and native submission CPU samples");
-		}
-		if (!profiling) {
-			const auto statistics = device->GetStatistics();
-			Expect(statistics.gpuTimings.empty() && statistics.uploadStaging.sampleCount == 0 &&
-					statistics.submissions.sampleCount == 0 && statistics.graphicsPipelineCreation.sampleCount == 0 &&
-					statistics.resourceStateValidation.sampleCount == 0 &&
-					statistics.nativeSubmissions.sampleCount == 0 &&
-					statistics.computePipelineCreation.sampleCount == 0,
-				"Disabled profiling records no timing samples");
-		}
 		vkCmdBeginDebugUtilsLabelEXT = s_BeginLabel;
 		vkCmdEndDebugUtilsLabelEXT = s_EndLabel;
 		vkCmdInsertDebugUtilsLabelEXT = s_InsertLabel;
 		device.reset();
-		Expect(s_Errors == s_ExpectedErrors, "No unexpected profiling or cleanup errors");
+		Expect(s_Errors == s_ExpectedErrors, "No unexpected diagnostics or cleanup errors");
 	}
 }
 
 int main() {
-	RunTests(true, true);
-	RunTests(true, false);
-	RunTests(false, true);
+	RunTests(true);
+	RunTests(false);
 	{
 		std::unique_ptr<RealRHI::Device> device;
 		Expect(RealRHI::Device::Create(
@@ -827,5 +480,5 @@ int main() {
 	}
 	Expect(s_BeginLabels != 0 && s_BeginLabels == s_EndLabels && s_InsertLabels != 0,
 		"Nested labels and point markers reach Vulkan and remain balanced");
-	std::cout << "ProfilingTests passed\n";
+	std::cout << "DiagnosticsTests passed\n";
 }

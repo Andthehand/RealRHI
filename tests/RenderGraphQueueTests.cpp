@@ -339,16 +339,12 @@ namespace {
 
 	void TestBatching(Device& device) {
 		RenderGraph graph(Capture);
-		graph.SetOptions({.enableGpuTimings = true});
 		std::vector<CommandList*> recordings;
-		bool timestamps = false;
 		uint32_t callbacks = 0;
 		for (uint32_t i = 0; i < 5; ++i) {
 			graph.AddPass({.name = "Batched pass " + std::to_string(i)}, [&](CommandList& list) {
 				recordings.push_back(&list);
-				timestamps = list.SupportsTimestamps();
 				++callbacks;
-				list.WriteTimestamp("Callback marker");
 			});
 		}
 		s_Submit = vkQueueSubmit2;
@@ -372,17 +368,6 @@ namespace {
 			"Reports expose the native submission batch and its passes");
 		graph.Reset();
 		completion.Wait(device);
-		if (timestamps) {
-			for (uint32_t i = 0; i < 5; ++i) {
-				bool found = false;
-				for (const auto& timing : device.GetStatistics().gpuTimings) {
-					if (timing.name == "RenderGraph: Batched pass " + std::to_string(i)) {
-						found = timing.timing.sampleCount == 1;
-					}
-				}
-				Expect(found, "Batching preserves separate per-pass timings despite callback markers");
-			}
-		}
 
 		// Use an actually distinct native queue; role aliases are exercised above and
 		// in the join test. Hardware with one queue cannot exercise foreign waits.
@@ -534,7 +519,7 @@ namespace {
 					"An unwritten backbuffer fails before consuming image availability");
 			}
 			RenderGraph graph(Capture);
-			graph.SetOptions({.cullUnusedPasses = true, .enableGpuTimings = true});
+			graph.SetOptions({.cullUnusedPasses = true});
 			const auto image = graph.ImportBackBuffer(*swapchain, frame);
 			const auto source = graph.ImportBuffer(upload.Raw(), s_Read);
 			const auto output =
@@ -666,7 +651,7 @@ namespace {
 		auto readback = Readback(device, 16);
 		for (uint32_t frame = 0; frame < 3; ++frame) {
 			RenderGraph graph(Capture);
-			graph.SetOptions({.cullUnusedPasses = true, .enableGpuTimings = true});
+			graph.SetOptions({.cullUnusedPasses = true});
 			const auto source = graph.ImportBuffer(upload.Raw(), s_Read);
 			const auto shared =
 				graph.CreateBuffer({.size = 16, .usage = BufferUsage::TransferSrc | BufferUsage::TransferDst});
@@ -734,7 +719,6 @@ int main() {
 	Expect(RealRHI::Device::Create({.applicationName = "RenderGraphQueueTests",
 									   .shaderDirectory = REALRHI_TEST_SHADER_DIRECTORY,
 									   .enableDebug = true,
-									   .enableProfiling = true,
 									   .enableValidationLayers = true,
 									   .debugCallback = Capture},
 			   device) == RealRHI::Result::Success,

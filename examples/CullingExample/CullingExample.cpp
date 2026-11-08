@@ -256,7 +256,6 @@ int main() {
 	Check(RealRHI::Device::Create({.applicationName = "CullingExample",
 											  .shaderDirectory = shaderDirectory,
 											  .enableDebug = true,
-											  .enableProfiling = false,
 											  .enableValidationLayers = true,
 											  .debugCallback = CaptureDebugMessage},
 			  device) == RealRHI::Result::Success,

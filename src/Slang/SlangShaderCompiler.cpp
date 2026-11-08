@@ -1,5 +1,7 @@
 #include "SlangShaderCompiler.h"
 
+#include "Detail/CpuProfiling.h"
+
 #include "SlangShaderReflection.h"
 
 #include <cstring>
@@ -110,6 +112,7 @@ namespace RealRHI {
 	}
 
 	Result SlangShaderCompiler::Compile(const ShaderDesc& desc, CompiledShaderProgram& outProgram) {
+		REALRHI_CPU_ZONE("RealRHI: Compile shader");
 		std::scoped_lock lock(m_Mutex);
 		const std::string context = std::string("CreateShader(") + (desc.moduleName ? desc.moduleName : "<null>") + ")";
 		if (!desc.moduleName || !desc.moduleName[0]) {

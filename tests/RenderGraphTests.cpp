@@ -169,7 +169,7 @@ namespace {
 		graph.AddPass({.name = "Unreferenced callback"}, [&](CommandList&) {
 			callbacks += 100;
 		});
-		graph.SetOptions({.cullUnusedPasses = true, .enableGpuTimings = true});
+		graph.SetOptions({.cullUnusedPasses = true});
 		std::string error;
 		Expect(graph.Compile(error), "Compile optional culling with exports, imports, and external effects");
 		const auto info = graph.GetDiagnostics();
@@ -207,15 +207,6 @@ namespace {
 		auto completion = device.GetGraphicsCommandQueue()->Submit(*commands);
 		Expect(completion.IsValid(), "Submit optimized graph");
 		device.GetGraphicsCommandQueue()->Wait(completion);
-		if (commands->SupportsTimestamps()) {
-			bool measured = false;
-			for (const auto& timing : device.GetStatistics().gpuTimings) {
-				if (timing.name == "RenderGraph: Imported write") {
-					measured = timing.timing.sampleCount == 1 && timing.queue == commands->GetQueueId();
-				}
-			}
-			Expect(measured, "Completed graph passes publish named GPU timing statistics");
-		}
 		Expect(graph.GetDiagnostics().passes[write.index].nativeQueue == commands->GetQueueId(),
 			"Execute diagnostics identify the actual caller queue");
 		graph.AddDependency(write, effect);
@@ -233,7 +224,7 @@ namespace {
 		ExpectInvalid(graph, "cycle");
 		Expect(!graph.GetDiagnostics().compiled, "Even culled branches cannot hide dependency cycles");
 		graph.Reset();
-		graph.SetOptions({.enableGpuTimings = true});
+		graph.SetOptions({});
 		callbacks = 0;
 		for (uint32_t i = 0; i < 70; ++i) {
 			graph.AddPass({.name = "Capacity pass " + std::to_string(i)}, [&](CommandList&) {
@@ -242,15 +233,10 @@ namespace {
 		}
 		Expect(commands->Begin() == Result::Success && graph.Execute(device, *commands) == Result::Success &&
 				callbacks == 70 && commands->End() == Result::Success,
-			"Profiling capacity never prevents graph callbacks from executing");
+			"Large graphs execute all callbacks");
 		completion = device.GetGraphicsCommandQueue()->Submit(*commands);
-		Expect(completion.IsValid(), "Submit graph larger than timestamp capacity");
+		Expect(completion.IsValid(), "Submit graph with many passes");
 		device.GetGraphicsCommandQueue()->Wait(completion);
-		if (commands->SupportsTimestamps()) {
-			std::vector<GpuTimestamp> timestamps;
-			Expect(commands->GetTimestampResults(timestamps) == Result::Success && timestamps.size() == 128,
-				"Large graph profiles complete pairs without overflowing the timestamp pool");
-		}
 	}
 
 	void TestInvalidGraphs(Buffer* buffer, Texture* texture) {
@@ -685,7 +671,6 @@ int main() {
 	Expect(RealRHI::Device::Create({.applicationName = "RenderGraphTests",
 									   .shaderDirectory = REALRHI_TEST_SHADER_DIRECTORY,
 									   .enableDebug = true,
-									   .enableProfiling = true,
 									   .enableValidationLayers = true,
 									   .debugCallback = Capture},
 			   device) == RealRHI::Result::Success,
