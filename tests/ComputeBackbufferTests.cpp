@@ -16,6 +16,18 @@ namespace {
 	uint32_t s_ExpectedErrors = 0;
 	PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR s_SurfaceCapabilities;
 	PFN_vkGetPhysicalDeviceSurfaceFormatsKHR s_SurfaceFormats;
+	PFN_vkCreateSwapchainKHR s_CreateSwapchain;
+	uint32_t s_SwapchainCreations = 0;
+	VkPresentModeKHR s_LastPresentMode = VK_PRESENT_MODE_MAX_ENUM_KHR;
+
+	VKAPI_ATTR VkResult VKAPI_CALL CaptureSwapchainCreation(VkDevice device,
+		const VkSwapchainCreateInfoKHR* info,
+		const VkAllocationCallbacks* allocator,
+		VkSwapchainKHR* swapchain) {
+		++s_SwapchainCreations;
+		s_LastPresentMode = info->presentMode;
+		return s_CreateSwapchain(device, info, allocator, swapchain);
+	}
 
 	void Expect(bool condition, const char* message) {
 		if (!condition) {
@@ -82,15 +94,27 @@ namespace {
 	}
 
 	void TestRendering(Device& device, Window* window) {
+		s_CreateSwapchain = vkCreateSwapchainKHR;
+		vkCreateSwapchainKHR = CaptureSwapchainCreation;
 		Ref<Swapchain> swapchain;
 		Expect(device.CreateSwapchain({.window = window, .enableStorage = true}, swapchain) == Result::Success,
 			"Create storage backbuffer swapchain");
+		Expect(swapchain->IsVSyncEnabled() && s_LastPresentMode == VK_PRESENT_MODE_FIFO_KHR,
+			"VSync defaults to FIFO presentation");
 		Expect(swapchain->GetBackBufferFormat() == TextureFormat::RGBA8_UNorm ||
 				swapchain->GetBackBufferFormat() == TextureFormat::BGRA8_UNorm,
 			"Select a UNorm storage format");
 		auto render = MakePipeline(device, "renderMain");
 		auto read = MakePipeline(device, "readMain");
 		for (uint32_t iteration = 0; iteration < 8; ++iteration) {
+			// Change between frames, repeat a setting, and cancel a pending change.
+			if (iteration == 1 || iteration == 2 || iteration == 5) {
+				swapchain->SetVSync(false);
+			}
+			if (iteration == 6 || iteration == 7) {
+				swapchain->SetVSync(false);
+				swapchain->SetVSync(true);
+			}
 			if (iteration == 4) {
 				int count = 0;
 				auto** windows = SDL_GetWindows(&count);
@@ -103,7 +127,24 @@ namespace {
 				SDL_free(windows);
 				SDL_PumpEvents();
 			}
+			const uint32_t creationsBeforeAcquire = s_SwapchainCreations;
 			const auto frame = swapchain->BeginFrame();
+			const bool shouldRecreate = iteration == 1 || iteration == 4 || iteration == 5 || iteration == 6;
+			Expect(s_SwapchainCreations == creationsBeforeAcquire + (shouldRecreate ? 1u : 0u),
+				"VSync changes recreate once at acquisition; repeated and cancelled changes do not");
+			const bool expectedVSync = iteration == 0 || iteration == 4 || iteration >= 6;
+			Expect(swapchain->IsVSyncEnabled() == expectedVSync,
+				"VSync query reports the requested setting");
+			if (expectedVSync) {
+				Expect(s_LastPresentMode == VK_PRESENT_MODE_FIFO_KHR, "Enabling VSync restores FIFO presentation");
+			}
+			if (iteration == 3) {
+				const uint32_t creationsBeforeChange = s_SwapchainCreations;
+				swapchain->SetVSync(true);
+				Expect(swapchain->IsVSyncEnabled() && s_SwapchainCreations == creationsBeforeChange &&
+						swapchain->IsFrameReady(frame),
+					"Changing VSync with an acquired frame defers recreation and preserves that frame");
+			}
 			Expect(frame.backBufferView && frame.backBufferView->GetStorageImageDescriptorIndex() != UINT32_MAX,
 				"Every acquired backbuffer exposes a storage descriptor, including after resize");
 			Expect(swapchain->GetBackBuffer(frame)->GetStorageImageDescriptorIndex() ==
@@ -177,6 +218,7 @@ namespace {
 			}
 		}
 		device.WaitIdle();
+		vkCreateSwapchainKHR = s_CreateSwapchain;
 	}
 }
 

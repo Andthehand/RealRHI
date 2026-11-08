@@ -68,6 +68,25 @@ Queue backends implement `Submit(const SubmitInfo&)`; the single-list and list-s
 
 `Buffer::WriteData` now returns `Result`, matching `ReadData`, so callers can handle mapped-copy and flush failures. Existing calls may ignore the result; custom buffer implementations must update their override's return type. The redundant Vulkan-only `CopyToMappedMemory` helper and unused compiler accessor were removed. `DeviceDesc::maxFramesInFlight` was also removed because the backend never used it: the swapchain currently uses two frame slots, while `FrameResources::Initialize` accepts an explicit slot count.
 
+## VSync
+
+Set `SwapchainDesc::enableVSync` when creating the swapchain:
+
+```cpp
+device->CreateSwapchain({.window = window.Raw(), .enableVSync = false}, swapchain);
+```
+
+VSync defaults to enabled and uses FIFO presentation, synchronized to the display refresh.
+Disabling it prefers immediate presentation, which can tear, then mailbox if immediate
+is unavailable, and finally FIFO if neither is supported. The setting persists when the
+swapchain is recreated after resizing. Previously, presentation always preferred mailbox.
+
+Change it at runtime with `swapchain->SetVSync(false)` or `swapchain->SetVSync(true)`.
+`IsVSyncEnabled()` returns the requested setting. Changes take effect at the next drawable
+`BeginFrame` after the current frame is presented; a minimized window defers the change
+until restored. Setting the same value does not recreate the swapchain. Applying a change
+recreates the Vulkan swapchain and waits for the device to become idle.
+
 ## Shader preprocessor definitions
 
 Set object-like macros per shader through `ShaderDesc::preprocessorDefinitions`:

@@ -10,6 +10,10 @@ namespace RealRHI {
 		virtual ~Swapchain() = default;
 
 		virtual TextureFormat GetBackBufferFormat() const = 0;
+		// Apply the requested setting at the next drawable BeginFrame, after the current frame is presented.
+		virtual void SetVSync(bool enabled) = 0;
+		// Returns the requested setting; unsupported unsynchronized modes may still fall back to FIFO.
+		virtual bool IsVSyncEnabled() const = 0;
 
 		virtual FrameContext BeginFrame() = 0;
 		// Present consumes the acquired frame; BeginFrame returns an invalid view while minimized.

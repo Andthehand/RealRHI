@@ -26,6 +26,8 @@ namespace RealRHI {
 		Result Init(const SwapchainDesc& desc);
 
 		TextureFormat GetBackBufferFormat() const override { return m_SwapchainImageFormat; }
+		void SetVSync(bool enabled) override { m_EnableVSync = enabled; }
+		bool IsVSyncEnabled() const override { return m_EnableVSync; }
 
 		FrameContext BeginFrame() override;
 		Result Present(const FrameContext& frame) override;
@@ -96,6 +98,8 @@ namespace RealRHI {
 		VkExtent2D m_SwapchainExtent = {.width = 0, .height = 0};
 		// To enable descriptor access
 		bool m_EnableStorage = false;
+		bool m_EnableVSync = true;
+		bool m_AppliedVSync = true;
 
 		std::vector<FrameSync> m_FrameSync;
 		std::vector<VkSemaphore> m_RenderFinishedSemaphores;

@@ -60,6 +60,7 @@ namespace RealRHI {
 		}
 
 		m_EnableStorage = desc.enableStorage;
+		m_EnableVSync = desc.enableVSync;
 		m_Window = static_cast<VulkanWindow*>(desc.window);
 		if (!m_Window->CreateVulkanSurface(&m_Surface)) {
 			m_Device->SendDebugMessage(
@@ -175,9 +176,12 @@ namespace RealRHI {
 
 	VkPresentModeKHR VulkanSwapchain::ChooseSwapPresentMode(
 		const std::vector<VkPresentModeKHR>& availablePresentModes) {
-		for (const auto& availablePresentMode : availablePresentModes) {
-			if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
-				return availablePresentMode;
+		if (!m_EnableVSync) {
+			for (VkPresentModeKHR preferred : {VK_PRESENT_MODE_IMMEDIATE_KHR, VK_PRESENT_MODE_MAILBOX_KHR}) {
+				if (std::find(availablePresentModes.begin(), availablePresentModes.end(), preferred) !=
+					availablePresentModes.end()) {
+					return preferred;
+				}
 			}
 		}
 
@@ -311,6 +315,7 @@ namespace RealRHI {
 		m_SwapchainImages = std::move(newImages);
 		m_SwapchainImageFormat = Utils::VkFormatToTextureFormat(surfaceFormat.format);
 		m_SwapchainExtent = extent;
+		m_AppliedVSync = m_EnableVSync;
 		m_ImageLayouts.assign(imageCount, VK_IMAGE_LAYOUT_UNDEFINED);
 
 		if (!newSemaphores.empty()) {
@@ -357,11 +362,6 @@ namespace RealRHI {
 		if (m_Window->IsMinimized() || m_Window->GetWidth() == 0 || m_Window->GetHeight() == 0) {
 			return FrameContext{.imageIndex = std::numeric_limits<uint32_t>::max()};
 		}
-		if (m_Window->GetWidth() != m_SwapchainExtent.width || m_Window->GetHeight() != m_SwapchainExtent.height) {
-			if (RecreateSwapchain() != Result::Success) {
-				return FrameContext{.imageIndex = std::numeric_limits<uint32_t>::max()};
-			}
-		}
 		const uint32_t frameIdx = m_CurrentFrameIndex;
 
 		auto& sync = m_FrameSync[frameIdx];
@@ -371,6 +371,15 @@ namespace RealRHI {
 				"BeginFrame: Submit and present the acquired frame before acquiring another.");
 			return FrameContext{.imageIndex = UINT32_MAX};
 		}
+
+		// Recreate the swapchain if the window size or VSync setting has changed.
+		if (m_EnableVSync != m_AppliedVSync || m_Window->GetWidth() != m_SwapchainExtent.width ||
+			m_Window->GetHeight() != m_SwapchainExtent.height) {
+			if (RecreateSwapchain() != Result::Success) {
+				return FrameContext{.imageIndex = std::numeric_limits<uint32_t>::max()};
+			}
+		}
+		
 		if (sync.submissionPending) {
 			auto* queue = m_Device->GetCommandQueue(sync.completionToken.queue);
 			if (queue == nullptr || !sync.completionToken.IsValid()) {
