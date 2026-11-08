@@ -68,6 +68,14 @@ Queue backends implement `Submit(const SubmitInfo&)`; the single-list and list-s
 
 `Buffer::WriteData` now returns `Result`, matching `ReadData`, so callers can handle mapped-copy and flush failures. Existing calls may ignore the result; custom buffer implementations must update their override's return type. The redundant Vulkan-only `CopyToMappedMemory` helper and unused compiler accessor were removed. `DeviceDesc::maxFramesInFlight` was also removed because the backend never used it: the swapchain currently uses two frame slots, while `FrameResources::Initialize` accepts an explicit slot count.
 
+## Window title
+
+Set the initial title with `WindowDesc::title`, or change it at runtime with
+`window->SetTitle("My application")`. Call `SetTitle` on the main thread with a UTF-8
+string; the title is copied, so the caller can release the string after the call.
+An empty string clears the title. The method returns `Result::Success` on success,
+`Result::InvalidParameter` for a null title, or `Result::Failed` if the native update fails.
+
 ## VSync
 
 Set `SwapchainDesc::enableVSync` when creating the swapchain:

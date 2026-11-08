@@ -31,6 +31,14 @@ namespace RealRHI {
 		return Result::Success;
 	}
 
+	Result VulkanWindow::SetTitle(const char* title) {
+		if (!SDL_SetWindowTitle(m_Window, title)) {
+			return Result::Failed;
+		}
+
+		return Result::Success;
+	}
+
 	uint32_t VulkanWindow::GetWidth() const {
 		int width = 0;
 		int height = 0;

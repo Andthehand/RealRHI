@@ -16,6 +16,8 @@ namespace RealRHI {
 		static Result Create(const VulkanDevice* device, const WindowDesc& desc, Ref<VulkanWindow>& outWindow);
 		Result Init(const WindowDesc& desc);
 
+		Result SetTitle(const char* title) override;
+
 		uint32_t GetWidth() const override;
 		uint32_t GetHeight() const override;
 		bool IsMinimized() const override;
