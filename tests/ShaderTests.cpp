@@ -98,38 +98,5 @@ int main() {
 			program.reflection.entryPoints[1].stage == ShaderStage::Fragment,
 		"Reflect names and stages without caller declarations");
 	Expect(errors == 6, "Expected failures produce diagnostics");
-	ShaderDesc variant{.moduleName = "preprocessor"};
-	Expect(compiler.Compile(variant, program) == Result::Success, "Compile without preprocessor definitions");
-	const auto defaultId = program.cacheId;
-	Expect(program.reflection.entryPoints[0].computeGroupSize == std::array<uint32_t, 3>{4, 1, 1},
-		"Use source defaults when definitions are absent");
-	variant.preprocessorDefinitions = {{"GROUP_SIZE", "8"}, {"ENABLE_FEATURE"}, {"EMPTY_REPLACEMENT", ""}};
-	Expect(compiler.Compile(variant, program) == Result::Success, "Compile valued, default, and empty definitions");
-	const auto variantId = program.cacheId;
-	Expect(variantId != defaultId &&
-			program.reflection.entryPoints[0].computeGroupSize == std::array<uint32_t, 3>{8, 2, 1},
-		"Definitions affect compilation and distinguish cache entries");
-	Expect(compiler.Compile(variant, program) == Result::Success && program.cacheId == variantId,
-		"Identical definitions reuse cached compilation");
-	variant.preprocessorDefinitions[0].value = "16";
-	Expect(compiler.Compile(variant, program) == Result::Success && program.cacheId != variantId &&
-			program.reflection.entryPoints[0].computeGroupSize == std::array<uint32_t, 3>{16, 2, 1},
-		"Changing a definition value compiles a distinct variant");
-	variant.preprocessorDefinitions.clear();
-	Expect(compiler.Compile(variant, program) == Result::Success && program.cacheId == defaultId,
-		"Definitions do not leak into the default variant");
-	compiler.ClearCache();
-	Expect(compiler.Compile(variant, program) == Result::Success &&
-			program.reflection.entryPoints[0].computeGroupSize == std::array<uint32_t, 3>{4, 1, 1},
-		"Definitions do not leak into a fresh session");
-	const auto validId = program.cacheId;
-	for (const auto& definitions : std::vector<std::vector<ShaderPreprocessorDefinition>>{
-			 {{"", "1"}}, {{"NOT-AN-IDENTIFIER", "1"}}, {{"GROUP_SIZE", "8"}, {"GROUP_SIZE", "16"}},
-			 {{"GROUP_SIZE", std::string("8\0ignored", 9)}}}) {
-		variant.preprocessorDefinitions = definitions;
-		Expect(compiler.Compile(variant, program) == Result::InvalidParameter && program.cacheId == validId,
-			"Invalid definitions fail without publishing a partial program");
-	}
-	Expect(errors == 10, "Invalid definitions produce diagnostics");
 	std::cout << "ShaderTests passed\n";
 }

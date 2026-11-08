@@ -68,24 +68,6 @@ Queue backends implement `Submit(const SubmitInfo&)`; the single-list and list-s
 
 `Buffer::WriteData` now returns `Result`, matching `ReadData`, so callers can handle mapped-copy and flush failures. Existing calls may ignore the result; custom buffer implementations must update their override's return type. The redundant Vulkan-only `CopyToMappedMemory` helper and unused compiler accessor were removed. `DeviceDesc::maxFramesInFlight` was also removed because the backend never used it: the swapchain currently uses two frame slots, while `FrameResources::Initialize` accepts an explicit slot count.
 
-## Shader preprocessor definitions
-
-Set object-like macros per shader through `ShaderDesc::preprocessorDefinitions`:
-
-```cpp
-RealRHI::ShaderDesc desc{
-    .moduleName = "shader",
-    .preprocessorDefinitions = {{"USE_TEXTURES"}, {"LIGHT_COUNT", "4"}},
-};
-device->CreateShader(desc, shader);
-```
-
-A definition with no value expands to `1`; an explicit `""` gives an empty replacement.
-Names must be unique identifiers. Definitions apply to the module and its imports and
-includes for that compilation. Different definitions produce separate cached shader
-variants; repeated requests with the same definitions reuse the cache. Definition order
-is part of the cache key.
-
 ## Examples
 
 The build copies shader assets beside each example executable. Run examples from their executable directory so relative shader paths resolve:
