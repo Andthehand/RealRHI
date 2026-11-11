@@ -46,21 +46,8 @@ namespace {
 	void RunCulling(Device& device, bool indexed, float viewHalfWidth, QueueType computeQueue, bool multiDraw) {
 		Ref<Shader> cullShader;
 		Ref<Shader> drawShader;
-		Ref<Pipeline> cullPipeline;
-		Ref<Pipeline> drawPipeline;
 		Check(device.CreateShader({.moduleName = "cull"}, cullShader) == Result::Success, "Compile culling shader");
 		Check(device.CreateShader({.moduleName = "culled_draw"}, drawShader) == Result::Success, "Compile draw shader");
-		Check(device.CreateComputePipeline({.shader = cullShader.Raw()}, cullPipeline) == Result::Success,
-			"Create culling pipeline");
-		Check(device.CreateGraphicsPipeline(
-				  {
-					  .shader = drawShader.Raw(),
-					  .rasterState = {.cullMode = CullMode::None},
-					  .depthState = {.depthTestEnable = false, .depthWriteEnable = false},
-					  .renderTargetFormats = {.colorFormats = {TextureFormat::RGBA8_UNorm}},
-				  },
-				  drawPipeline) == Result::Success,
-			"Create indirect graphics pipeline");
 
 		Ref<Buffer> arguments;
 		Ref<Buffer> dispatch;
@@ -114,7 +101,7 @@ namespace {
 								  {dispatchResource, indirect}},
 						  .queue = computeQueue},
 			[&](CommandList& list) {
-				list.BindPipeline(cullPipeline.Raw());
+				list.BindShaderProgram(cullShader.Raw());
 				list.UseResource(arguments.Raw());
 				struct CullParameters {
 					uint32_t output;
@@ -146,7 +133,10 @@ namespace {
 						.renderArea = {.width = 64, .height = 64}});
 				list.SetViewport({.width = 64, .height = 64});
 				list.SetScissor({.width = 64, .height = 64});
-				list.BindPipeline(drawPipeline.Raw());
+				list.BindShaderProgram(drawShader.Raw());
+				list.SetGraphicsState(
+					{.raster = {.cullMode = CullMode::None},
+						.depth = {.depthTestEnable = false, .depthWriteEnable = false}});
 #ifdef REALRHI_INDIRECT_TESTS
 				s_ExpectError = true;
 				list.DispatchComputeIndirect(dispatch.Raw());
@@ -254,10 +244,10 @@ int main() {
 #endif
 	std::unique_ptr<RealRHI::Device> device;
 	Check(RealRHI::Device::Create({.applicationName = "CullingExample",
-											  .shaderDirectory = shaderDirectory,
-											  .enableDebug = true,
-											  .enableValidationLayers = true,
-											  .debugCallback = CaptureDebugMessage},
+									  .shaderDirectory = shaderDirectory,
+									  .enableDebug = true,
+									  .enableValidationLayers = true,
+									  .debugCallback = CaptureDebugMessage},
 			  device) == RealRHI::Result::Success,
 		"Create culling device");
 	for (auto queue : {RealRHI::QueueType::Graphics, RealRHI::QueueType::Compute}) {

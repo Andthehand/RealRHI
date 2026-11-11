@@ -341,16 +341,13 @@ namespace {
 		Expect(uploads->Submit(upload) == Result::Success, "Submit storage upload");
 
 		Ref<Shader> shader;
-		Ref<Pipeline> pipeline;
 		Expect(device.CreateShader(
 				   {.moduleName = "ownership_texture", .entryPoints = {{"computeMain", RealRHI::ShaderStage::Compute}}},
 				   shader) == Result::Success,
 			"Compile storage shader");
-		Expect(device.CreateComputePipeline({.shader = shader.Raw()}, pipeline) == Result::Success,
-			"Create storage pipeline");
 
 		auto list = MakeList(device);
-		list->BindPipeline(pipeline.Raw());
+		list->BindShaderProgram(shader.Raw());
 		list->UseResource(view.Raw());
 		const uint32_t index = view->GetStorageImageDescriptorIndex();
 		list->SetPushConstants(&index, sizeof(index));
@@ -443,19 +440,16 @@ namespace {
 			"Create linear sampler with white border");
 
 		Ref<Shader> shader;
-		Ref<Pipeline> pipeline;
 		Expect(device.CreateShader(
 				   {.moduleName = "texture_sampling", .entryPoints = {{"computeMain", RealRHI::ShaderStage::Compute}}},
 				   shader) == Result::Success,
 			"Compile sampling shader");
-		Expect(device.CreateComputePipeline({.shader = shader.Raw()}, pipeline) == Result::Success,
-			"Create sampling pipeline");
 
 		auto result = MakeBuffer(
 			device, 5 * sizeof(uint32_t), BufferUsage::Storage | BufferUsage::TransferSrc, MemoryUsage::GPUOnly);
 		auto output = MakeBuffer(device, 5 * sizeof(uint32_t), BufferUsage::TransferDst, MemoryUsage::GPUToCPU);
 		auto list = MakeList(device);
-		list->BindPipeline(pipeline.Raw());
+		list->BindShaderProgram(shader.Raw());
 		list->UseResource(firstView.Raw());
 		list->UseResource(secondView.Raw());
 		list->UseResource(repeatSampler.Raw());
@@ -638,11 +632,12 @@ namespace {
 	}
 
 	void TestTextureCopyFormats(Device& device) {
-		for (auto format : {TextureFormat::BGRA8_UNorm,
-				 TextureFormat::RGBA8_SRGB,
-				 TextureFormat::RGBA16_Float,
-				 TextureFormat::R32_Float,
-				 TextureFormat::D32_Float}) {
+		for (auto format :
+			{TextureFormat::BGRA8_UNorm,
+				TextureFormat::RGBA8_SRGB,
+				TextureFormat::RGBA16_Float,
+				TextureFormat::R32_Float,
+				TextureFormat::D32_Float}) {
 			const TextureDesc desc{
 				.width = 4,
 				.height = 4,

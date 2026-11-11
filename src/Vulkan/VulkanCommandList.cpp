@@ -1,12 +1,11 @@
 #include "VulkanCommandList.h"
 
 #include "Detail/CpuProfiling.h"
-
 #include "VulkanBarrierConversions.h"
 #include "VulkanBuffer.h"
 #include "VulkanCommandQueue.h"
 #include "VulkanConversions.h"
-#include "VulkanPipeline.h"
+#include "VulkanShader.h"
 #include "VulkanTexture.h"
 #include "VulkanTextureView.h"
 #include "VulkanTransferValidation.h"
@@ -21,7 +20,8 @@ namespace RealRHI {
 	VulkanCommandList::VulkanCommandList(const VulkanDevice* device, Ref<VulkanCommandAllocator> allocator)
 		: m_Device(device),
 		  m_Allocator(std::move(allocator)),
-		  m_QueueId{m_Allocator->GetQueueFamilyIndex(), 0} { }
+		  m_QueueId{m_Allocator->GetQueueFamilyIndex(), 0},
+		  m_GraphicsState(device) { }
 
 	VulkanCommandList::~VulkanCommandList() {
 		std::scoped_lock lock(m_StateMutex);
@@ -194,10 +194,11 @@ namespace RealRHI {
 
 	void VulkanCommandList::ResetRecordingState() {
 		m_RetainedResourceIndex.clear();
-		m_ComputePipelineBound = false;
-		m_GraphicsPipeline = nullptr;
+		m_ComputeShader = nullptr;
+		m_GraphicsShader = nullptr;
+		m_GraphicsState = VulkanGraphicsState(m_Device);
 		m_Rendering = false;
-		m_RenderTargetFormats = {};
+		m_VulkanRenderingFormats = {};
 		m_RenderingSampleCount = 0;
 		m_ReadOnlyDepth = false;
 		m_ReadOnlyStencil = false;
@@ -239,32 +240,24 @@ namespace RealRHI {
 		return true;
 	}
 
-	bool VulkanCommandList::ValidateGraphicsState(const char* operation) const {
-		auto reject = [&](const char* reason) {
-			m_Device->SendDebugMessage(
-				DebugSeverity::Error, DebugMessageType::General, (std::string(operation) + ": " + reason).c_str());
+	bool VulkanCommandList::ValidateGraphicsState(const char* operation) {
+		if (GetState() != CommandListState::Recording || !m_Rendering || !m_GraphicsShader) {
+			m_Device->SendDebugMessage(DebugSeverity::Error,
+				DebugMessageType::General,
+				(std::string(operation) + ": Requires an active rendering scope and a bound graphics shader program.")
+					.c_str());
 			return false;
-		};
-		if (GetState() != CommandListState::Recording || !m_Rendering || m_GraphicsPipeline == nullptr) {
-			return reject("Requires an active rendering scope and a bound graphics pipeline.");
 		}
-
-		const auto& formats = m_GraphicsPipeline->GetRenderTargetFormats();
-		if (formats.colorFormats != m_RenderTargetFormats.colorFormats ||
-			(formats.depthFormat != m_RenderTargetFormats.depthFormat &&
-				m_RenderTargetFormats.depthFormat != TextureFormat::Unknown)) {
-			return reject("Pipeline attachment formats must match the active rendering scope.");
+		if (!m_GraphicsState.ValidateAndApply(m_CommandBuffer,
+				m_GraphicsShader,
+				m_VulkanRenderingFormats,
+				m_RenderingSampleCount,
+				m_ReadOnlyDepth,
+				m_ReadOnlyStencil,
+				operation)) {
+			return false;
 		}
-		if (m_RenderingSampleCount != 0 && m_GraphicsPipeline->GetSampleCount() != m_RenderingSampleCount) {
-			return reject("Pipeline sample count must match the source attachments.");
-		}
-		if (m_ReadOnlyDepth && m_GraphicsPipeline->WritesDepth()) {
-			return reject("A depth-writing pipeline cannot draw into a read-only depth attachment.");
-		}
-		if (m_ReadOnlyStencil && m_GraphicsPipeline->WritesStencil()) {
-			return reject("A stencil-writing pipeline cannot draw into a read-only stencil attachment.");
-		}
-
+		m_ActiveVertexBindings = m_GraphicsState.GetVertexBindings();
 		return true;
 	}
 
@@ -281,7 +274,7 @@ namespace RealRHI {
 		}
 
 		uint32_t sampleCount = 0;
-		RenderTargetFormats formats;
+		VulkanRenderingFormats formats;
 		struct AttachmentUse {
 			VulkanTextureView* view;
 			TextureLayout layout;
@@ -461,7 +454,7 @@ namespace RealRHI {
 				use.layout,
 				"BeginRendering");
 		}
-		m_RenderTargetFormats = std::move(formats);
+		m_VulkanRenderingFormats = std::move(formats);
 		m_RenderingSampleCount = sampleCount;
 		m_ReadOnlyDepth = renderingInfo.hasDepth && renderingInfo.depthAttachment.readOnlyDepth;
 		m_ReadOnlyStencil = hasStencil && renderingInfo.depthAttachment.readOnlyStencil;
@@ -495,7 +488,7 @@ namespace RealRHI {
 			.minDepth = vp.minDepth,
 			.maxDepth = vp.maxDepth,
 		};
-		vkCmdSetViewport(m_CommandBuffer, 0, 1, &viewport);
+		vkCmdSetViewportWithCount(m_CommandBuffer, 1, &viewport);
 	}
 
 	void VulkanCommandList::SetScissor(const Rect& rect) {
@@ -508,7 +501,7 @@ namespace RealRHI {
 			.offset = {.x = rect.x, .y = rect.y},
 			.extent = {.width = rect.width, .height = rect.height},
 		};
-		vkCmdSetScissor(m_CommandBuffer, 0, 1, &scissor);
+		vkCmdSetScissorWithCount(m_CommandBuffer, 1, &scissor);
 	}
 
 	void VulkanCommandList::UseResource(Texture* texture) {
@@ -586,35 +579,49 @@ namespace RealRHI {
 		m_ShaderViews.clear();
 	}
 
-	void VulkanCommandList::BindPipeline(Pipeline* pipeline) {
-		auto* vulkanPipeline = static_cast<VulkanPipeline*>(pipeline);
-		if (GetState() != CommandListState::Recording || vulkanPipeline == nullptr) {
+	void VulkanCommandList::BindShaderProgram(Shader* shader) {
+		if (GetState() != CommandListState::Recording || !shader) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
-				"BindPipeline: Begin command recording and provide a non-null pipeline before binding.");
-
+				"BindShaderProgram: Requires an active recording and a non-null shader program.");
 			return;
 		}
-
-		RetainResource(vulkanPipeline);
-		vkCmdBindPipeline(m_CommandBuffer, vulkanPipeline->GetBindPoint(), vulkanPipeline->GetPipeline());
+		auto* program = static_cast<VulkanShader*>(shader);
+		const auto& entries = program->GetReflection().entryPoints;
+		const bool compute = entries.size() == 1 && entries[0].stage == ShaderStage::Compute;
+		auto*& bound = compute ? m_ComputeShader : m_GraphicsShader;
+		RetainResource(program);
+		if (bound != program) {
+			program->Bind(m_CommandBuffer);
+			bound = program;
+		}
 		m_Device->BindDescriptorHeaps(m_CommandBuffer);
+	}
 
-		if (vulkanPipeline->GetBindPoint() == VK_PIPELINE_BIND_POINT_COMPUTE) {
-			m_ComputePipelineBound = true;
+	Result VulkanCommandList::SetGraphicsState(const GraphicsState& state) {
+		if (GetState() != CommandListState::Recording) {
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "SetGraphicsState: Requires an active recording.");
+			return Result::InvalidParameter;
 		}
-		else {
-			m_GraphicsPipeline = vulkanPipeline;
-			m_ActiveVertexBindings = vulkanPipeline->GetVertexBindings();
+		return m_GraphicsState.SetState(state);
+	}
+
+	Result VulkanCommandList::SetVertexLayout(const VertexLayout& layout) {
+		if (GetState() != CommandListState::Recording) {
+			m_Device->SendDebugMessage(
+				DebugSeverity::Error, DebugMessageType::General, "SetVertexLayout: Requires an active recording.");
+			return Result::InvalidParameter;
 		}
+		return m_GraphicsState.SetVertexLayout(layout);
 	}
 
 	void VulkanCommandList::DispatchCompute(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) {
-		if (GetState() != CommandListState::Recording || m_Rendering || !m_ComputePipelineBound || groupCountX == 0 ||
+		if (GetState() != CommandListState::Recording || m_Rendering || !m_ComputeShader || groupCountX == 0 ||
 			groupCountY == 0 || groupCountZ == 0) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
-				"DispatchCompute: A compute pipeline must be bound, the command list must be "
+				"DispatchCompute: A compute shader program must be bound, the command list must be "
 				"recording, and all three dispatch group counts must be nonzero.");
 			return;
 		}
@@ -788,7 +795,7 @@ namespace RealRHI {
 
 	void VulkanCommandList::DispatchComputeIndirect(Buffer* arguments, uint64_t offset) {
 		static_assert(sizeof(DispatchIndirectArguments) == sizeof(VkDispatchIndirectCommand));
-		if (GetState() != CommandListState::Recording || m_Rendering || !m_ComputePipelineBound) {
+		if (GetState() != CommandListState::Recording || m_Rendering || !m_ComputeShader) {
 			m_Device->SendDebugMessage(DebugSeverity::Error,
 				DebugMessageType::General,
 				"DispatchComputeIndirect: Requires recording outside rendering and a bound compute pipeline.");

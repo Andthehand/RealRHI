@@ -118,7 +118,7 @@ namespace RealRHI::Examples {
 			return depthResult;
 		}
 
-		const Result pipelineResult = CreatePipelines(outputFormat);
+		const Result pipelineResult = CreatePrograms();
 		if (pipelineResult != Result::Success) {
 			return pipelineResult;
 		}
@@ -147,75 +147,18 @@ namespace RealRHI::Examples {
 		return Result::Failed;
 	}
 
-	Result SceneRenderer::CreatePipelines(TextureFormat outputFormat) {
-		Ref<Shader> shadowShader;
-		Result result =
-			m_Device->CreateShader({.moduleName = "shadow", .debugName = "Scene shadow shader"}, shadowShader);
+	Result SceneRenderer::CreatePrograms() {
+		auto result =
+			m_Device->CreateShader({.moduleName = "shadow", .debugName = "Scene shadow shader"}, m_ShadowShader);
 		if (result != Result::Success) {
 			return result;
 		}
-
-		// Only position is consumed, but the shadow pass shares the full scene vertex stream.
-		result = m_Device->CreateGraphicsPipeline(
-			{.shader = shadowShader.Raw(),
-				.vertexLayout =
-					{.bindings = {{.stride = sizeof(Vertex)}}, .attributes = {{.format = VertexFormat::Float3}}},
-				.rasterState =
-					{.cullMode = CullMode::None,
-						.depthBias = {.enable = true, .constantFactor = 1.25f, .slopeFactor = 1.75f}},
-				.renderTargetFormats = {.depthFormat = m_DepthFormat},
-				.debugName = "Scene shadow depth pipeline"},
-			m_ShadowPipeline);
+		result = m_Device->CreateShader({.moduleName = "scene", .debugName = "Scene geometry shader"}, m_SceneShader);
 		if (result != Result::Success) {
 			return result;
 		}
-
-		Ref<Shader> sceneShader;
-		result = m_Device->CreateShader({.moduleName = "scene", .debugName = "Scene geometry shader"}, sceneShader);
-		if (result != Result::Success) {
-			return result;
-		}
-
-		PipelineDesc sceneDesc{
-			.shader = sceneShader.Raw(),
-
-			.rasterState = {.cullMode = CullMode::None},
-			.renderTargetFormats =
-				{
-					.colorFormats = {TextureFormat::RGBA8_UNorm},
-					.depthFormat = m_DepthFormat,
-				},
-			.debugName = "Scene opaque pipeline",
-		};
-		result = m_Device->CreateGraphicsPipeline(sceneDesc, m_OpaquePipeline);
-		if (result != Result::Success) {
-			return result;
-		}
-
-		sceneDesc.depthState.depthWriteEnable = false;
-		sceneDesc.blendState.enable = true;
-		sceneDesc.debugName = "Scene transparent pipeline";
-		result = m_Device->CreateGraphicsPipeline(sceneDesc, m_TransparentPipeline);
-		if (result != Result::Success) {
-			return result;
-		}
-
-		Ref<Shader> postprocessShader;
-		result = m_Device->CreateShader(
-			{.moduleName = "postprocess", .debugName = "Scene postprocess shader"}, postprocessShader);
-		if (result != Result::Success) {
-			return result;
-		}
-
-		return m_Device->CreateGraphicsPipeline(
-			{
-				.shader = postprocessShader.Raw(),
-				.rasterState = {.cullMode = CullMode::None},
-				.depthState = {.depthTestEnable = false, .depthWriteEnable = false},
-				.renderTargetFormats = {.colorFormats = {outputFormat}},
-				.debugName = "Scene postprocess pipeline",
-			},
-			m_PostprocessPipeline);
+		return m_Device->CreateShader(
+			{.moduleName = "postprocess", .debugName = "Scene postprocess shader"}, m_PostprocessShader);
 	}
 
 	Result SceneRenderer::CreateGeometry(UploadContext& uploads, Ref<Buffer>& vertices, Ref<Buffer>& indices) {
@@ -517,7 +460,12 @@ namespace RealRHI::Examples {
 		commands.DrawIndexed(6);
 
 		if (pass == GeometryPass::Lighting) {
-			commands.BindPipeline(m_TransparentPipeline.Raw());
+			commands.BindShaderProgram(m_SceneShader.Raw());
+			commands.SetVertexLayout(m_SceneShader->GetReflection().vertexLayout);
+			commands.SetGraphicsState(
+				{.raster = {.cullMode = CullMode::None},
+					.depth = {.depthWriteEnable = false},
+					.blend = {.enable = true}});
 			parameters.translationAndScale = {-0.9f, 0.1f, 1.7f, 1.1f};
 			parameters.tint = {0.1f, 0.9f, 0.65f, 0.35f};
 			commands.SetPushConstants(&parameters, sizeof(parameters));
@@ -537,14 +485,23 @@ namespace RealRHI::Examples {
 				.depthAttachment = {.target = targets.shadow->GetTextureView()},
 				.renderArea = {.width = m_ShadowResolution, .height = m_ShadowResolution}});
 		if (shadowsEnabled) {
-			commands.BindPipeline(m_ShadowPipeline.Raw());
+			commands.BindShaderProgram(m_ShadowShader.Raw());
+			commands.SetVertexLayout(
+				{.bindings = {{.stride = sizeof(Vertex)}}, .attributes = {{.format = VertexFormat::Float3}}});
+			commands.SetGraphicsState(
+				{.raster = {
+					 .cullMode = CullMode::None,
+					 .depthBias = {.enable = true, .constantFactor = 1.25f, .slopeFactor = 1.75f}
+				 }});
 			DrawGeometry(commands, targets, rotation, GeometryPass::Shadow, false);
 		}
 		commands.EndRendering();
 	}
 
 	void SceneRenderer::DrawScene(CommandList& commands, FrameTargets& targets, float rotation, bool shadowsEnabled) {
-		commands.BindPipeline(m_OpaquePipeline.Raw());
+		commands.BindShaderProgram(m_SceneShader.Raw());
+		commands.SetVertexLayout(m_SceneShader->GetReflection().vertexLayout);
+		commands.SetGraphicsState({.raster = {.cullMode = CullMode::None}});
 		commands.UseResource(m_Pattern.Raw());
 		commands.UseResource(m_Sampler.Raw());
 		commands.UseResource(targets.shadow);
@@ -563,7 +520,10 @@ namespace RealRHI::Examples {
 			.colorAttachments = {{.target = output}},
 			.renderArea = {.width = targets.width, .height = targets.height},
 		});
-		commands.BindPipeline(m_PostprocessPipeline.Raw());
+		commands.BindShaderProgram(m_PostprocessShader.Raw());
+		commands.SetVertexLayout({});
+		commands.SetGraphicsState(
+			{.raster = {.cullMode = CullMode::None}, .depth = {.depthTestEnable = false, .depthWriteEnable = false}});
 		commands.UseResource(targets.color);
 		commands.UseResource(m_Sampler.Raw());
 

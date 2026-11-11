@@ -17,14 +17,14 @@ namespace RealRHI {
 		Result Init(const CompiledShaderProgram& program, const char* debugName);
 
 		const ShaderReflection& GetReflection() const override { return m_Reflection; }
-		VkShaderModule GetShaderModule() const { return m_ShaderModule; }
-		const std::vector<std::string>& GetExportedEntryPoints() const { return m_ExportedEntryPoints; }
+		void Bind(VkCommandBuffer commands) const;
 
 	private:
 		const VulkanDevice* m_Device = nullptr;
 
-		VkShaderModule m_ShaderModule = VK_NULL_HANDLE;
+		std::vector<VkShaderEXT> m_Shaders;
+		std::vector<VkShaderStageFlagBits> m_Stages;
 		ShaderReflection m_Reflection;
-		std::vector<std::string> m_ExportedEntryPoints;
+		uint32_t m_CountedStages = 0;
 	};
 }

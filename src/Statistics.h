@@ -29,7 +29,8 @@ namespace RealRHI {
 		// External swapchain images are excluded. Bytes are VMA allocation sizes.
 		ResourceStatistics buffers;
 		ResourceStatistics textures;
-		ResourceStatistics pipelines;
+		// Live compiled shader stages (a graphics program can own multiple stages).
+		ResourceStatistics shaders;
 		DescriptorStatistics descriptors;
 
 		// Successful staging includes cancelled batches; submission counts only successful batches.

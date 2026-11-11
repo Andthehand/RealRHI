@@ -419,15 +419,8 @@ namespace {
 
 	void TestTexturePasses(Device& device) {
 		Ref<Shader> shader;
-		Ref<Pipeline> pipeline;
-		Expect(device.CreateShader({.moduleName = "render_graph"}, shader) == Result::Success &&
-				device.CreateGraphicsPipeline(
-					{.shader = shader.Raw(),
-						.rasterState = {.cullMode = CullMode::None},
-						.depthState = {.depthTestEnable = false, .depthWriteEnable = false},
-						.renderTargetFormats = {.colorFormats = {TextureFormat::RGBA8_UNorm}}},
-					pipeline) == Result::Success,
-			"Create render graph texture pipeline");
+		Expect(device.CreateShader({.moduleName = "render_graph"}, shader) == Result::Success,
+			"Compile rendering program");
 		Ref<Buffer> readback;
 		Expect(device.CreateBuffer(
 				   {.size = 8 * 8 * 8, .usage = BufferUsage::TransferDst, .memoryUsage = MemoryUsage::GPUToCPU},
@@ -446,7 +439,10 @@ namespace {
 				{.colorAttachments = {{.target = target->GetTextureView()}}, .renderArea = {.width = 8, .height = 8}});
 			list.SetViewport({.width = 8, .height = 8});
 			list.SetScissor({.width = 8, .height = 8});
-			list.BindPipeline(pipeline.Raw());
+			list.BindShaderProgram(shader.Raw());
+			list.SetGraphicsState(
+				{.raster = {.cullMode = CullMode::None},
+					.depth = {.depthTestEnable = false, .depthWriteEnable = false}});
 			struct Parameters {
 				std::array<float, 4> color;
 				uint32_t textureIndex = 0;
@@ -516,9 +512,8 @@ namespace {
 				"Execute allocates the two declared textures");
 			graph.Reset();
 		}
-		pipeline.Reset();
 		shader.Reset();
-		device.ClearShaderAndPipelineCaches();
+		device.ClearShaderCache();
 		Expect(commands->End() == Result::Success, "End graph texture commands");
 		const auto token = device.GetGraphicsCommandQueue()->Submit(*commands);
 		Expect(token.IsValid(), "Pass-local resource declarations permit sampled-to-attachment reuse");
@@ -554,10 +549,8 @@ namespace {
 				"Create graph readback");
 		}
 		Ref<Shader> shader;
-		Ref<Pipeline> pipeline;
-		Expect(device.CreateShader({.moduleName = "ownership_compute"}, shader) == Result::Success &&
-				device.CreateComputePipeline({.shader = shader.Raw()}, pipeline) == Result::Success,
-			"Create graph compute pipeline");
+		Expect(device.CreateShader({.moduleName = "ownership_compute"}, shader) == Result::Success,
+			"Create graph compute shader");
 		Ref<CommandAllocator> allocator;
 		Ref<CommandList> commands;
 		Expect(device.CreateCommandAllocator(QueueType::Graphics, allocator) == Result::Success &&
@@ -622,7 +615,7 @@ namespace {
 										  RenderGraphAccess::ReadWrite}}},
 					[&](CommandList& list) {
 						order.push_back("Compute");
-						list.BindPipeline(pipeline.Raw());
+						list.BindShaderProgram(shader.Raw());
 						list.UseResource(graph.GetBuffer(working));
 						const uint32_t parameters[] = {graph.GetBuffer(working)->GetDescriptorIndex(), 64};
 						list.SetPushConstants(parameters, sizeof(parameters));
@@ -648,9 +641,8 @@ namespace {
 				"Read/write hazards preserve callback ordering");
 		}
 		upload.Reset();
-		pipeline.Reset();
 		shader.Reset();
-		device.ClearShaderAndPipelineCaches();
+		device.ClearShaderCache();
 		Expect(commands->End() == Result::Success, "End recording after an invalid and a valid graph");
 		const auto completion = device.GetGraphicsCommandQueue()->Submit(*commands);
 		Expect(completion.IsValid(), "Graph destruction and invalid recording do not poison submission");

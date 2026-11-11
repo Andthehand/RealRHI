@@ -27,7 +27,7 @@ namespace RealRHI {
 	enum class VulkanResourceKind {
 		Buffer,
 		Texture,
-		Pipeline
+		Shader
 	};
 
 	struct QueueFamilyIndices {
@@ -97,9 +97,7 @@ namespace RealRHI {
 
 		Result CreateWindow(const WindowDesc& desc, Ref<Window>& outWindow) const override;
 		Result CreateShader(const ShaderDesc& desc, Ref<Shader>& outShader) const override;
-		Result CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) const override;
-		Result CreateComputePipeline(const ComputePipelineDesc& desc, Ref<Pipeline>& outPipeline) const override;
-		void ClearShaderAndPipelineCaches() const override;
+		void ClearShaderCache() const override;
 		Result CreateSwapchain(const SwapchainDesc& desc, Ref<Swapchain>& outSwapchain) const override;
 		Result CreateBuffer(const BufferDesc& desc, Ref<Buffer>& outBuffer) const override;
 		Result CreateTexture(const TextureDesc& desc, Ref<Texture>& outTexture) const override;
@@ -131,13 +129,6 @@ namespace RealRHI {
 		bool SupportsDepthBiasClamp() const { return m_Capabilities.features.depthBiasClamp; }
 
 	private:
-		struct CachedPipeline {
-			// Retain shader identity so its address cannot be reused by a later program.
-			Ref<Shader> shader;
-			Ref<Pipeline> pipeline;
-		};
-
-	private:
 		void InitCapabilities();
 
 		Result SetDebugObjectName(VkObjectType type, uint64_t handle, const char* name) const;
@@ -161,7 +152,6 @@ namespace RealRHI {
 		std::unique_ptr<SlangShaderCompiler> m_ShaderCompiler;
 		mutable std::mutex m_CacheMutex;
 		mutable std::unordered_map<uint64_t, Ref<Shader>> m_Shaders;
-		mutable std::unordered_map<std::string, CachedPipeline> m_Pipelines;
 		VkInstance m_Instance = VK_NULL_HANDLE;
 		VkDebugUtilsMessengerEXT m_DebugMessenger = VK_NULL_HANDLE;
 		VkPhysicalDevice m_PhysicalDevice = VK_NULL_HANDLE;
@@ -189,7 +179,8 @@ namespace RealRHI {
 		mutable std::mutex m_StatisticsMutex;
 		mutable DeviceStatistics m_Statistics;
 
-		static constexpr std::array<const char*, 5> s_DeviceExtensions{
+		static constexpr std::array<const char*, 6> s_DeviceExtensions{
+			VK_EXT_SHADER_OBJECT_EXTENSION_NAME,
 			VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
 			VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 			VK_KHR_MAINTENANCE_5_EXTENSION_NAME,

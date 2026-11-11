@@ -84,13 +84,11 @@ namespace {
 		Expect(s_Errors == s_ExpectedErrors, "Unsupported surfaces report their cause once");
 	}
 
-	Ref<Pipeline> MakePipeline(Device& device, const char* entry) {
+	Ref<Shader> MakeProgram(Device& device, const char* entry) {
 		Ref<Shader> shader;
-		Ref<Pipeline> pipeline;
-		Expect(device.CreateShader({.moduleName = "backbuffer", .entryPoints = {{entry}}}, shader) == Result::Success &&
-				device.CreateComputePipeline({.shader = shader.Raw()}, pipeline) == Result::Success,
-			"Create backbuffer compute pipeline");
-		return pipeline;
+		Expect(device.CreateShader({.moduleName = "backbuffer", .entryPoints = {{entry}}}, shader) == Result::Success,
+			"Create backbuffer compute shader");
+		return shader;
 	}
 
 	void TestRendering(Device& device, Window* window) {
@@ -104,8 +102,8 @@ namespace {
 		Expect(swapchain->GetBackBufferFormat() == TextureFormat::RGBA8_UNorm ||
 				swapchain->GetBackBufferFormat() == TextureFormat::BGRA8_UNorm,
 			"Select a UNorm storage format");
-		auto render = MakePipeline(device, "renderMain");
-		auto read = MakePipeline(device, "readMain");
+		auto render = MakeProgram(device, "renderMain");
+		auto read = MakeProgram(device, "readMain");
 		for (uint32_t iteration = 0; iteration < 8; ++iteration) {
 			// Change between frames, repeat a setting, and cancel a pending change.
 			if (iteration == 1 || iteration == 2 || iteration == 5) {
@@ -133,8 +131,7 @@ namespace {
 			Expect(s_SwapchainCreations == creationsBeforeAcquire + (shouldRecreate ? 1u : 0u),
 				"VSync changes recreate once at acquisition; repeated and cancelled changes do not");
 			const bool expectedVSync = iteration == 0 || iteration == 4 || iteration >= 6;
-			Expect(swapchain->IsVSyncEnabled() == expectedVSync,
-				"VSync query reports the requested setting");
+			Expect(swapchain->IsVSyncEnabled() == expectedVSync, "VSync query reports the requested setting");
 			if (expectedVSync) {
 				Expect(s_LastPresentMode == VK_PRESENT_MODE_FIFO_KHR, "Enabling VSync restores FIFO presentation");
 			}
@@ -178,7 +175,7 @@ namespace {
 									  RenderGraphAccess::Write}},
 							  .queue = queue},
 				[&](CommandList& list) {
-					list.BindPipeline(render.Raw());
+					list.BindShaderProgram(render.Raw());
 					list.UseResource(frame.backBufferView);
 					list.SetPushConstants(parameters, sizeof(parameters));
 					list.DispatchCompute((frame.width + 7) / 8, (frame.height + 7) / 8, 1);
@@ -193,7 +190,7 @@ namespace {
 								RenderGraphAccess::Write}},
 					.queue = queue},
 				[&](CommandList& list) {
-					list.BindPipeline(read.Raw());
+					list.BindShaderProgram(read.Raw());
 					list.UseResource(frame.backBufferView);
 					list.UseResource(pixels.Raw());
 					list.SetPushConstants(parameters, sizeof(parameters));

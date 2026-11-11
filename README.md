@@ -11,7 +11,7 @@ A C++20 rendering hardware interface with a Vulkan backend, Slang shaders, bindl
 
 The SDK supplies Vulkan/SPIR-V headers, SDL3, VMA, and Slang. CMake checks these headers and libraries and runs a CPU-only Slang probe for `spvDescriptorHeapEXT` before fetching Volk or building the backend. Volk is fetched at commit `0dc3ce00bf98b9f0b6fe708ca0f7eb74e2830173`. No SDK downloads happen during a normal CMake configuration.
 
-The SDK and a compatible GPU are separate requirements. Building the backend and running shader compiler tests do not require a GPU. Rendering and integration tests require a driver/device supporting the backend's required extensions, including `VK_EXT_descriptor_heap`, `VK_KHR_shader_untyped_pointers`, and `VK_KHR_maintenance5`. Device creation reports missing requirements.
+The SDK and a compatible GPU are separate requirements. Building the backend and running shader compiler tests do not require a GPU. Rendering and integration tests require a driver/device supporting the backend's required extensions, including `VK_EXT_shader_object`, `VK_EXT_descriptor_heap`, `VK_KHR_shader_untyped_pointers`, and `VK_KHR_maintenance5`. Device creation reports missing requirements.
 
 ## Build and test on Windows
 
@@ -54,6 +54,34 @@ This configuration exposes the `RealRHICore` header-only target, builds the back
 
 ## Architecture and API contracts
 
+The Vulkan backend uses shader objects for graphics and compute; it creates no native `VkPipeline` or `VkShaderModule` objects. A `Shader` owns compiled `VkShaderEXT` stages, with graphics stages linked as one program. `BindShaderProgram` binds graphics or compute programs independently and retains them through command-list reset. `SetGraphicsState` accepts a plain value containing raster, depth, stencil, multisample, topology, and blend settings. `SetVertexLayout` selects vertex input independently; until called, the active graphics program's reflected layout is used. An explicitly empty layout means no vertex input.
+
+Set graphics state before drawing. Setters return `Result` and preserve the previous value on failure. Draws validate the selected layout against the shader, blending and sample counts against the active attachments, and depth/stencil writes against read-only aspects. Rendering attachment formats belong to `BeginRendering`, so shader programs and graphics state can be reused across compatible targets without format-specific objects. The backend applies only changed dynamic state groups. Command-list reset clears programs, selected state, and cached dynamic state. `ClearShaderCache` releases cache-owned shaders and compiled programs while recorded references remain valid. `DeviceStatistics::shaders` counts native shader stages.
+
+`Pipeline`, `PipelineDesc`, pipeline creation methods, and `BindPipeline` have been removed. Bind a shader program directly and pass a `GraphicsState` value instead:
+
+```cpp
+commands->BindShaderProgram(materialShader.Raw());
+commands->SetVertexLayout(vertexLayout);
+GraphicsState state{
+    .raster = {.cullMode = CullMode::Back},
+    .depth = {.depthTestEnable = true, .depthWriteEnable = true},
+};
+commands->SetGraphicsState(state);
+commands->Draw(opaqueVertexCount);
+state.depth.depthWriteEnable = false;
+state.blend.enable = true;
+commands->SetGraphicsState(state);
+commands->Draw(transparentVertexCount);
+
+commands->EndRendering();
+commands->BindShaderProgram(cullingShader.Raw());
+// Dispatch outside the rendering scope.
+commands->DispatchCompute(groupCount, 1, 1);
+```
+
+Devices without native shader object support are rejected; the backend does not automatically enable an emulation layer.
+
 `RealRHICore` provides the resource/device interfaces and reference-counting, queue, and cleanup helpers. `RealRHIGraph` implements graph planning and transient resource pooling against those interfaces. `RealRHI` adds the Vulkan backend and Slang compiler and links the graph library transitively. Applications using `RealRHI` keep their existing link target; graph-only users can link `RealRHIGraph` without an SDK.
 
 Graph scheduling indexes users by resource and groups readers by layout, avoiding comparisons between unrelated passes or compatible readers. A priority queue selects the earliest inserted ready pass, preserving deterministic execution order. Diagnostics retain every direct hazard and explicit prerequisite in their original order; graphs with many conflicting writes can still require a quadratic number of dependency edges.
@@ -86,7 +114,7 @@ target_link_libraries(MyApplication PRIVATE RealRHI Tracy::TracyClient)
 For a standalone RealRHI build with an installed, enabled Tracy package, configure
 with `-DREALRHI_ENABLE_TRACY=ON -DCMAKE_PREFIX_PATH=<Tracy-install-prefix>`.
 Use a matching Tracy profiler to capture application and RealRHI zones together.
-Zones cover shader compilation, pipeline creation, uploads, command list lifecycle,
+Zones cover shader compilation, graphics state preparation, uploads, command list lifecycle,
 queue submission (with nested resource validation and native submission), waits,
 and render graph compilation/allocation/execution. Graph pass CPU zones carry the
 pass name as zone text. Failed calls and early returns also close their CPU zones.
@@ -187,7 +215,7 @@ Create the swapchain with `{.window = window.Raw(), .enableStorage = true}`.
 Each acquired `frame.backBufferView` then exposes `GetStorageImageDescriptorIndex()`.
 Import the frame with `RenderGraph::ImportBackBuffer`, declare a compute pass with
 `ComputeShader`/`ShaderWrite`, `TextureLayout::General`, and `RenderGraphAccess::Write`,
-then bind the pipeline, call `UseResource(frame.backBufferView)`, pass the storage
+then bind the compute shader program, call `UseResource(frame.backBufferView)`, pass the storage
 descriptor to an `RWTexture2D<float4>` handle, and dispatch. `graph.Submit` waits for
 acquisition, transfers ownership between queue families, and presents automatically.
 The example uses `QueueType::Compute`; dispatching on `QueueType::Graphics` also works.
@@ -196,7 +224,7 @@ The final presentation batch joins on graphics, including when the last image us
 Storage is opt-in and requires surface storage support and a compatible UNorm format;
 creation fails with a diagnostic if either is unavailable. The backend prefers RGBA8_UNorm
 and falls back to BGRA8_UNorm. Use the existing descriptor-heap shader handles as in the
-example, and query `GetBackBufferFormat()` when creating graphics pipelines for this swapchain.
+example. The active rendering attachments determine their formats.
 UNorm storage writes do not apply sRGB encoding: compute shaders should output display-encoded
 colors (or explicitly encode linear colors). Default swapchains retain their existing format
 selection and attachment-only usage. `Device::Submit` retains its color-attachment transitions;
@@ -263,25 +291,25 @@ Aliasing is opt-in and also works without a pool. Identical graph-created resour
 
 ## Stencil and multisampling
 
-Stencil state lives in `PipelineDesc::stencilState`. Enable it with a stencil-capable depth format (`D24_UNorm_S8_UInt` or `D32_Float_S8_UInt`), then configure the front and back faces independently:
+Stencil state lives in `GraphicsState::stencil`. Enable it with a stencil-capable depth format (`D24_UNorm_S8_UInt` or `D32_Float_S8_UInt`), then configure the front and back faces independently:
 
 ```cpp
-pipelineDesc.stencilState.enable = true;
-pipelineDesc.stencilState.front = {
+state.stencil.enable = true;
+state.stencil.front = {
     .passOp = StencilOp::Replace,
     .compareOp = CompareOp::Always,
     .reference = 1,
 };
-pipelineDesc.stencilState.back = pipelineDesc.stencilState.front;
+state.stencil.back = state.stencil.front;
 ```
 
-Each face has fail/pass/depth-fail operations, a comparison, comparison/write masks, and a reference value. Depth and stencil attachments have separate load/store operations. For read-only aspects, use `Load` or `DontCare` and a pipeline that cannot write that aspect. `readOnlyDepth` and `readOnlyStencil` both default to false; stencil load/store defaults to Clear/Store.
+Each face has fail/pass/depth-fail operations, a comparison, comparison/write masks, and a reference value. Depth and stencil attachments have separate load/store operations. For read-only aspects, use `Load` or `DontCare` and graphics state that cannot write that aspect. `readOnlyDepth` and `readOnlyStencil` both default to false; stencil load/store defaults to Clear/Store.
 
-Textures and pipelines default to one sample. Query `GetTextureFormatSupport(format)` for attachment sample-count masks, and use `SupportsTexture(desc)` to check the complete combination of usages and dimensions. Match the pipeline sample count to every source attachment:
+Textures and graphics state default to one sample. Query `GetTextureFormatSupport(format)` for attachment sample-count masks, and use `SupportsTexture(desc)` to check the complete combination of usages and dimensions. Match the graphics state sample count to every source attachment:
 
 ```cpp
 textureDesc.sampleCount = 4;
-pipelineDesc.multisampleState.sampleCount = 4;
+state.multisample.sampleCount = 4;
 // Optional: sampleMask and alphaToCoverageEnable.
 
 ColorAttachment color{
@@ -316,7 +344,7 @@ The pattern benchmark includes already-fragmented submitted buffer state. Setup 
 `SceneResourceBenchmarks` reuses the scene renderer offscreen at 960x640 with shadows.
 It draws a fixed grid using either one shared asset set (`--shared`) or a separate
 vertex buffer, index buffer, and 32x32 texture for each object. Each draw has its own
-material tint; pipelines and explicitly bound samplers are shared. Sampled textures
+material tint; shader programs and explicitly bound samplers are shared. Sampled textures
 also own an implicit default sampler, whose descriptor is shared with identical
 sampler settings across the device. `--stream N` overwrites N distinct
 vertex buffers and textures per frame, rotating through the asset sets. Each streamed

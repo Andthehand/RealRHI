@@ -92,7 +92,7 @@ namespace {
 		Expect(actual.textures.liveCount == expected.textures.liveCount &&
 				actual.textures.liveBytes == expected.textures.liveBytes,
 			"Texture allocations return to baseline");
-		Expect(actual.pipelines.liveCount == expected.pipelines.liveCount, "Pipelines return to baseline");
+		Expect(actual.shaders.liveCount == expected.shaders.liveCount, "Shader stages return to baseline");
 		Expect(actual.descriptors.bufferCount == expected.descriptors.bufferCount &&
 				actual.descriptors.imageCount == expected.descriptors.imageCount &&
 				actual.descriptors.samplerCount == expected.descriptors.samplerCount,
@@ -145,7 +145,7 @@ namespace {
 	}
 
 	void TestResourceNames(Device& device) {
-		device.ClearShaderAndPipelineCaches();
+		device.ClearShaderCache();
 		const bool enabled = static_cast<VulkanDevice&>(device).SupportsDebugLabels();
 		const auto baseline = device.GetStatistics();
 		s_NamedObjects.clear();
@@ -195,35 +195,18 @@ namespace {
 
 			Ref<Shader> graphicsShader;
 			Ref<Shader> computeShader;
-			Ref<Pipeline> graphicsPipeline;
-			Ref<Pipeline> computePipeline;
 			Expect(device.CreateShader({.moduleName = "draw",
 										   .entryPoints =
 											   {{"vertexMain", RealRHI::ShaderStage::Vertex},
 												   {"fragmentMain", RealRHI::ShaderStage::Fragment}},
 										   .debugName = "Named graphics shader"},
 					   graphicsShader) == Result::Success,
-				"Name a graphics shader module");
+				"Name graphics shader objects");
 			Expect(device.CreateShader({.moduleName = "ownership_compute",
 										   .entryPoints = {{"computeMain", RealRHI::ShaderStage::Compute}},
 										   .debugName = "Named compute shader"},
 					   computeShader) == Result::Success,
-				"Name a compute shader module");
-			Expect(device.CreateGraphicsPipeline(
-					   {
-						   .shader = graphicsShader.Raw(),
-						   .vertexLayout =
-							   {.bindings = {{.stride = sizeof(float) * 2}},
-								   .attributes = {{.format = RealRHI::VertexFormat::Float2}}},
-						   .depthState = {.depthTestEnable = false, .depthWriteEnable = false},
-						   .renderTargetFormats = {.colorFormats = {TextureFormat::RGBA8_UNorm}},
-						   .debugName = "Named graphics pipeline",
-					   },
-					   graphicsPipeline) == Result::Success,
-				"Name a graphics pipeline");
-			Expect(device.CreateComputePipeline({.shader = computeShader.Raw(), .debugName = "Named compute pipeline"},
-					   computePipeline) == Result::Success,
-				"Name a compute pipeline");
+				"Name a compute shader object");
 
 			for (uint32_t index = 0; index < 64; ++index) {
 				const std::string name = "Temporary sampler " + std::to_string(index);
@@ -233,18 +216,25 @@ namespace {
 					"Name identical descriptors while reusing a slot");
 			}
 		}
-		device.ClearShaderAndPipelineCaches();
+		device.ClearShaderCache();
 		CheckResourcesEqual(device.GetStatistics(), baseline);
 		if (enabled) {
+			uint32_t graphicsStages = 0;
+			uint32_t computeStages = 0;
+			for (const auto& named : s_NamedObjects) {
+				Expect(named.type != VK_OBJECT_TYPE_SHADER_MODULE && named.type != VK_OBJECT_TYPE_PIPELINE,
+					"Shader object backend names no shader modules or native pipelines");
+				graphicsStages += named.type == VK_OBJECT_TYPE_SHADER_EXT && named.name == "Named graphics shader";
+				computeStages += named.type == VK_OBJECT_TYPE_SHADER_EXT && named.name == "Named compute shader";
+			}
+			Expect(graphicsStages == 2 && computeStages == 1, "Every compiled shader stage receives its program name");
 			for (const auto& expected : std::vector<NamedObject>{
 					 {VK_OBJECT_TYPE_BUFFER, "Named storage buffer"},
 					 {VK_OBJECT_TYPE_IMAGE, "Named texture"},
 					 {VK_OBJECT_TYPE_IMAGE_VIEW, "Named texture"},
 					 {VK_OBJECT_TYPE_IMAGE_VIEW, "Named custom view"},
-					 {VK_OBJECT_TYPE_SHADER_MODULE, "Named graphics shader"},
-					 {VK_OBJECT_TYPE_SHADER_MODULE, "Named compute shader"},
-					 {VK_OBJECT_TYPE_PIPELINE, "Named graphics pipeline"},
-					 {VK_OBJECT_TYPE_PIPELINE, "Named compute pipeline"},
+					 {VK_OBJECT_TYPE_SHADER_EXT, "Named graphics shader"},
+					 {VK_OBJECT_TYPE_SHADER_EXT, "Named compute shader"},
 				 }) {
 				bool found = false;
 				for (const auto& actual : s_NamedObjects) {
@@ -282,7 +272,7 @@ namespace {
 	}
 
 	void TestUsageCounters(Device& device) {
-		device.ClearShaderAndPipelineCaches();
+		device.ClearShaderCache();
 		const auto before = device.GetStatistics();
 		{
 			Ref<Buffer> buffer;
@@ -307,31 +297,17 @@ namespace {
 
 			Ref<Shader> graphicsShader;
 			Ref<Shader> computeShader;
-			Ref<Pipeline> graphics;
-			Ref<Pipeline> compute;
 			Expect(device.CreateShader({.moduleName = "draw",
 										   .entryPoints =
 											   {{"vertexMain", RealRHI::ShaderStage::Vertex},
 												   {"fragmentMain", RealRHI::ShaderStage::Fragment}}},
 					   graphicsShader) == Result::Success,
 				"Create graphics shader");
-			Expect(device.CreateGraphicsPipeline(
-					   {
-						   .shader = graphicsShader.Raw(),
-						   .vertexLayout =
-							   {.bindings = {{.stride = sizeof(float) * 2}},
-								   .attributes = {{.format = RealRHI::VertexFormat::Float2}}},
-						   .depthState = {.depthTestEnable = false, .depthWriteEnable = false},
-						   .renderTargetFormats = {.colorFormats = {TextureFormat::RGBA8_UNorm}},
-					   },
-					   graphics) == Result::Success,
-				"Create tracked graphics pipeline");
+
 			Expect(device.CreateShader({.moduleName = "ownership_compute",
 										   .entryPoints = {{"computeMain", RealRHI::ShaderStage::Compute}}},
 					   computeShader) == Result::Success,
 				"Create compute shader");
-			Expect(device.CreateComputePipeline({.shader = computeShader.Raw()}, compute) == Result::Success,
-				"Create tracked compute pipeline");
 
 			const auto current = device.GetStatistics();
 			Expect(current.buffers.liveCount == before.buffers.liveCount + 1 &&
@@ -340,7 +316,8 @@ namespace {
 			Expect(current.textures.liveCount == before.textures.liveCount + 1 &&
 					current.textures.liveBytes > before.textures.liveBytes,
 				"Owned texture allocation is counted");
-			Expect(current.pipelines.liveCount == before.pipelines.liveCount + 2, "Both pipeline types are counted");
+			Expect(current.shaders.liveCount == before.shaders.liveCount + 3,
+				"Graphics and compute shader stages are counted");
 			Expect(current.descriptors.bufferCount == before.descriptors.bufferCount + 1 &&
 					current.descriptors.imageCount == before.descriptors.imageCount + 3 &&
 					current.descriptors.samplerCount == before.descriptors.samplerCount + 1,
@@ -371,7 +348,7 @@ namespace {
 			vkWriteResourceDescriptorsEXT = nativeWrite;
 			CheckResourcesEqual(device.GetStatistics(), saved);
 		}
-		device.ClearShaderAndPipelineCaches();
+		device.ClearShaderCache();
 		const auto after = device.GetStatistics();
 		CheckResourcesEqual(after, before);
 		Expect(

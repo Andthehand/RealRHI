@@ -1,12 +1,13 @@
 #pragma once
 #include "BarrierDesc.h"
 #include "Buffer.h"
-#include "Pipeline.h"
+#include "GraphicsState.h"
 #include "RefCounted.h"
 #include "RenderingInfo.h"
 #include "Result.h"
 #include "Sampler.h"
 #include "SamplerDesc.h"
+#include "Shader.h"
 #include "Texture.h"
 
 #include <cstdint>
@@ -120,7 +121,12 @@ namespace RealRHI {
 		// or recording synchronization. Requires an active recording and non-null object.
 		virtual void RetainResource(RefCounted* resource) = 0;
 
-		virtual void BindPipeline(Pipeline* pipeline) = 0;
+		// Graphics and compute programs remain bound independently. Programs are retained through reset.
+		virtual void BindShaderProgram(Shader* shader) = 0;
+		// Failed setters leave the previous state unchanged. Attachment and shader compatibility is checked at draw.
+		virtual Result SetGraphicsState(const GraphicsState& state) = 0;
+		// An explicit empty layout means no vertex inputs. Until set, use the graphics shader's reflected layout.
+		virtual Result SetVertexLayout(const VertexLayout& layout) = 0;
 		virtual void SetPushConstants(const void* data, uint32_t size, uint32_t offset = 0) = 0;
 		virtual void DispatchCompute(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) = 0;
 		// Argument buffers require Indirect usage and a 4-byte-aligned offset.

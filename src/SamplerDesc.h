@@ -1,5 +1,5 @@
 #pragma once
-#include "PipelineDesc.h"
+#include "GraphicsState.h"
 
 #include <limits>
 

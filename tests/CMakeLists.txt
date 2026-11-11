@@ -36,8 +36,8 @@ if(REALRHI_BUILD_GPU_TESTS)
     target_compile_definitions(IndirectTests PRIVATE REALRHI_INDIRECT_TESTS
         REALRHI_CULLING_SHADER_DIRECTORY="${RealRHI_SOURCE_DIR}/examples/CullingExample/shaders")
     realrhi_add_test(CapabilitiesTests CapabilitiesTests.cpp)
-    realrhi_add_test(PipelineStateTests PipelineStateTests.cpp)
-    realrhi_add_test(ShaderPipelineTests ShaderPipelineTests.cpp)
+    realrhi_add_test(GraphicsStateTests GraphicsStateTests.cpp)
+    realrhi_add_test(ShaderProgramTests ShaderProgramTests.cpp)
     realrhi_add_test(DiagnosticsTests DiagnosticsTests.cpp)
     realrhi_add_test(TextureTests TextureTests.cpp)
     realrhi_add_test(ComputeBackbufferTests ComputeBackbufferTests.cpp)
@@ -50,7 +50,7 @@ if(REALRHI_BUILD_GPU_TESTS)
     realrhi_add_test(SceneTests SceneTests.cpp "${RealRHI_SOURCE_DIR}/examples/SceneExample/SceneRenderer.cpp")
     realrhi_add_test(DrawTests DrawTests.cpp)
 
-    foreach(name IN ITEMS RenderGraphQueueTests RenderGraphTests PipelineStateTests ShaderPipelineTests DiagnosticsTests TextureTests QueueOwnershipTests DrawTests)
+    foreach(name IN ITEMS RenderGraphQueueTests RenderGraphTests GraphicsStateTests ShaderProgramTests DiagnosticsTests TextureTests QueueOwnershipTests DrawTests)
         target_compile_definitions(${name} PRIVATE
             REALRHI_TEST_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/shaders")
     endforeach()
@@ -59,7 +59,7 @@ if(REALRHI_BUILD_GPU_TESTS)
     target_compile_definitions(SceneTests PRIVATE
         REALRHI_SCENE_SHADER_DIRECTORY="${RealRHI_SOURCE_DIR}/examples/SceneExample/shaders")
 
-    foreach(name IN ITEMS RenderGraphQueueTests TransientResourcePoolTests RenderGraphTests CacheTests IndirectTests CapabilitiesTests PipelineStateTests ShaderPipelineTests DiagnosticsTests TextureTests ComputeBackbufferTests ResourceSafetyTests QueueSubmissionTests QueueOwnershipTests UploadTests SceneTests DrawTests)
+    foreach(name IN ITEMS RenderGraphQueueTests TransientResourcePoolTests RenderGraphTests CacheTests IndirectTests CapabilitiesTests GraphicsStateTests ShaderProgramTests DiagnosticsTests TextureTests ComputeBackbufferTests ResourceSafetyTests QueueSubmissionTests QueueOwnershipTests UploadTests SceneTests DrawTests)
         set_tests_properties(${name} PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
     endforeach()
 endif()

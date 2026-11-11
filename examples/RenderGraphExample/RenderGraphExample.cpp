@@ -39,8 +39,7 @@ namespace {
 			}
 
 			m_Pool = std::make_unique<TransientResourcePool>(*m_Device, 64ull * 1024 * 1024);
-			return CreatePipeline("triangle", TextureFormat::RGBA8_UNorm, m_TrianglePipeline) &&
-				CreatePipeline("postprocess", m_Swapchain->GetBackBufferFormat(), m_PostprocessPipeline);
+			return CreateProgram("triangle", m_TriangleProgram) && CreateProgram("postprocess", m_PostprocessProgram);
 		}
 
 		bool Run(uint32_t frameLimit) {
@@ -79,28 +78,20 @@ namespace {
 			m_Device->WaitIdle();
 			m_Pool->Collect();
 			const auto statistics = m_Pool->GetStatistics();
-			std::cout << "Rendered " << framesRendered << " frames; transient texture allocations: "
-					  << statistics.textureAllocations << ", reuses: " << statistics.textureReuses << '\n';
+			std::cout << "Rendered " << framesRendered
+					  << " frames; transient texture allocations: " << statistics.textureAllocations
+					  << ", reuses: " << statistics.textureReuses << '\n';
 			return frameLimit == 0 || framesRendered == frameLimit;
 		}
 
 	private:
-		bool CreatePipeline(const char* module, TextureFormat format, Ref<Pipeline>& pipeline) {
-			Ref<Shader> shader;
-			if (m_Device->CreateShader({.moduleName = module}, shader) != Result::Success) {
-				return false;
-			}
-			const PipelineDesc desc{
-				.shader = shader.Raw(),
-				.rasterState = {.cullMode = CullMode::None},
-				.depthState = {.depthTestEnable = false, .depthWriteEnable = false},
-				.renderTargetFormats = {.colorFormats = {format}},
-			};
-			return m_Device->CreateGraphicsPipeline(desc, pipeline) == Result::Success;
+		bool CreateProgram(const char* module, Ref<Shader>& program) {
+			return m_Device->CreateShader({.moduleName = module}, program) == Result::Success;
 		}
 
 		static void SetRenderArea(CommandList& commands, const FrameContext& frame) {
-			commands.SetViewport({.width = static_cast<float>(frame.width), .height = static_cast<float>(frame.height)});
+			commands.SetViewport(
+				{.width = static_cast<float>(frame.width), .height = static_cast<float>(frame.height)});
 			commands.SetScissor({.width = frame.width, .height = frame.height});
 		}
 
@@ -119,50 +110,64 @@ namespace {
 			const auto backbuffer = graph.ImportBackBuffer(*m_Swapchain, frame);
 			const ResourceState colorWrite{PipelineStage::ColorAttachmentOutput, ResourceAccess::ColorAttachmentWrite};
 
-			graph.AddPass({
-				.name = "Draw triangle",
-				.resources = {{scene, colorWrite, TextureLayout::ColorAttachment, RenderGraphAccess::Write}},
-			}, [&, scene](CommandList& commands) {
-				// Graph-created textures resolve only when recording begins.
-				commands.BeginRendering({
-					.colorAttachments = {{
-						.target = graph.GetTexture(scene)->GetTextureView(),
-						.clearColor = {0.025f, 0.035f, 0.06f, 1.0f},
-					}},
-					.renderArea = {.width = frame.width, .height = frame.height},
+			graph.AddPass(
+				{
+					.name = "Draw triangle",
+					.resources = {{scene, colorWrite, TextureLayout::ColorAttachment, RenderGraphAccess::Write}},
+				},
+				[&, scene](CommandList& commands) {
+					// Graph-created textures resolve only when recording begins.
+					commands.BeginRendering({
+						.colorAttachments = {{
+							.target = graph.GetTexture(scene)->GetTextureView(),
+							.clearColor = {0.025f, 0.035f, 0.06f, 1.0f},
+						}},
+						.renderArea = {.width = frame.width, .height = frame.height},
+					});
+					SetRenderArea(commands, frame);
+					commands.BindShaderProgram(m_TriangleProgram.Raw());
+					commands.SetGraphicsState(
+						{.raster = {.cullMode = CullMode::None},
+							.depth = {.depthTestEnable = false, .depthWriteEnable = false}});
+					commands.Draw(3);
+					commands.EndRendering();
 				});
-				SetRenderArea(commands, frame);
-				commands.BindPipeline(m_TrianglePipeline.Raw());
-				commands.Draw(3);
-				commands.EndRendering();
-			});
 
 			// Reading scene establishes the dependency on Draw triangle and inserts
 			// its ColorAttachment -> ShaderRead barrier without an explicit edge.
-			graph.AddPass({
-				.name = "Postprocess",
-				.resources = {
-					{scene, {PipelineStage::FragmentShader, ResourceAccess::ShaderRead}, TextureLayout::ShaderRead,
-						RenderGraphAccess::Read},
-					{backbuffer, colorWrite, TextureLayout::ColorAttachment, RenderGraphAccess::Write},
+			graph.AddPass(
+				{
+					.name = "Postprocess",
+					.resources =
+						{
+							{scene,
+								{PipelineStage::FragmentShader, ResourceAccess::ShaderRead},
+								TextureLayout::ShaderRead,
+								RenderGraphAccess::Read},
+							{backbuffer, colorWrite, TextureLayout::ColorAttachment, RenderGraphAccess::Write},
+						},
 				},
-			}, [&, scene](CommandList& commands) {
-				commands.BeginRendering({
-					.colorAttachments = {{.target = frame.backBufferView}},
-					.renderArea = {.width = frame.width, .height = frame.height},
+				[&, scene](CommandList& commands) {
+					commands.BeginRendering({
+						.colorAttachments = {{.target = frame.backBufferView}},
+						.renderArea = {.width = frame.width, .height = frame.height},
+					});
+					SetRenderArea(commands, frame);
+					commands.BindShaderProgram(m_PostprocessProgram.Raw());
+					commands.SetGraphicsState(
+						{.raster = {.cullMode = CullMode::None},
+							.depth = {.depthTestEnable = false, .depthWriteEnable = false}});
+					auto* texture = graph.GetTexture(scene);
+					// Bindless accesses still need a recording-local resource declaration.
+					commands.UseResource(texture);
+					const uint32_t parameters[] = {
+						texture->GetSampledImageDescriptorIndex(),
+						texture->GetSamplerDescriptorIndex(),
+					};
+					commands.SetPushConstants(parameters, sizeof(parameters));
+					commands.Draw(3);
+					commands.EndRendering();
 				});
-				SetRenderArea(commands, frame);
-				commands.BindPipeline(m_PostprocessPipeline.Raw());
-				auto* texture = graph.GetTexture(scene);
-				// Bindless accesses still need a recording-local resource declaration.
-				commands.UseResource(texture);
-				const uint32_t parameters[] = {
-					texture->GetSampledImageDescriptorIndex(), texture->GetSamplerDescriptorIndex(),
-				};
-				commands.SetPushConstants(parameters, sizeof(parameters));
-				commands.Draw(3);
-				commands.EndRendering();
-			});
 
 			// Submit records both passes, waits for image acquisition, transitions
 			// the backbuffer to Present, and presents it. No manual Present call.
@@ -183,8 +188,8 @@ namespace {
 		std::unique_ptr<Device> m_Device;
 		Ref<Window> m_Window;
 		Ref<Swapchain> m_Swapchain;
-		Ref<Pipeline> m_TrianglePipeline;
-		Ref<Pipeline> m_PostprocessPipeline;
+		Ref<Shader> m_TriangleProgram;
+		Ref<Shader> m_PostprocessProgram;
 		std::unique_ptr<TransientResourcePool> m_Pool;
 	};
 }

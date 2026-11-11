@@ -53,37 +53,18 @@ namespace {
 											   {"fragmentMain", RealRHI::ShaderStage::Fragment}}},
 				   shader) == Result::Success,
 			"Compile draw test shader");
-		PipelineDesc pipelineDesc{
-			.shader = shader.Raw(),
-
-			.rasterState = {.cullMode = CullMode::None},
-			.renderTargetFormats = {
-				.colorFormats = {TextureFormat::RGBA8_UNorm},
-				.depthFormat = TextureFormat::D32_Float,
-			},
-		};
-		Ref<Pipeline> opaque;
-		Ref<Pipeline> transparent;
-		Expect(device.CreateGraphicsPipeline(pipelineDesc, opaque) == Result::Success,
-			"Create depth-only graphics pipeline");
-		pipelineDesc.depthState.depthWriteEnable = false;
-		pipelineDesc.blendState.enable = true;
-		Expect(
-			device.CreateGraphicsPipeline(pipelineDesc, transparent) == Result::Success, "Create alpha blend pipeline");
+		GraphicsState opaque{.raster = {.cullMode = CullMode::None}};
+		GraphicsState transparent = opaque;
+		transparent.depth.depthWriteEnable = false;
+		transparent.blend.enable = true;
 
 		Ref<Shader> instanceShader;
-		Ref<Pipeline> instances;
 		Expect(device.CreateShader({.moduleName = "instances",
 									   .entryPoints =
 										   {{"vertexMain", RealRHI::ShaderStage::Vertex},
 											   {"fragmentMain", RealRHI::ShaderStage::Fragment}}},
 				   instanceShader) == Result::Success,
 			"Compile procedural instance shader");
-		pipelineDesc.shader = instanceShader.Raw();
-		pipelineDesc.depthState.depthWriteEnable = true;
-		pipelineDesc.blendState.enable = false;
-		Expect(device.CreateGraphicsPipeline(pipelineDesc, instances) == Result::Success,
-			"Create pipeline without vertex input bindings");
 
 		// Prefix geometry and indices make a silently ignored firstIndex/vertexOffset draw the wrong pixels.
 		const float positions[][2] = {
@@ -156,7 +137,8 @@ namespace {
 		});
 		commands->SetViewport({.width = 64, .height = 64});
 		commands->SetScissor({.width = 64, .height = 64});
-		commands->BindPipeline(opaque.Raw());
+		commands->BindShaderProgram(shader.Raw());
+		commands->SetGraphicsState(opaque);
 		commands->BindVertexBuffer(vertices.Raw());
 
 		Parameters parameters{.color = {1, 0, 0, 1}, .depth = {0.3f}};
@@ -175,7 +157,7 @@ namespace {
 		commands->DrawIndexed(3, 1, 3, 3);
 		commands->Draw(3, 1, 6, 2);
 
-		commands->BindPipeline(transparent.Raw());
+		commands->SetGraphicsState(transparent);
 		parameters.color = {0, 1, 0, 0.5f};
 		parameters.depth[0] = 0.2f;
 		commands->SetPushConstants(&parameters, sizeof(parameters));
@@ -194,7 +176,8 @@ namespace {
 			.depthAttachment = {.target = depth->GetTextureView()},
 			.renderArea = {.width = 64, .height = 64},
 		});
-		commands->BindPipeline(instances.Raw());
+		commands->BindShaderProgram(instanceShader.Raw());
+		commands->SetGraphicsState(opaque);
 		parameters.color = {1, 1, 1, 1};
 		parameters.depth[0] = 0.3f;
 		commands->SetPushConstants(&parameters, sizeof(parameters));

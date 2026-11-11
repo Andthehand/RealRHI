@@ -65,7 +65,7 @@ namespace RealRHI::Examples {
 			bool shadowsEnabled,
 			std::optional<RenderGraphResource> outputResource = {});
 		Result SelectDepthFormat();
-		Result CreatePipelines(TextureFormat outputFormat);
+		Result CreatePrograms();
 		Result UploadAssets(UploadSubmission& outUpload);
 		Result CreateGeometry(UploadContext& uploads, Ref<Buffer>& vertices, Ref<Buffer>& indices);
 		Result CreatePattern(UploadContext& uploads, Ref<Texture>& pattern, bool mipmapped = true, uint32_t seed = 0);
@@ -84,10 +84,9 @@ namespace RealRHI::Examples {
 	private:
 		Device* m_Device = nullptr;
 		std::unique_ptr<TransientResourcePool> m_TransientResources;
-		Ref<Pipeline> m_ShadowPipeline;
-		Ref<Pipeline> m_OpaquePipeline;
-		Ref<Pipeline> m_TransparentPipeline;
-		Ref<Pipeline> m_PostprocessPipeline;
+		Ref<Shader> m_ShadowShader;
+		Ref<Shader> m_SceneShader;
+		Ref<Shader> m_PostprocessShader;
 
 		Ref<Buffer> m_VertexBuffer;
 		Ref<Buffer> m_IndexBuffer;

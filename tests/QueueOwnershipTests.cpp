@@ -81,16 +81,14 @@ namespace {
 		return texture;
 	}
 
-	Ref<Pipeline> MakeCompute(Device& device, const char* module) {
+	Ref<Shader> MakeCompute(Device& device, const char* module) {
 		Ref<Shader> shader;
-		Ref<Pipeline> pipeline;
 		Expect(
 			device.CreateShader({.moduleName = module, .entryPoints = {{"computeMain", RealRHI::ShaderStage::Compute}}},
 				shader) == Result::Success,
 			"Compile compute shader");
-		Expect(device.CreateComputePipeline({.shader = shader.Raw()}, pipeline) == Result::Success,
-			"Create compute pipeline");
-		return pipeline;
+
+		return shader;
 	}
 
 	SubmissionToken Submit(Device& device,
@@ -204,26 +202,14 @@ namespace {
 		auto target = MakeTexture(device, TextureUsage::RenderTarget | TextureUsage::TransferSrc);
 		const float positions[] = {-1, -1, -1, 3, 3, -1};
 		auto vertices = MakeBuffer(device, sizeof(positions), BufferUsage::Vertex, MemoryUsage::CPUToGPU, positions);
-		auto computePipeline = MakeCompute(device, "ownership_compute");
+		auto computeProgram = MakeCompute(device, "ownership_compute");
 		Ref<Shader> graphicsShader;
-		Ref<Pipeline> graphicsPipeline;
 		Expect(device.CreateShader({.moduleName = "ownership_graphics",
 									   .entryPoints =
 										   {{"vertexMain", RealRHI::ShaderStage::Vertex},
 											   {"fragmentMain", RealRHI::ShaderStage::Fragment}}},
 				   graphicsShader) == Result::Success,
 			"Compile graphics shader");
-		PipelineDesc pipelineDesc{};
-		pipelineDesc.shader = graphicsShader.Raw();
-		pipelineDesc.vertexLayout = {
-			.bindings = {{.stride = sizeof(float) * 2}}, .attributes = {{.format = RealRHI::VertexFormat::Float2}}
-		};
-		pipelineDesc.rasterState.cullMode = CullMode::None;
-		pipelineDesc.depthState.depthTestEnable = false;
-		pipelineDesc.depthState.depthWriteEnable = false;
-		pipelineDesc.renderTargetFormats.colorFormats = {TextureFormat::RGBA8_UNorm};
-		Expect(device.CreateGraphicsPipeline(pipelineDesc, graphicsPipeline) == Result::Success,
-			"Create graphics pipeline");
 		const bool transferToCompute = DifferentFamilies(device, QueueType::Transfer, QueueType::Compute);
 		const bool computeToGraphics = DifferentFamilies(device, QueueType::Compute, QueueType::Graphics);
 
@@ -238,7 +224,7 @@ namespace {
 			QueueType::Compute,
 			transferWrite,
 			computeReadWrite);
-		compute->BindPipeline(computePipeline.Raw());
+		compute->BindShaderProgram(computeProgram.Raw());
 		const uint32_t parameters[] = {values->GetDescriptorIndex(), static_cast<uint32_t>(input.size())};
 		compute->SetPushConstants(parameters, sizeof(parameters));
 		compute->DispatchCompute(1, 1, 1);
@@ -303,7 +289,7 @@ namespace {
 		}
 		if (transferToCompute && computeToGraphics) {
 			auto useAfterRelease = MakeList(device, QueueType::Compute);
-			useAfterRelease->BindPipeline(computePipeline.Raw());
+			useAfterRelease->BindShaderProgram(computeProgram.Raw());
 			useAfterRelease->UseResource(values.Raw());
 			useAfterRelease->SetPushConstants(parameters, sizeof(parameters));
 			BufferBarrierFor(*useAfterRelease,
@@ -363,7 +349,9 @@ namespace {
 		rendering.colorAttachments.push_back({.target = target->GetTextureView()});
 		rendering.renderArea = {.width = 4, .height = 4};
 		graphics->BeginRendering(rendering);
-		graphics->BindPipeline(graphicsPipeline.Raw());
+		graphics->BindShaderProgram(graphicsShader.Raw());
+		graphics->SetGraphicsState(
+			{.raster = {.cullMode = CullMode::None}, .depth = {.depthTestEnable = false, .depthWriteEnable = false}});
 		graphics->BindVertexBuffer(vertices.Raw());
 		graphics->UseResource(values.Raw());
 		graphics->SetPushConstants(parameters, sizeof(parameters));
@@ -416,7 +404,7 @@ namespace {
 		auto texture =
 			MakeTexture(device, TextureUsage::Storage | TextureUsage::TransferDst | TextureUsage::TransferSrc);
 		auto result = MakeBuffer(device, input.size(), BufferUsage::TransferDst, MemoryUsage::GPUToCPU);
-		auto pipeline = MakeCompute(device, "ownership_texture");
+		auto shader = MakeCompute(device, "ownership_texture");
 		const bool transferToCompute = DifferentFamilies(device, QueueType::Transfer, QueueType::Compute);
 		const bool computeToGraphics = DifferentFamilies(device, QueueType::Compute, QueueType::Graphics);
 		auto compute = MakeList(device, QueueType::Compute);
@@ -428,7 +416,7 @@ namespace {
 			computeReadWrite,
 			QueueType::Transfer,
 			QueueType::Compute);
-		compute->BindPipeline(pipeline.Raw());
+		compute->BindShaderProgram(shader.Raw());
 		compute->UseResource(texture.Raw());
 		const auto descriptor = texture->GetStorageImageDescriptorIndex();
 		compute->SetPushConstants(&descriptor, sizeof(descriptor));
@@ -501,7 +489,7 @@ namespace {
 		}
 		if (transferToCompute && computeToGraphics) {
 			auto useAfterRelease = MakeList(device, QueueType::Compute);
-			useAfterRelease->BindPipeline(pipeline.Raw());
+			useAfterRelease->BindShaderProgram(shader.Raw());
 			useAfterRelease->UseResource(texture.Raw());
 			useAfterRelease->SetPushConstants(&descriptor, sizeof(descriptor));
 			TextureBarrierFor(*useAfterRelease,

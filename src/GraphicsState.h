@@ -1,11 +1,9 @@
 #pragma once
-#include "Shader.h"
 #include "TextureFormat.h"
 #include "VertexLayout.h"
 
 #include <array>
 #include <cstdint>
-#include <memory>
 #include <vector>
 
 namespace RealRHI {
@@ -34,6 +32,8 @@ namespace RealRHI {
 		float constantFactor = 0.f;
 		float clamp = 0.f;
 		float slopeFactor = 0.f;
+
+		bool operator==(const DepthBiasState&) const = default;
 	};
 
 	struct RasterState {
@@ -41,6 +41,8 @@ namespace RealRHI {
 		FillMode fillMode = FillMode::Solid;
 		bool frontCounterClockwise = false;
 		DepthBiasState depthBias;
+
+		bool operator==(const RasterState&) const = default;
 	};
 
 	enum class CompareOp {
@@ -58,6 +60,8 @@ namespace RealRHI {
 		bool depthTestEnable = true;
 		bool depthWriteEnable = true;
 		CompareOp compareOp = CompareOp::Less;
+
+		bool operator==(const DepthState&) const = default;
 	};
 
 	enum class StencilOp {
@@ -79,18 +83,24 @@ namespace RealRHI {
 		uint32_t compareMask = UINT32_MAX;
 		uint32_t writeMask = UINT32_MAX;
 		uint32_t reference = 0;
+
+		bool operator==(const StencilFaceState&) const = default;
 	};
 
 	struct StencilState {
 		bool enable = false;
 		StencilFaceState front;
 		StencilFaceState back;
+
+		bool operator==(const StencilState&) const = default;
 	};
 
 	struct MultisampleState {
 		uint32_t sampleCount = 1;
 		uint64_t sampleMask = UINT64_MAX;
 		bool alphaToCoverageEnable = false;
+
+		bool operator==(const MultisampleState&) const = default;
 	};
 
 	enum class BlendFactor {
@@ -145,35 +155,19 @@ namespace RealRHI {
 		bool operator==(const BlendState&) const = default;
 	};
 
-	struct RenderTargetFormats {
-		std::vector<TextureFormat> colorFormats;
-		TextureFormat depthFormat = TextureFormat::Unknown;
-	};
-
-	struct ComputePipelineDesc {
-		Shader* shader = nullptr;
-		const char* debugName = nullptr;
-	};
-
-	struct PipelineDesc {
-		Shader* shader = nullptr;
-		// Empty uses the shader-reflected, tightly packed layout on binding zero.
-		VertexLayout vertexLayout;
-
-		RasterState rasterState;
-		DepthState depthState;
-		StencilState stencilState;
-		MultisampleState multisampleState;
+	// Fixed-function graphics state, independent of shaders, vertex layout, and attachment formats.
+	struct GraphicsState {
+		RasterState raster;
+		DepthState depth;
+		StencilState stencil;
+		MultisampleState multisample;
 		PrimitiveTopology topology = PrimitiveTopology::TriangleList;
-		// Restart uses the index type's maximum value and is supported for strips and fans.
 		bool primitiveRestartEnable = false;
-
-		BlendState blendState;
-		// Empty repeats blendState for every color target. Otherwise provide one state per target.
-		std::vector<BlendState> colorBlendStates;
+		BlendState blend;
+		// Empty repeats blend for every active color attachment.
+		std::vector<BlendState> colorBlends;
 		std::array<float, 4> blendConstants{};
 
-		RenderTargetFormats renderTargetFormats;
-		const char* debugName = nullptr;
+		bool operator==(const GraphicsState&) const = default;
 	};
 }

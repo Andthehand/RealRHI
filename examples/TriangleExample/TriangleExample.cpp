@@ -46,8 +46,8 @@ namespace {
 			if (!m_Swapchain) {
 				return false;
 			}
-			CreateGraphicsPipeline();
-			if (!m_Pipeline) {
+			CreateShaderProgram();
+			if (!m_Shader) {
 				return false;
 			}
 
@@ -96,47 +96,9 @@ namespace {
 			}
 		}
 
-		void CreateGraphicsPipeline() {
-			const RealRHI::ShaderDesc shaderDesc{
-				.moduleName = "shader",
-
-			};
-
-			RealRHI::Ref<RealRHI::Shader> shader;
-			RealRHI::Result result = m_Device->CreateShader(shaderDesc, shader);
-			if (result != RealRHI::Result::Success) {
-				std::cerr << "Failed to create shader" << std::endl;
-				return;
-			}
-
-			RealRHI::PipelineDesc desc{
-				.shader = shader.Raw(),
-
-				.rasterState =
-					{
-						.cullMode = RealRHI::CullMode::Back,
-						.fillMode = RealRHI::FillMode::Solid,
-						.frontCounterClockwise = false,
-					},
-				.depthState =
-					{
-						.depthTestEnable = false,
-						.depthWriteEnable = false,
-						.compareOp = RealRHI::CompareOp::Less,
-					},
-				.blendState =
-					{
-						.enable = false,
-					},
-				.renderTargetFormats = {
-					.colorFormats = {m_Swapchain->GetBackBufferFormat()},
-					.depthFormat = RealRHI::TextureFormat::Unknown,
-				},
-			};
-
-			result = m_Device->CreateGraphicsPipeline(desc, m_Pipeline);
-			if (result != RealRHI::Result::Success) {
-				std::cerr << "Failed to create pipeline" << std::endl;
+		void CreateShaderProgram() {
+			if (m_Device->CreateShader({.moduleName = "shader"}, m_Shader) != RealRHI::Result::Success) {
+				std::cerr << "Failed to create shader program\n";
 			}
 		}
 
@@ -171,7 +133,8 @@ namespace {
 			};
 
 			cmd->BeginRendering(renderingInfo);
-			cmd->BindPipeline(m_Pipeline.Raw());
+			cmd->BindShaderProgram(m_Shader.Raw());
+			cmd->SetGraphicsState({.depth = {.depthTestEnable = false, .depthWriteEnable = false}});
 
 			RealRHI::Viewport viewport{
 				.x = 0.0f,
@@ -246,7 +209,7 @@ namespace {
 		std::unique_ptr<RealRHI::Device> m_Device;
 		RealRHI::Ref<RealRHI::Window> m_Window;
 		RealRHI::Ref<RealRHI::Swapchain> m_Swapchain;
-		RealRHI::Ref<RealRHI::Pipeline> m_Pipeline;
+		RealRHI::Ref<RealRHI::Shader> m_Shader;
 		RealRHI::Ref<RealRHI::Buffer> m_VertexBuffer;
 		RealRHI::FrameResources m_FrameResources;
 	};

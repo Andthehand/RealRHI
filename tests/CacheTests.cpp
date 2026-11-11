@@ -91,109 +91,7 @@ namespace {
 			"Explicit compiler clear recompiles the same program");
 	}
 
-	void TestPipelineKeys(Device& device, Shader* shader) {
-		PipelineDesc desc{
-			.shader = shader,
-			.rasterState = {.cullMode = CullMode::None},
-			.depthState = {.depthTestEnable = false, .depthWriteEnable = false},
-			.renderTargetFormats = {
-				.colorFormats = {TextureFormat::RGBA8_UNorm}, .depthFormat = TextureFormat::D32_Float
-			}
-		};
-		Ref<Pipeline> first;
-		Ref<Pipeline> repeated;
-		Expect(device.CreateGraphicsPipeline(desc, first) == Result::Success, "Create base graphics pipeline");
-		desc.debugName = "Ignored cache name";
-		desc.vertexLayout = shader->GetReflection().vertexLayout;
-		desc.colorBlendStates = {desc.blendState};
-		Expect(device.CreateGraphicsPipeline(desc, repeated) == Result::Success && repeated == first,
-			"Equivalent effective vertex/blend state and different debug names reuse pipeline");
-
-		const std::vector<std::function<void(PipelineDesc&)>> changes{
-			[](auto& d) {
-				d.rasterState.cullMode = CullMode::Back;
-			},
-			[](auto& d) {
-				d.rasterState.frontCounterClockwise = true;
-			},
-			[](auto& d) {
-				d.rasterState.depthBias.enable = true;
-			},
-			[](auto& d) {
-				d.rasterState.depthBias.constantFactor = 1;
-			},
-			[](auto& d) {
-				d.rasterState.depthBias.slopeFactor = 1;
-			},
-			[](auto& d) {
-				d.depthState.depthTestEnable = true;
-			},
-			[](auto& d) {
-				d.depthState.depthWriteEnable = true;
-			},
-			[](auto& d) {
-				d.depthState.compareOp = CompareOp::Always;
-			},
-			[](auto& d) {
-				d.topology = PrimitiveTopology::TriangleStrip;
-			},
-			[](auto& d) {
-				d.colorBlendStates[0].enable = true;
-			},
-			[](auto& d) {
-				d.colorBlendStates[0].sourceColorFactor = BlendFactor::One;
-			},
-			[](auto& d) {
-				d.colorBlendStates[0].destinationColorFactor = BlendFactor::Zero;
-			},
-			[](auto& d) {
-				d.colorBlendStates[0].colorOperation = BlendOperation::Max;
-			},
-			[](auto& d) {
-				d.colorBlendStates[0].sourceAlphaFactor = BlendFactor::Zero;
-			},
-			[](auto& d) {
-				d.colorBlendStates[0].destinationAlphaFactor = BlendFactor::One;
-			},
-			[](auto& d) {
-				d.colorBlendStates[0].alphaOperation = BlendOperation::Min;
-			},
-			[](auto& d) {
-				d.colorBlendStates[0].writeMask = ColorWriteMask::Red;
-			},
-			[](auto& d) {
-				d.blendConstants[2] = 0.5f;
-			},
-			[](auto& d) {
-				d.renderTargetFormats.colorFormats[0] = TextureFormat::BGRA8_UNorm;
-			},
-			[](auto& d) {
-				d.renderTargetFormats.depthFormat = TextureFormat::Unknown;
-			},
-		};
-		for (const auto& change : changes) {
-			auto changed = desc;
-			change(changed);
-			Expect(device.CreateGraphicsPipeline(changed, repeated) == Result::Success && repeated != first,
-				"Changed graphics state selects a different pipeline");
-		}
-
-		auto invalid = desc;
-		invalid.colorBlendStates.resize(2);
-		++s_ExpectedErrors;
-		Expect(device.CreateGraphicsPipeline(invalid, repeated) == Result::InvalidParameter,
-			"Mismatched blend array does not hit an otherwise equivalent pipeline");
-		invalid = desc;
-		invalid.topology = PrimitiveTopology::TriangleStrip;
-		invalid.primitiveRestartEnable = true;
-		Expect(device.CreateGraphicsPipeline(invalid, repeated) == Result::Success, "Cache primitive restart state");
-		invalid.primitiveRestartEnable = false;
-		Ref<Pipeline> withoutRestart;
-		Expect(device.CreateGraphicsPipeline(invalid, withoutRestart) == Result::Success && repeated != withoutRestart,
-			"Restart flag distinguishes pipelines");
-	}
-
-	void DispatchAndVerify(Device& device, Ref<Pipeline> pipeline, uint32_t expected) {
+	void DispatchAndVerify(Device& device, Ref<Shader> pipeline, uint32_t expected) {
 		Ref<Buffer> output;
 		Ref<Buffer> readback;
 		Expect(device.CreateBuffer({.size = 4, .usage = BufferUsage::Storage | BufferUsage::TransferSrc}, output) ==
@@ -207,8 +105,8 @@ namespace {
 		Expect(device.CreateCommandAllocator(QueueType::Graphics, allocator) == Result::Success &&
 				device.CreateCommandList(allocator.Raw(), commands) == Result::Success &&
 				commands->Begin() == Result::Success,
-			"Begin cached pipeline commands");
-		commands->BindPipeline(pipeline.Raw());
+			"Begin cached shader commands");
+		commands->BindShaderProgram(pipeline.Raw());
 		commands->UseResource(output.Raw());
 		const uint32_t descriptor = output->GetDescriptorIndex();
 		commands->SetPushConstants(&descriptor, sizeof(descriptor));
@@ -221,11 +119,11 @@ namespace {
 				.size = 4});
 		commands->Barrier(barrier);
 		commands->CopyBuffer(output.Raw(), readback.Raw(), {.size = 4});
-		Expect(commands->End() == Result::Success, "End cached pipeline commands");
-		device.ClearShaderAndPipelineCaches();
+		Expect(commands->End() == Result::Success, "End cached shader commands");
+		device.ClearShaderCache();
 		pipeline.Reset();
 		const auto token = device.GetGraphicsCommandQueue()->Submit(*commands);
-		Expect(token.IsValid(), "Clearing caches preserves recorded pipeline");
+		Expect(token.IsValid(), "Clearing caches preserves recorded shader");
 		device.GetGraphicsCommandQueue()->Wait(token);
 		uint32_t value = 0;
 		Expect(readback->ReadData(&value, sizeof(value)) == Result::Success && value == expected,
@@ -245,7 +143,7 @@ namespace {
 		Ref<Shader> repeated;
 		Expect(device->CreateShader(ComputeDesc(), shader) == Result::Success &&
 				device->CreateShader(ComputeDesc(), repeated) == Result::Success && repeated == shader,
-			"Device reuses shader module");
+			"Device reuses shader program");
 		std::array<Ref<Shader>, 4> shaders;
 		std::array<std::thread, 4> workers;
 		for (size_t i = 0; i < workers.size(); ++i) {
@@ -261,39 +159,23 @@ namespace {
 			Expect(value == shader, "Concurrent requests publish one shared shader");
 		}
 
-		Ref<Pipeline> first;
-		Ref<Pipeline> hit;
-		Expect(device->CreateComputePipeline({.shader = shader.Raw()}, first) == Result::Success,
-			"Create cached compute pipeline");
-		const auto before = device->GetStatistics();
-		Expect(device->CreateComputePipeline({.shader = shader.Raw(), .debugName = "Another name"}, hit) ==
-					Result::Success &&
-				hit == first,
-			"Device reuses compute pipeline independently of debug name");
-		const auto after = device->GetStatistics();
-		Expect(after.pipelines.liveCount == before.pipelines.liveCount, "Cache hits create no native pipeline");
+		Ref<Shader> first = shader;
 
 		Write("cache_value.slangh", "#define CACHE_VALUE 29\n");
 		Expect(device->CreateShader(ComputeDesc(), repeated) == Result::Success && repeated != shader,
 			"Source edits select a new shader object");
-		Ref<Pipeline> changed;
-		Expect(
-			device->CreateComputePipeline({.shader = repeated.Raw()}, changed) == Result::Success && changed != first,
-			"New shader version selects a new pipeline");
-		hit.Reset();
+		Ref<Shader> changed = repeated;
 		DispatchAndVerify(*device, std::move(first), 17);
 		DispatchAndVerify(*device, std::move(changed), 29);
 
 		Ref<Shader> graphics;
 		Expect(device->CreateShader(GraphicsDesc(), graphics) == Result::Success, "Compile graphics cache program");
-		TestPipelineKeys(*device, graphics.Raw());
-		device->ClearShaderAndPipelineCaches();
-		Expect(device->GetStatistics().pipelines.liveCount == 0, "Clearing unused caches releases native pipelines");
+		device->ClearShaderCache();
 		Ref<Shader> afterClear;
 		Expect(device->CreateShader(GraphicsDesc(), afterClear) == Result::Success && afterClear != graphics,
 			"Explicit clear causes a fresh shader creation");
 		device->WaitIdle();
-		device->ClearShaderAndPipelineCaches();
+		device->ClearShaderCache();
 	}
 }
 

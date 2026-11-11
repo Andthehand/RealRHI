@@ -27,11 +27,6 @@ int main() {
 		return 1;
 	}
 
-	RealRHI::Ref<RealRHI::Pipeline> pipeline;
-	if (device->CreateComputePipeline({.shader = shader.Raw()}, pipeline) != RealRHI::Result::Success) {
-		return 1;
-	}
-
 	constexpr uint32_t elementCount = 64;
 	RealRHI::Ref<RealRHI::Buffer> output;
 	RealRHI::BufferDesc outputDesc{
@@ -73,7 +68,7 @@ int main() {
 		.elementCount = elementCount,
 	};
 
-	list->BindPipeline(pipeline.Raw());
+	list->BindShaderProgram(shader.Raw());
 	list->UseResource(output.Raw());
 	list->SetPushConstants(&parameters, sizeof(parameters));
 	list->DispatchCompute(1, 1, 1);
@@ -117,7 +112,6 @@ int main() {
 	allocator.Reset();
 	readback.Reset();
 	output.Reset();
-	pipeline.Reset();
 	shader.Reset();
 	device.reset();
 	if (RealRHI::Examples::s_ErrorCount != 0) {

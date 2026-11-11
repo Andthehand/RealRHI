@@ -4,7 +4,7 @@
 #include "VulkanCommandAllocator.h"
 #include "VulkanCommandResourceTracker.h"
 #include "VulkanDevice.h"
-#include "VulkanPipeline.h"
+#include "VulkanGraphicsState.h"
 #include "VulkanResourceState.h"
 #include "VulkanTextureView.h"
 
@@ -47,7 +47,9 @@ namespace RealRHI {
 		void ClearResourceDeclarations() override;
 		void RetainResource(RefCounted* resource) override;
 
-		void BindPipeline(Pipeline* pipeline) override;
+		void BindShaderProgram(Shader* shader) override;
+		Result SetGraphicsState(const GraphicsState& state) override;
+		Result SetVertexLayout(const VertexLayout& layout) override;
 		void SetPushConstants(const void* data, uint32_t size, uint32_t offset = 0) override;
 		void DispatchCompute(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) override;
 		void DispatchComputeIndirect(Buffer* arguments, uint64_t offset = 0) override;
@@ -95,7 +97,7 @@ namespace RealRHI {
 		void ResetRecordingState();
 		bool ValidateDebugLabel(const char* operation, const char* name) const;
 
-		bool ValidateGraphicsState(const char* operation) const;
+		bool ValidateGraphicsState(const char* operation);
 		bool ValidateAttachmentView(const VulkanTextureView* view, TextureUsage usage, const Rect& renderArea) const;
 		TextureLayout GetExpectedLayout(const VulkanTexture* texture, uint32_t mip, uint32_t layer) const;
 		bool ReplayResources(VulkanResourceStateTransaction& transaction) const;
@@ -125,13 +127,16 @@ namespace RealRHI {
 		static constexpr size_t s_LinearRetentionLimit = 64;
 		std::unordered_set<RefCounted*> m_RetainedResourceIndex;
 		std::atomic<CommandListState> m_State = CommandListState::Initial;
-		bool m_ComputePipelineBound = false;
-		bool m_Rendering = false;
-		VulkanPipeline* m_GraphicsPipeline = nullptr;
-		RenderTargetFormats m_RenderTargetFormats;
+		
+		VulkanShader* m_ComputeShader = nullptr;
+		VulkanShader* m_GraphicsShader = nullptr;
+		VulkanGraphicsState m_GraphicsState;
+		VulkanRenderingFormats m_VulkanRenderingFormats;
+		
 		uint32_t m_RenderingSampleCount = 0;
 		bool m_ReadOnlyDepth = false;
 		bool m_ReadOnlyStencil = false;
+		bool m_Rendering = false;
 
 		VulkanCommandResourceTracker m_ResourceTracker;
 		std::vector<VulkanTextureView*> m_ShaderViews;
@@ -141,6 +146,5 @@ namespace RealRHI {
 		VulkanBuffer* m_IndexBuffer = nullptr;
 
 		VkCommandBuffer m_CommandBuffer = VK_NULL_HANDLE;
-
 	};
 }

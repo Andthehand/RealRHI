@@ -3,14 +3,12 @@
 #include "VulkanDevice.h"
 
 #include "Detail/CpuProfiling.h"
-
 #include "VulkanBuffer.h"
 #include "VulkanCommandAllocator.h"
 #include "VulkanCommandList.h"
 #include "VulkanCommandQueue.h"
 #include "VulkanConversions.h"
 #include "VulkanDescriptorManager.h"
-#include "VulkanPipeline.h"
 #include "VulkanSampler.h"
 #include "VulkanShader.h"
 #include "VulkanSwapchain.h"
@@ -25,98 +23,6 @@
 #include <set>
 
 namespace RealRHI {
-	namespace {
-		template <typename T>
-		void AppendCacheKey(std::string& key, T value) {
-			static_assert(std::is_arithmetic_v<T> || std::is_enum_v<T>);
-			// Serialize fields individually: struct padding and debug-name pointers are not identity.
-			key.append(reinterpret_cast<const char*>(&value), sizeof(value));
-		}
-
-		void AppendBlendKey(std::string& key, const BlendState& blend) {
-			AppendCacheKey(key, blend.enable);
-			AppendCacheKey(key, blend.sourceColorFactor);
-			AppendCacheKey(key, blend.destinationColorFactor);
-			AppendCacheKey(key, blend.colorOperation);
-			AppendCacheKey(key, blend.sourceAlphaFactor);
-			AppendCacheKey(key, blend.destinationAlphaFactor);
-			AppendCacheKey(key, blend.alphaOperation);
-			AppendCacheKey(key, blend.writeMask);
-		}
-
-		std::string BuildGraphicsPipelineKey(const PipelineDesc& desc) {
-			std::string key("graphics");
-			AppendCacheKey(key, reinterpret_cast<uintptr_t>(desc.shader));
-
-			const VertexLayout* layout = &desc.vertexLayout;
-			if (desc.shader && layout->bindings.empty() && layout->attributes.empty()) {
-				layout = &desc.shader->GetReflection().vertexLayout;
-			}
-			AppendCacheKey(key, layout->bindings.size());
-			for (const auto& binding : layout->bindings) {
-				AppendCacheKey(key, binding.binding);
-				AppendCacheKey(key, binding.stride);
-				AppendCacheKey(key, binding.inputRate);
-			}
-			AppendCacheKey(key, layout->attributes.size());
-			for (const auto& attribute : layout->attributes) {
-				AppendCacheKey(key, attribute.location);
-				AppendCacheKey(key, attribute.binding);
-				AppendCacheKey(key, attribute.format);
-				AppendCacheKey(key, attribute.offset);
-			}
-
-			const auto& raster = desc.rasterState;
-			AppendCacheKey(key, raster.cullMode);
-			AppendCacheKey(key, raster.fillMode);
-			AppendCacheKey(key, raster.frontCounterClockwise);
-			AppendCacheKey(key, raster.depthBias.enable);
-			AppendCacheKey(key, raster.depthBias.constantFactor);
-			AppendCacheKey(key, raster.depthBias.clamp);
-			AppendCacheKey(key, raster.depthBias.slopeFactor);
-			AppendCacheKey(key, desc.depthState.depthTestEnable);
-			AppendCacheKey(key, desc.depthState.depthWriteEnable);
-			AppendCacheKey(key, desc.depthState.compareOp);
-			AppendCacheKey(key, desc.stencilState.enable);
-			for (const auto& face : {desc.stencilState.front, desc.stencilState.back}) {
-				AppendCacheKey(key, face.failOp);
-				AppendCacheKey(key, face.passOp);
-				AppendCacheKey(key, face.depthFailOp);
-				AppendCacheKey(key, face.compareOp);
-				AppendCacheKey(key, face.compareMask);
-				AppendCacheKey(key, face.writeMask);
-				AppendCacheKey(key, face.reference);
-			}
-			AppendCacheKey(key, desc.multisampleState.sampleCount);
-			AppendCacheKey(key, desc.multisampleState.sampleMask);
-			AppendCacheKey(key, desc.multisampleState.alphaToCoverageEnable);
-			AppendCacheKey(key, desc.topology);
-			AppendCacheKey(key, desc.primitiveRestartEnable);
-
-			AppendCacheKey(key, desc.renderTargetFormats.colorFormats.size());
-			for (auto format : desc.renderTargetFormats.colorFormats) {
-				AppendCacheKey(key, format);
-			}
-			AppendCacheKey(key, desc.renderTargetFormats.depthFormat);
-			// Normalize an omitted per-target array to its effective attachment states.
-			if (desc.colorBlendStates.empty()) {
-				AppendCacheKey(key, desc.renderTargetFormats.colorFormats.size());
-				for (size_t i = 0; i < desc.renderTargetFormats.colorFormats.size(); ++i) {
-					AppendBlendKey(key, desc.blendState);
-				}
-			}
-			else {
-				AppendCacheKey(key, desc.colorBlendStates.size());
-				for (const auto& blend : desc.colorBlendStates) {
-					AppendBlendKey(key, blend);
-				}
-			}
-			for (float constant : desc.blendConstants) {
-				AppendCacheKey(key, constant);
-			}
-			return key;
-		}
-	}
 
 	VulkanDevice::VulkanDevice() = default;
 
@@ -126,7 +32,7 @@ namespace RealRHI {
 			vkDeviceWaitIdle(m_Device);
 			ProcessDeferredDeletions();
 		}
-		ClearShaderAndPipelineCaches();
+		ClearShaderCache();
 		m_Queues.clear();
 		m_GraphicsCommandQueue = nullptr;
 
@@ -474,46 +380,8 @@ namespace RealRHI {
 		return result;
 	}
 
-	Result VulkanDevice::CreateGraphicsPipeline(const PipelineDesc& desc, Ref<Pipeline>& outPipeline) const {
+	void VulkanDevice::ClearShaderCache() const {
 		std::scoped_lock lock(m_CacheMutex);
-		const auto key = BuildGraphicsPipelineKey(desc);
-		const auto cached = m_Pipelines.find(key);
-		if (cached != m_Pipelines.end()) {
-			outPipeline = cached->second.pipeline;
-			return Result::Success;
-		}
-
-		Ref<VulkanPipeline> pipeline;
-		const auto result = VulkanPipeline::CreateGraphics(this, desc, pipeline);
-		if (result == Result::Success) {
-			m_Pipelines.emplace(key, CachedPipeline{Ref<Shader>(desc.shader), pipeline});
-			outPipeline = pipeline;
-		}
-		return result;
-	}
-
-	Result VulkanDevice::CreateComputePipeline(const ComputePipelineDesc& desc, Ref<Pipeline>& outPipeline) const {
-		std::scoped_lock lock(m_CacheMutex);
-		std::string key("compute");
-		AppendCacheKey(key, reinterpret_cast<uintptr_t>(desc.shader));
-		const auto cached = m_Pipelines.find(key);
-		if (cached != m_Pipelines.end()) {
-			outPipeline = cached->second.pipeline;
-			return Result::Success;
-		}
-
-		Ref<VulkanPipeline> pipeline;
-		const auto result = VulkanPipeline::CreateCompute(this, desc, pipeline);
-		if (result == Result::Success) {
-			m_Pipelines.emplace(key, CachedPipeline{Ref<Shader>(desc.shader), pipeline});
-			outPipeline = pipeline;
-		}
-		return result;
-	}
-
-	void VulkanDevice::ClearShaderAndPipelineCaches() const {
-		std::scoped_lock lock(m_CacheMutex);
-		m_Pipelines.clear();
 		m_Shaders.clear();
 		if (m_ShaderCompiler) {
 			m_ShaderCompiler->ClearCache();
@@ -927,8 +795,12 @@ namespace RealRHI {
 	}
 
 	bool VulkanDevice::SupportsRequiredFeatures(VkPhysicalDevice device) const {
+		VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjects{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT,
+		};
 		VkPhysicalDeviceDescriptorHeapFeaturesEXT descriptorHeapFeatures{
 			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_FEATURES_EXT,
+			.pNext = &shaderObjects,
 		};
 		VkPhysicalDeviceMaintenance5FeaturesKHR maintenance5Features{
 			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES_KHR,
@@ -962,6 +834,7 @@ namespace RealRHI {
 		};
 
 		const RequiredFeature requiredFeatures[] = {
+			{shaderObjects.shaderObject, "shaderObject"},
 			{vulkan11Features.shaderDrawParameters, "shaderDrawParameters"},
 			{vulkan12Features.bufferDeviceAddress, "bufferDeviceAddress"},
 			{vulkan12Features.timelineSemaphore, "timelineSemaphore"},
@@ -1107,8 +980,13 @@ namespace RealRHI {
 			queueCreateInfos.push_back(queueCreateInfo);
 		}
 
+		VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjects{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT,
+			.shaderObject = VK_TRUE,
+		};
 		VkPhysicalDeviceDescriptorHeapFeaturesEXT heapFeatures{
 			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_FEATURES_EXT,
+			.pNext = &shaderObjects,
 			.descriptorHeap = VK_TRUE,
 		};
 
@@ -1324,8 +1202,8 @@ namespace RealRHI {
 					return statistics.buffers;
 				case VulkanResourceKind::Texture:
 					return statistics.textures;
-				case VulkanResourceKind::Pipeline:
-					return statistics.pipelines;
+				case VulkanResourceKind::Shader:
+					return statistics.shaders;
 			}
 			return statistics.buffers;
 		}

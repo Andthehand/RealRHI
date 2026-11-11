@@ -129,10 +129,8 @@ namespace {
 		upload.Reset();
 
 		Ref<Shader> shader;
-		Ref<Pipeline> pipeline;
-		Expect(device.CreateShader({.moduleName = "ownership_compute"}, shader) == Result::Success &&
-				device.CreateComputePipeline({.shader = shader.Raw()}, pipeline) == Result::Success,
-			"Create queue graph compute pipeline");
+		Expect(device.CreateShader({.moduleName = "ownership_compute"}, shader) == Result::Success,
+			"Create queue graph compute shader");
 		std::array<Ref<Buffer>, 3> outputs;
 		for (auto& output : outputs) {
 			output = Readback(device, sizeof(initial));
@@ -158,7 +156,7 @@ namespace {
 						{imageOutput, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}},
 				.queue = QueueType::Compute},
 			[&](CommandList& list) {
-				list.BindPipeline(pipeline.Raw());
+				list.BindShaderProgram(shader.Raw());
 				list.UseResource(data.Raw());
 				const uint32_t parameters[] = {data->GetDescriptorIndex(), 64};
 				list.SetPushConstants(parameters, sizeof(parameters));
@@ -220,8 +218,8 @@ namespace {
 		graph.Reset();
 		data.Reset();
 		shader.Reset();
-		pipeline.Reset();
-		device.ClearShaderAndPipelineCaches();
+		shader.Reset();
+		device.ClearShaderCache();
 		completion.Wait(device);
 		Expect(completion.IsComplete(device), "Waiting retires all graph submissions");
 		std::array<uint32_t, 64> values{};

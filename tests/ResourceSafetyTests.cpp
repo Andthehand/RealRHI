@@ -291,32 +291,6 @@ int main() {
 				   shader) == Result::Success,
 			"Compile graphics shader");
 		Expect(g_ShaderErrors == 0, "Successful reflection is not logged as a shader error");
-		PipelineDesc pipelineDesc{};
-		pipelineDesc.shader = shader.Raw();
-		pipelineDesc.vertexLayout = {
-			.bindings = {{.stride = 20}},
-			.attributes = {
-				{.format = VertexFormat::Float2}, {.location = 1, .format = VertexFormat::Float3, .offset = 8}
-			}
-		};
-		pipelineDesc.depthState.depthTestEnable = false;
-		pipelineDesc.depthState.depthWriteEnable = false;
-		pipelineDesc.renderTargetFormats.colorFormats = {TextureFormat::RGBA8_UNorm, TextureFormat::RGBA8_UNorm};
-		Ref<Pipeline> pipeline;
-		Expect(device->CreateGraphicsPipeline(pipelineDesc, pipeline) == Result::Success,
-			"Create multiple-color-attachment pipeline");
-		pipelineDesc.rasterState.fillMode = FillMode::Wireframe;
-		if (device->GetCapabilities().features.wireframe) {
-			Expect(device->CreateGraphicsPipeline(pipelineDesc, pipeline) == Result::Success,
-				"Create supported wireframe pipeline");
-		}
-		pipelineDesc.rasterState.fillMode = FillMode::Solid;
-		pipelineDesc.renderTargetFormats.colorFormats.clear();
-		pipelineDesc.renderTargetFormats.depthFormat = TextureFormat::D24_UNorm_S8_UInt;
-		pipelineDesc.depthState.depthTestEnable = true;
-		pipelineDesc.depthState.depthWriteEnable = true;
-		Expect(device->CreateGraphicsPipeline(pipelineDesc, pipeline) == Result::Success,
-			"Create depth/stencil-only pipeline");
 
 		TextureDesc textureDesc{};
 		textureDesc.width = 4;

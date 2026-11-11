@@ -1,6 +1,6 @@
 #pragma once
 #include "BufferDesc.h"
-#include "PipelineDesc.h"
+#include "GraphicsState.h"
 #include "RenderingInfo.h"
 #include "Shader.h"
 #include "TextureDesc.h"

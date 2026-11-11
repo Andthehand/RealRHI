@@ -22,7 +22,7 @@ namespace {
 	void Capture(const DebugMessage& message) {
 		DefaultDebugCallback(message);
 		if (message.severity == DebugSeverity::Error) {
-			Expect(s_ExpectError && message.type == DebugMessageType::General, "Only intentional pipeline errors");
+			Expect(s_ExpectError && message.type == DebugMessageType::General, "Only intentional state errors");
 			++s_Errors;
 		}
 	}
@@ -33,7 +33,7 @@ namespace {
 	};
 
 	struct Draw {
-		Pipeline* pipeline;
+		const GraphicsState* state;
 		Parameters parameters;
 		uint32_t vertexCount = 4;
 		Buffer* indices = nullptr;
@@ -44,7 +44,7 @@ namespace {
 		explicit RenderTest(Device& device, uint32_t samples = 1, TextureFormat depthFormat = TextureFormat::D32_Float)
 			: m_Device(device), m_Samples(samples), m_DepthFormat(depthFormat) {
 			Expect(device.CreateShader({.moduleName = "pipeline_state"}, m_Shader) == Result::Success,
-				"Compile pipeline state shader");
+				"Compile state state shader");
 
 			for (auto& target : m_Targets) {
 				Expect(device.CreateTexture({.width = 16,
@@ -85,34 +85,27 @@ namespace {
 				"Create pixel readback");
 		}
 
-		PipelineDesc Description() {
+		GraphicsState Description() {
 			return {
-				.shader = m_Shader.Raw(),
-				.rasterState = {.cullMode = CullMode::None},
-				.depthState = {.depthTestEnable = false, .depthWriteEnable = false},
-				.multisampleState = {.sampleCount = m_Samples},
-				.topology = PrimitiveTopology::TriangleStrip,
-				.renderTargetFormats = {
-					.colorFormats = {TextureFormat::RGBA8_UNorm, TextureFormat::RGBA8_UNorm},
-					.depthFormat = m_DepthFormat
-				}
+				.raster = {.cullMode = CullMode::None},
+				.depth = {.depthTestEnable = false, .depthWriteEnable = false},
+				.multisample = {.sampleCount = m_Samples},
+				.topology = PrimitiveTopology::TriangleStrip
 			};
 		}
-
-		Ref<Pipeline> Create(const PipelineDesc& desc) const {
-			Ref<Pipeline> pipeline;
-			Expect(m_Device.CreateGraphicsPipeline(desc, pipeline) == Result::Success, "Create pipeline state variant");
-			return pipeline;
-		}
-
-		void Reject(const PipelineDesc& desc) const {
-			Ref<Pipeline> pipeline;
-			const uint32_t errorsBefore = s_Errors;
+		void Reject(const GraphicsState& state) const {
+			Ref<CommandAllocator> allocator;
+			Ref<CommandList> commands;
+			Expect(m_Device.CreateCommandAllocator(QueueType::Graphics, allocator) == Result::Success &&
+					m_Device.CreateCommandList(allocator.Raw(), commands) == Result::Success &&
+					commands->Begin() == Result::Success,
+				"Begin state validation commands");
+			const auto before = s_Errors;
 			s_ExpectError = true;
-			Expect(m_Device.CreateGraphicsPipeline(desc, pipeline) == Result::InvalidParameter && !pipeline,
-				"Reject invalid pipeline before Vulkan creation");
+			Expect(commands->SetGraphicsState(state) == Result::InvalidParameter, "Reject invalid graphics state");
 			s_ExpectError = false;
-			Expect(s_Errors == errorsBefore + 1, "Invalid state has one actionable diagnostic");
+			Expect(s_Errors == before + 1, "One actionable diagnostic");
+			Expect(commands->End() == Result::Success, "Rejected setter preserves recording");
 		}
 
 		void RejectAttachments() {
@@ -184,7 +177,7 @@ namespace {
 
 		void Render(std::initializer_list<Draw> draws,
 			ClearColorValue clear = {0.2f, 0.4f, 0.6f, 0.8f},
-			Pipeline* resolvedPipeline = nullptr,
+			const GraphicsState* resolvedState = nullptr,
 			bool readOnlyDepth = false,
 			bool readOnlyStencil = false) {
 			Ref<CommandAllocator> allocator;
@@ -233,7 +226,7 @@ namespace {
 							.oldLayout = m_Initialized ? TextureLayout::TransferSrc : TextureLayout::Undefined,
 							.newLayout = TextureLayout::ColorAttachment});
 				}
-				if (resolvedPipeline) {
+				if (resolvedState) {
 					barriers.textures.push_back(
 						{.texture = m_ResolvedDepth.Raw(),
 							.after = {PipelineStage::ColorAttachmentOutput, ResourceAccess::ColorAttachmentWrite},
@@ -259,15 +252,16 @@ namespace {
 							.readOnlyDepth = readOnlyDepth,
 							.readOnlyStencil = readOnlyStencil,
 							.stencilLoadOp = readOnlyStencil ? LoadOp::Load : LoadOp::Clear,
-							.resolveTarget = resolvedPipeline ? m_ResolvedDepth->GetTextureView() : nullptr,
-							.depthResolveMode = resolvedPipeline ? ResolveMode::SampleZero : ResolveMode::None,
-							.stencilResolveMode = resolvedPipeline ? ResolveMode::SampleZero : ResolveMode::None},
+							.resolveTarget = resolvedState ? m_ResolvedDepth->GetTextureView() : nullptr,
+							.depthResolveMode = resolvedState ? ResolveMode::SampleZero : ResolveMode::None,
+							.stencilResolveMode = resolvedState ? ResolveMode::SampleZero : ResolveMode::None},
 					.renderArea = {.width = 16, .height = 16}});
 			commands->SetViewport({.width = 16, .height = 16});
 			commands->SetScissor({.width = 16, .height = 16});
 
 			for (const auto& draw : draws) {
-				commands->BindPipeline(draw.pipeline);
+				commands->BindShaderProgram(m_Shader.Raw());
+				Expect(commands->SetGraphicsState(*draw.state) == Result::Success, "Set graphics state variant");
 				commands->SetPushConstants(&draw.parameters, sizeof(draw.parameters));
 				if (draw.indices) {
 					commands->BindIndexBuffer(draw.indices);
@@ -279,7 +273,7 @@ namespace {
 			}
 			commands->EndRendering();
 
-			if (resolvedPipeline) {
+			if (resolvedState) {
 				BarrierDesc resolvedBarriers;
 				for (auto& target : m_ResolveTargets) {
 					resolvedBarriers.textures.push_back(
@@ -308,7 +302,8 @@ namespace {
 								.depthLoadOp = LoadOp::Load,
 								.stencilLoadOp = LoadOp::Load},
 						.renderArea = {.width = 16, .height = 16}});
-				commands->BindPipeline(resolvedPipeline);
+				commands->BindShaderProgram(m_Shader.Raw());
+				commands->SetGraphicsState(*resolvedState);
 				const Parameters green{.color = {0, 1, 0, 1}};
 				commands->SetPushConstants(&green, sizeof(green));
 				commands->Draw(4);
@@ -368,39 +363,39 @@ namespace {
 
 	void TestBlending(RenderTest& test, Device& device) {
 		auto desc = test.Description();
-		auto pipeline = test.Create(desc);
-		test.Render({{pipeline.Raw(), {.color = {0.3f, 0.2f, 0.1f, 0.5f}}}});
+		auto state = desc;
+		test.Render({{&state, {.color = {0.3f, 0.2f, 0.1f, 0.5f}}}});
 		test.Pixel(0, 8, 8, {0.3f, 0.2f, 0.1f, 0.5f}, "Disabled blending replaces destination");
 
-		desc.blendState.enable = true;
-		pipeline = test.Create(desc);
-		test.Render({{pipeline.Raw(), {.color = {0.3f, 0.2f, 0.1f, 0.5f}}}});
+		desc.blend.enable = true;
+		state = desc;
+		test.Render({{&state, {.color = {0.3f, 0.2f, 0.1f, 0.5f}}}});
 		test.Pixel(0, 8, 8, {0.25f, 0.3f, 0.35f, 0.5f}, "Default factors preserve existing alpha blending");
 
-		desc.blendState.sourceColorFactor = BlendFactor::One;
-		desc.blendState.destinationColorFactor = BlendFactor::One;
-		desc.blendState.destinationAlphaFactor = BlendFactor::One;
-		pipeline = test.Create(desc);
-		test.Render({{pipeline.Raw(), {.color = {0.3f, 0.2f, 0.1f, 0.5f}}}});
+		desc.blend.sourceColorFactor = BlendFactor::One;
+		desc.blend.destinationColorFactor = BlendFactor::One;
+		desc.blend.destinationAlphaFactor = BlendFactor::One;
+		state = desc;
+		test.Render({{&state, {.color = {0.3f, 0.2f, 0.1f, 0.5f}}}});
 		test.Pixel(0, 8, 8, {0.5f, 0.6f, 0.7f, 1.f}, "Additive color and alpha blending");
 
-		desc.blendState.colorOperation = BlendOperation::Subtract;
-		desc.blendState.alphaOperation = BlendOperation::ReverseSubtract;
-		pipeline = test.Create(desc);
-		test.Render({{pipeline.Raw(), {.color = {0.7f, 0.6f, 0.5f, 0.4f}}}});
+		desc.blend.colorOperation = BlendOperation::Subtract;
+		desc.blend.alphaOperation = BlendOperation::ReverseSubtract;
+		state = desc;
+		test.Render({{&state, {.color = {0.7f, 0.6f, 0.5f, 0.4f}}}});
 		test.Pixel(0, 8, 8, {0.5f, 0.2f, 0.f, 0.4f}, "Separate color subtraction and reverse alpha subtraction");
 
-		desc.blendState.colorOperation = BlendOperation::ReverseSubtract;
-		desc.blendState.alphaOperation = BlendOperation::Subtract;
-		pipeline = test.Create(desc);
-		test.Render({{pipeline.Raw(), {.color = {0.7f, 0.6f, 0.5f, 0.4f}}}});
+		desc.blend.colorOperation = BlendOperation::ReverseSubtract;
+		desc.blend.alphaOperation = BlendOperation::Subtract;
+		state = desc;
+		test.Render({{&state, {.color = {0.7f, 0.6f, 0.5f, 0.4f}}}});
 		test.Pixel(0, 8, 8, {0.f, 0.f, 0.1f, 0.f}, "Reverse color subtraction and alpha subtraction");
 
 		for (auto operation : {BlendOperation::Min, BlendOperation::Max}) {
-			desc.blendState.colorOperation = operation;
-			desc.blendState.alphaOperation = operation;
-			pipeline = test.Create(desc);
-			test.Render({{pipeline.Raw(), {.color = {0.7f, 0.2f, 0.5f, 0.9f}}}});
+			desc.blend.colorOperation = operation;
+			desc.blend.alphaOperation = operation;
+			state = desc;
+			test.Render({{&state, {.color = {0.7f, 0.2f, 0.5f, 0.9f}}}});
 			if (operation == BlendOperation::Min) {
 				test.Pixel(0, 8, 8, {0.2f, 0.2f, 0.5f, 0.8f}, "Minimum blend operation");
 			}
@@ -409,7 +404,7 @@ namespace {
 			}
 		}
 
-		desc.blendState = {
+		desc.blend = {
 			.enable = true,
 			.sourceColorFactor = BlendFactor::ConstantColor,
 			.destinationColorFactor = BlendFactor::OneMinusConstantColor,
@@ -417,56 +412,56 @@ namespace {
 			.destinationAlphaFactor = BlendFactor::OneMinusConstantAlpha
 		};
 		desc.blendConstants = {0.5f, 0.25f, 0.75f, 0.4f};
-		pipeline = test.Create(desc);
-		test.Render({{pipeline.Raw(), {.color = {0.8f, 0.6f, 0.4f, 0.2f}}}});
+		state = desc;
+		test.Render({{&state, {.color = {0.8f, 0.6f, 0.4f, 0.2f}}}});
 		test.Pixel(0, 8, 8, {0.5f, 0.45f, 0.45f, 0.56f}, "Constant color and alpha blend factors");
 
-		desc.blendState = {
+		desc.blend = {
 			.enable = true,
 			.sourceColorFactor = BlendFactor::SourceColor,
 			.destinationColorFactor = BlendFactor::DestinationColor,
 			.sourceAlphaFactor = BlendFactor::SourceAlpha,
 			.destinationAlphaFactor = BlendFactor::DestinationAlpha
 		};
-		pipeline = test.Create(desc);
-		test.Render({{pipeline.Raw(), {.color = {0.3f, 0.2f, 0.1f, 0.5f}}}});
+		state = desc;
+		test.Render({{&state, {.color = {0.3f, 0.2f, 0.1f, 0.5f}}}});
 		test.Pixel(0, 8, 8, {0.13f, 0.2f, 0.37f, 0.89f}, "Source and destination color and alpha factors");
 
-		desc.blendState = {
+		desc.blend = {
 			.enable = true,
 			.sourceColorFactor = BlendFactor::OneMinusSourceColor,
 			.destinationColorFactor = BlendFactor::OneMinusDestinationColor,
 			.sourceAlphaFactor = BlendFactor::OneMinusSourceAlpha,
 			.destinationAlphaFactor = BlendFactor::OneMinusDestinationAlpha
 		};
-		pipeline = test.Create(desc);
-		test.Render({{pipeline.Raw(), {.color = {0.3f, 0.2f, 0.1f, 0.5f}}}});
+		state = desc;
+		test.Render({{&state, {.color = {0.3f, 0.2f, 0.1f, 0.5f}}}});
 		test.Pixel(0, 8, 8, {0.37f, 0.4f, 0.33f, 0.41f}, "Complementary source and destination factors");
 
-		desc.blendState = {
+		desc.blend = {
 			.enable = true,
 			.sourceColorFactor = BlendFactor::SourceAlphaSaturate,
 			.destinationColorFactor = BlendFactor::Zero
 		};
-		pipeline = test.Create(desc);
-		test.Render({{pipeline.Raw(), {.color = {0.3f, 0.2f, 0.1f, 0.5f}}}});
+		state = desc;
+		test.Render({{&state, {.color = {0.3f, 0.2f, 0.1f, 0.5f}}}});
 		test.Pixel(0, 8, 8, {0.06f, 0.04f, 0.02f, 0.5f}, "Saturated source alpha factor");
 
-		desc.blendState = {
+		desc.blend = {
 			.enable = true,
 			.sourceColorFactor = BlendFactor::DestinationAlpha,
 			.destinationColorFactor = BlendFactor::OneMinusDestinationAlpha
 		};
-		pipeline = test.Create(desc);
-		test.Render({{pipeline.Raw(), {.color = {0.3f, 0.2f, 0.1f, 0.5f}}}});
+		state = desc;
+		test.Render({{&state, {.color = {0.3f, 0.2f, 0.1f, 0.5f}}}});
 		test.Pixel(0, 8, 8, {0.28f, 0.24f, 0.2f, 0.5f}, "Destination alpha color factors");
 
-		desc.blendState = {.writeMask = ColorWriteMask::None};
-		pipeline = test.Create(desc);
-		test.Render({{pipeline.Raw(), {.color = {1, 1, 1, 1}}}});
+		desc.blend = {.writeMask = ColorWriteMask::None};
+		state = desc;
+		test.Render({{&state, {.color = {1, 1, 1, 1}}}});
 		test.Pixel(0, 8, 8, {0.2f, 0.4f, 0.6f, 0.8f}, "Empty write mask preserves target");
 
-		desc.colorBlendStates = {
+		desc.colorBlends = {
 			{.writeMask = ColorWriteMask::Red | ColorWriteMask::Alpha},
 			{.enable = true,
 				.sourceColorFactor = BlendFactor::One,
@@ -474,8 +469,8 @@ namespace {
 				.writeMask = ColorWriteMask::Green | ColorWriteMask::Blue}
 		};
 		if (device.GetCapabilities().features.independentBlend) {
-			pipeline = test.Create(desc);
-			test.Render({{pipeline.Raw(), {.color = {0.8f, 0.2f, 0.1f, 0.2f}}}});
+			state = desc;
+			test.Render({{&state, {.color = {0.8f, 0.2f, 0.1f, 0.2f}}}});
 			test.Pixel(0, 8, 8, {0.8f, 0.4f, 0.6f, 0.2f}, "First target has its own color mask and disabled blend");
 			test.Pixel(1, 8, 8, {0.2f, 0.6f, 0.7f, 0.8f}, "Second target has independent mask and additive blend");
 		}
@@ -488,30 +483,30 @@ namespace {
 		auto desc = test.Description();
 		const Parameters white{.color = {1, 1, 1, 1}};
 		const ClearColorValue black{0, 0, 0, 0};
-		auto pipeline = test.Create(desc);
-		test.Render({{pipeline.Raw(), white}}, black);
+		auto state = desc;
+		test.Render({{&state, white}}, black);
 		test.Pixel(0, 12, 12, {1, 1, 1, 1}, "Triangle strip assembles the second triangle");
 
 		desc.topology = PrimitiveTopology::TriangleList;
-		pipeline = test.Create(desc);
-		test.Render({{pipeline.Raw(), white, 3}}, black);
+		state = desc;
+		test.Render({{&state, white, 3}}, black);
 		test.Pixel(0, 12, 12, {0, 0, 0, 0}, "Triangle list assembles only the first triangle");
 		test.Pixel(0, 4, 4, {1, 1, 1, 1}, "Triangle list renders its first triangle");
 
 		desc.topology = PrimitiveTopology::LineList;
-		pipeline = test.Create(desc);
-		test.Render({{pipeline.Raw(), white, 2}}, black);
+		state = desc;
+		test.Render({{&state, white, 2}}, black);
 		test.Pixel(0, 8, 1, {1, 1, 1, 1}, "Line list renders a horizontal edge");
 		test.Pixel(0, 8, 8, {0, 0, 0, 0}, "Line list does not fill triangles");
 
 		desc.topology = PrimitiveTopology::LineStrip;
-		pipeline = test.Create(desc);
-		test.Render({{pipeline.Raw(), white}}, black);
+		state = desc;
+		test.Render({{&state, white}}, black);
 		test.Pixel(0, 7, 8, {1, 1, 1, 1}, "Line strip connects consecutive vertices");
 
 		desc.topology = PrimitiveTopology::PointList;
-		pipeline = test.Create(desc);
-		test.Render({{pipeline.Raw(), white}}, black);
+		state = desc;
+		test.Render({{&state, white}}, black);
 		test.Pixel(0, 1, 1, {1, 1, 1, 1}, "Point list renders one-pixel points");
 		test.Pixel(0, 8, 8, {0, 0, 0, 0}, "Points do not fill triangles");
 
@@ -526,48 +521,48 @@ namespace {
 			"Create restart indices");
 		desc.topology = PrimitiveTopology::TriangleStrip;
 		desc.primitiveRestartEnable = true;
-		pipeline = test.Create(desc);
-		test.Render({{pipeline.Raw(), white, 7, indexBuffer.Raw()}}, black);
+		state = desc;
+		test.Render({{&state, white, 7, indexBuffer.Raw()}}, black);
 		test.Pixel(0, 4, 4, {1, 1, 1, 1}, "Restarted strip renders its first segment");
 		test.Pixel(0, 12, 12, {1, 1, 1, 1}, "Restarted strip renders its second segment");
 
 		desc.topology = PrimitiveTopology::TriangleFan;
 		desc.primitiveRestartEnable = false;
-		pipeline = test.Create(desc);
-		test.Render({{pipeline.Raw(), white, 3}}, black);
+		state = desc;
+		test.Render({{&state, white, 3}}, black);
 		test.Pixel(0, 4, 4, {1, 1, 1, 1}, "Triangle fan renders its first triangle");
 	}
 
 	void TestDepthBias(RenderTest& test, Device& device) {
 		auto desc = test.Description();
-		desc.depthState = {};
-		auto normal = test.Create(desc);
+		desc.depth = {};
+		auto normal = desc;
 		const Parameters green{.color = {0, 1, 0, 1}};
 		const Parameters red{.color = {1, 0, 0, 1}};
-		test.Render({{normal.Raw(), green}, {normal.Raw(), red}});
+		test.Render({{&normal, green}, {&normal, red}});
 		test.Pixel(0, 8, 8, {0, 1, 0, 1}, "Equal depth fails the default Less comparison");
 
-		desc.rasterState.depthBias = {.enable = true, .constantFactor = -10000.f};
-		auto biased = test.Create(desc);
-		test.Render({{normal.Raw(), green}, {biased.Raw(), red}});
+		desc.raster.depthBias = {.enable = true, .constantFactor = -10000.f};
+		auto biased = desc;
+		test.Render({{&normal, green}, {&biased, red}});
 		test.Pixel(0, 8, 8, {1, 0, 0, 1}, "Constant depth bias moves the second surface forward");
 
-		desc.rasterState.depthBias.enable = false;
-		biased = test.Create(desc);
-		test.Render({{normal.Raw(), green}, {biased.Raw(), red}});
+		desc.raster.depthBias.enable = false;
+		biased = desc;
+		test.Render({{&normal, green}, {&biased, red}});
 		test.Pixel(0, 8, 8, {0, 1, 0, 1}, "Disabled depth bias ignores nonzero factors");
 
 		const Parameters reference{.color = {0, 1, 0, 1}, .depthAndSlope = {0.49f}};
 		const Parameters sloped{.color = {1, 0, 0, 1}, .depthAndSlope = {0.5f, 0.2f}};
-		desc.rasterState.depthBias = {.enable = true, .slopeFactor = -1.f};
-		biased = test.Create(desc);
-		test.Render({{normal.Raw(), reference}, {biased.Raw(), sloped}});
+		desc.raster.depthBias = {.enable = true, .slopeFactor = -1.f};
+		biased = desc;
+		test.Render({{&normal, reference}, {&biased, sloped}});
 		test.Pixel(0, 8, 8, {1, 0, 0, 1}, "Slope-scaled depth bias moves the sloped surface forward");
 
-		desc.rasterState.depthBias.clamp = -0.001f;
+		desc.raster.depthBias.clamp = -0.001f;
 		if (device.GetCapabilities().features.depthBiasClamp) {
-			biased = test.Create(desc);
-			test.Render({{normal.Raw(), reference}, {biased.Raw(), sloped}});
+			biased = desc;
+			test.Render({{&normal, reference}, {&biased, sloped}});
 			test.Pixel(0, 8, 8, {0, 1, 0, 1}, "Depth bias clamp limits the slope contribution");
 		}
 		else {
@@ -578,23 +573,23 @@ namespace {
 	void TestStencil(Device& device) {
 		RenderTest test(device, 1, TextureFormat::D32_Float_S8_UInt);
 		auto desc = test.Description();
-		desc.stencilState.enable = true;
+		desc.stencil.enable = true;
 		const Parameters green{.color = {0, 1, 0, 1}};
 		const Parameters red{.color = {1, 0, 0, 1}};
 		for (bool counterClockwise : {false, true}) {
-			desc.rasterState.frontCounterClockwise = counterClockwise;
-			desc.blendState.writeMask = ColorWriteMask::None;
-			desc.stencilState.front = {.passOp = StencilOp::Replace, .reference = 7};
-			desc.stencilState.back = desc.stencilState.front;
-			auto write = test.Create(desc);
-			desc.blendState.writeMask = ColorWriteMask::All;
-			desc.stencilState.front = {.compareOp = CompareOp::Equal, .writeMask = 0, .reference = 7};
-			desc.stencilState.back = desc.stencilState.front;
-			auto equal = test.Create(desc);
-			desc.stencilState.front.compareOp = CompareOp::NotEqual;
-			desc.stencilState.back = desc.stencilState.front;
-			auto notEqual = test.Create(desc);
-			test.Render({{write.Raw(), red, 3}, {equal.Raw(), green}, {notEqual.Raw(), red}}, {0, 0, 0, 0});
+			desc.raster.frontCounterClockwise = counterClockwise;
+			desc.blend.writeMask = ColorWriteMask::None;
+			desc.stencil.front = {.passOp = StencilOp::Replace, .reference = 7};
+			desc.stencil.back = desc.stencil.front;
+			auto write = desc;
+			desc.blend.writeMask = ColorWriteMask::All;
+			desc.stencil.front = {.compareOp = CompareOp::Equal, .writeMask = 0, .reference = 7};
+			desc.stencil.back = desc.stencil.front;
+			auto equal = desc;
+			desc.stencil.front.compareOp = CompareOp::NotEqual;
+			desc.stencil.back = desc.stencil.front;
+			auto notEqual = desc;
+			test.Render({{&write, red, 3}, {&equal, green}, {&notEqual, red}}, {0, 0, 0, 0});
 			test.Pixel(0, 4, 4, {0, 1, 0, 1}, "Stencil replacement enables equal fragments on either face");
 			test.Pixel(
 				0, 12, 12, {1, 0, 0, 1}, "Stencil rejects equal and accepts not-equal outside the written triangle");
@@ -630,60 +625,56 @@ namespace {
 					expected = 252;
 					break;
 			}
-			desc.blendState.writeMask = ColorWriteMask::None;
-			desc.stencilState.front = {.passOp = operation, .reference = 7};
-			desc.stencilState.back = desc.stencilState.front;
-			auto write = test.Create(desc);
-			desc.blendState.writeMask = ColorWriteMask::All;
-			desc.stencilState.front = {.compareOp = CompareOp::Equal, .writeMask = 0, .reference = expected};
-			desc.stencilState.back = desc.stencilState.front;
-			auto check = test.Create(desc);
-			test.Render({{write.Raw(), red}, {check.Raw(), green}}, {0, 0, 0, 0});
+			desc.blend.writeMask = ColorWriteMask::None;
+			desc.stencil.front = {.passOp = operation, .reference = 7};
+			desc.stencil.back = desc.stencil.front;
+			auto write = desc;
+			desc.blend.writeMask = ColorWriteMask::All;
+			desc.stencil.front = {.compareOp = CompareOp::Equal, .writeMask = 0, .reference = expected};
+			desc.stencil.back = desc.stencil.front;
+			auto check = desc;
+			test.Render({{&write, red}, {&check, green}}, {0, 0, 0, 0});
 			test.Pixel(0, 8, 8, {0, 1, 0, 1}, "Each stencil pass operation updates the stored value");
 		}
 
 		for (bool depthFailure : {false, true}) {
-			desc.blendState.writeMask = ColorWriteMask::None;
-			desc.depthState = {
-				.depthTestEnable = depthFailure, .depthWriteEnable = false, .compareOp = CompareOp::Never
-			};
-			desc.stencilState.front = {
+			desc.blend.writeMask = ColorWriteMask::None;
+			desc.depth = {.depthTestEnable = depthFailure, .depthWriteEnable = false, .compareOp = CompareOp::Never};
+			desc.stencil.front = {
 				.failOp = StencilOp::Replace,
 				.depthFailOp = StencilOp::Replace,
 				.compareOp = depthFailure ? CompareOp::Always : CompareOp::Never,
 				.writeMask = 0xf,
 				.reference = 9
 			};
-			desc.stencilState.back = desc.stencilState.front;
-			auto write = test.Create(desc);
-			desc.blendState.writeMask = ColorWriteMask::All;
-			desc.depthState.depthTestEnable = false;
-			desc.stencilState.front = {
-				.compareOp = CompareOp::Equal, .compareMask = 0xf, .writeMask = 0, .reference = 0x19
-			};
-			desc.stencilState.back = desc.stencilState.front;
-			auto check = test.Create(desc);
-			test.Render({{write.Raw(), red}, {check.Raw(), green}}, {0, 0, 0, 0});
+			desc.stencil.back = desc.stencil.front;
+			auto write = desc;
+			desc.blend.writeMask = ColorWriteMask::All;
+			desc.depth.depthTestEnable = false;
+			desc.stencil.front = {.compareOp = CompareOp::Equal, .compareMask = 0xf, .writeMask = 0, .reference = 0x19};
+			desc.stencil.back = desc.stencil.front;
+			auto check = desc;
+			test.Render({{&write, red}, {&check, green}}, {0, 0, 0, 0});
 			test.Pixel(0, 8, 8, {0, 1, 0, 1}, "Stencil fail/depth-fail operations honor masks and references");
 		}
 
-		desc.stencilState.front = {.passOp = StencilOp::Replace, .reference = 7};
-		desc.stencilState.back = desc.stencilState.front;
-		auto stencilWrite = test.Create(desc);
+		desc.stencil.front = {.passOp = StencilOp::Replace, .reference = 7};
+		desc.stencil.back = desc.stencil.front;
+		auto stencilWrite = desc;
 		const auto beforeStencil = s_Errors;
 		s_ExpectError = true;
-		test.Render({{stencilWrite.Raw(), red}}, {0, 0, 0, 0}, nullptr, false, true);
+		test.Render({{&stencilWrite, red}}, {0, 0, 0, 0}, nullptr, false, true);
 		s_ExpectError = false;
-		Expect(s_Errors == beforeStencil + 1, "Read-only stencil rejects a writing pipeline");
+		Expect(s_Errors == beforeStencil + 1, "Read-only stencil rejects a writing state");
 		test.Pixel(0, 8, 8, {0, 0, 0, 0}, "Rejected stencil draw leaves the clear color intact");
-		desc.stencilState.enable = false;
-		desc.depthState = {};
-		auto depthWrite = test.Create(desc);
+		desc.stencil.enable = false;
+		desc.depth = {};
+		auto depthWrite = desc;
 		const auto beforeDepth = s_Errors;
 		s_ExpectError = true;
-		test.Render({{depthWrite.Raw(), red}}, {0, 0, 0, 0}, nullptr, true, false);
+		test.Render({{&depthWrite, red}}, {0, 0, 0, 0}, nullptr, true, false);
 		s_ExpectError = false;
-		Expect(s_Errors == beforeDepth + 1, "Read-only depth rejects a writing pipeline");
+		Expect(s_Errors == beforeDepth + 1, "Read-only depth rejects a writing state");
 	}
 
 	void TestMultisampling(Device& device) {
@@ -704,60 +695,54 @@ namespace {
 		RenderTest test(device, samples, TextureFormat::D32_Float_S8_UInt);
 		test.RejectAttachments();
 		auto desc = test.Description();
-		desc.multisampleState.sampleCount = 1;
-		auto incompatible = test.Create(desc);
+		desc.multisample.sampleCount = 1;
+		auto incompatible = desc;
 		const auto before = s_Errors;
 		s_ExpectError = true;
-		test.Render({{incompatible.Raw(), {.color = {1, 1, 1, 1}}}}, {0, 0, 0, 0});
+		test.Render({{&incompatible, {.color = {1, 1, 1, 1}}}}, {0, 0, 0, 0});
 		s_ExpectError = false;
-		Expect(s_Errors == before + 1, "Mismatched pipeline sample count skips the draw");
+		Expect(s_Errors == before + 1, "Mismatched state sample count skips the draw");
 		test.Pixel(0, 8, 8, {0, 0, 0, 0}, "Rejected sample count leaves the clear color intact");
-		desc.multisampleState.sampleCount = samples;
-		desc.multisampleState.sampleMask = 1;
-		auto masked = test.Create(desc);
-		test.Render({{masked.Raw(), {.color = {1, 1, 1, 1}}}}, {0, 0, 0, 0});
+		desc.multisample.sampleCount = samples;
+		desc.multisample.sampleMask = 1;
+		auto masked = desc;
+		test.Render({{&masked, {.color = {1, 1, 1, 1}}}}, {0, 0, 0, 0});
 		const float fraction = 1.f / samples;
 		test.Pixel(
 			0, 8, 8, {fraction, fraction, fraction, fraction}, "Color resolve averages exactly one enabled sample");
-		auto cached = test.Create(desc);
-		Expect(cached.Raw() == masked.Raw(), "Identical multisample state reuses the pipeline cache");
-		desc.multisampleState.sampleMask = UINT64_MAX;
-		auto full = test.Create(desc);
-		Expect(full.Raw() != masked.Raw(), "Sample mask participates in the pipeline cache key");
-		test.Render({{full.Raw(), {.color = {1, 1, 1, 1}}}}, {0, 0, 0, 0});
+		desc.multisample.sampleMask = UINT64_MAX;
+		auto full = desc;
+		test.Render({{&full, {.color = {1, 1, 1, 1}}}}, {0, 0, 0, 0});
 		test.Pixel(0, 8, 8, {1, 1, 1, 1}, "All samples resolve to full coverage");
-		desc.multisampleState.alphaToCoverageEnable = true;
-		auto alpha = test.Create(desc);
-		test.Render({{alpha.Raw(), {.color = {1, 1, 1, 0}}}}, {0, 0, 0, 0});
+		desc.multisample.alphaToCoverageEnable = true;
+		auto alpha = desc;
+		test.Render({{&alpha, {.color = {1, 1, 1, 0}}}}, {0, 0, 0, 0});
 		test.Pixel(0, 8, 8, {0, 0, 0, 0}, "Zero alpha removes coverage when alpha-to-coverage is enabled");
 
 		const auto& resolve = device.GetCapabilities().depthStencilResolve;
 		if ((resolve.depthModes & 1) && (resolve.stencilModes & 1)) {
 			RenderTest depthTest(device, samples, TextureFormat::D32_Float_S8_UInt);
 			desc = depthTest.Description();
-			desc.multisampleState.sampleCount = 1;
-			desc.depthState = {};
-			desc.stencilState.enable = true;
-			desc.stencilState.front = {.compareOp = CompareOp::Equal, .writeMask = 0, .reference = 3};
-			desc.stencilState.back = desc.stencilState.front;
-			auto check = depthTest.Create(desc);
-			depthTest.Render({}, {0, 0, 0, 0}, check.Raw());
+			desc.multisample.sampleCount = 1;
+			desc.depth = {};
+			desc.stencil.enable = true;
+			desc.stencil.front = {.compareOp = CompareOp::Equal, .writeMask = 0, .reference = 3};
+			desc.stencil.back = desc.stencil.front;
+			auto check = desc;
+			depthTest.Render({}, {0, 0, 0, 0}, &check);
 			depthTest.Pixel(0, 8, 8, {0, 1, 0, 1}, "Depth and stencil resolve preserve values for subsequent tests");
 		}
 	}
 
 	void TestInvalidStates(RenderTest& test) {
 		auto desc = test.Description();
-		desc.multisampleState.sampleCount = 3;
+		desc.multisample.sampleCount = 3;
 		test.Reject(desc);
 		desc = test.Description();
-		desc.stencilState.enable = true;
+		desc.stencil.front.failOp = static_cast<StencilOp>(999);
 		test.Reject(desc);
 		desc = test.Description();
-		desc.stencilState.front.failOp = static_cast<StencilOp>(999);
-		test.Reject(desc);
-		desc = test.Description();
-		desc.stencilState.back.compareOp = static_cast<CompareOp>(999);
+		desc.stencil.back.compareOp = static_cast<CompareOp>(999);
 		test.Reject(desc);
 		desc = test.Description();
 		desc.topology = static_cast<PrimitiveTopology>(999);
@@ -767,35 +752,47 @@ namespace {
 		desc.primitiveRestartEnable = true;
 		test.Reject(desc);
 		desc = test.Description();
-		desc.colorBlendStates = {{}};
+		desc.blend.sourceColorFactor = static_cast<BlendFactor>(999);
 		test.Reject(desc);
 		desc = test.Description();
-		desc.blendState.sourceColorFactor = static_cast<BlendFactor>(999);
+		desc.blend.colorOperation = static_cast<BlendOperation>(999);
 		test.Reject(desc);
 		desc = test.Description();
-		desc.blendState.colorOperation = static_cast<BlendOperation>(999);
-		test.Reject(desc);
-		desc = test.Description();
-		desc.blendState.writeMask = static_cast<ColorWriteMask>(16);
+		desc.blend.writeMask = static_cast<ColorWriteMask>(16);
 		test.Reject(desc);
 		desc = test.Description();
 		desc.blendConstants[0] = std::numeric_limits<float>::quiet_NaN();
 		test.Reject(desc);
 		desc = test.Description();
-		desc.rasterState.depthBias.slopeFactor = std::numeric_limits<float>::infinity();
+		desc.raster.depthBias.slopeFactor = std::numeric_limits<float>::infinity();
 		test.Reject(desc);
+		// These states are structurally valid; their compatibility depends on the active rendering scope.
+		auto rejectDraw = [&](const GraphicsState& state) {
+			const auto before = s_Errors;
+			s_ExpectError = true;
+			test.Render({{&state, {.color = {1, 1, 1, 1}}}}, {0, 0, 0, 0});
+			s_ExpectError = false;
+			Expect(s_Errors == before + 1, "Reject incompatible state at draw time");
+			test.Pixel(0, 8, 8, {0, 0, 0, 0}, "Rejected draw preserves the clear color");
+		};
+		desc = test.Description();
+		desc.stencil.enable = true;
+		rejectDraw(desc);
+		desc = test.Description();
+		desc.colorBlends = {{}};
+		rejectDraw(desc);
 	}
 }
 
 int main() {
 	std::unique_ptr<RealRHI::Device> device;
-	Expect(RealRHI::Device::Create({.applicationName = "PipelineStateTests",
-										   .shaderDirectory = REALRHI_TEST_SHADER_DIRECTORY,
-										   .enableDebug = true,
-										   .enableValidationLayers = true,
-										   .debugCallback = Capture},
+	Expect(RealRHI::Device::Create({.applicationName = "GraphicsStateTests",
+									   .shaderDirectory = REALRHI_TEST_SHADER_DIRECTORY,
+									   .enableDebug = true,
+									   .enableValidationLayers = true,
+									   .debugCallback = Capture},
 			   device) == RealRHI::Result::Success,
-		"Create validation-enabled pipeline test device");
+		"Create validation-enabled state test device");
 	{
 		RenderTest test(*device);
 		TestBlending(test, *device);
@@ -808,5 +805,5 @@ int main() {
 	}
 	device->WaitIdle();
 	device.reset();
-	std::cout << "PipelineStateTests passed\n";
+	std::cout << "GraphicsStateTests passed\n";
 }

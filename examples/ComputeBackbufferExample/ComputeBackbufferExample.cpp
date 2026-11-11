@@ -17,19 +17,18 @@ namespace {
 							   .enableDebug = true,
 							   .enableValidationLayers = true,
 							   .debugCallback = Examples::CaptureDebugMessage},
-				device) != Result::Success) {
+				device) != RealRHI::Result::Success) {
 			return false;
 		}
 		Ref<Window> window;
 		Ref<Swapchain> swapchain;
 		Ref<Shader> shader;
-		Ref<Pipeline> pipeline;
 		if (device->CreateWindow({.title = "RealRHI Compute Backbuffer", .width = 960, .height = 640}, window) !=
-				Result::Success ||
-			device->CreateSwapchain({.window = window.Raw(), .enableStorage = true}, swapchain) != Result::Success ||
+				RealRHI::Result::Success ||
+			device->CreateSwapchain({.window = window.Raw(), .enableStorage = true}, swapchain) !=
+				RealRHI::Result::Success ||
 			device->CreateShader({.moduleName = "backbuffer", .entryPoints = {{"renderMain"}}}, shader) !=
-				Result::Success ||
-			device->CreateComputePipeline({.shader = shader.Raw()}, pipeline) != Result::Success) {
+				RealRHI::Result::Success) {
 			return false;
 		}
 		uint32_t frames = 0;
@@ -55,25 +54,27 @@ namespace {
 			}
 			RenderGraph graph(Examples::CaptureDebugMessage);
 			const auto backbuffer = graph.ImportBackBuffer(*swapchain, frame);
-			graph.AddPass({
-				.name = "Compute backbuffer",
-				.resources = {{backbuffer, {PipelineStage::ComputeShader, ResourceAccess::ShaderWrite},
-								TextureLayout::General, RenderGraphAccess::Write}},
-				.queue = QueueType::Compute},
-			[&](CommandList& commands) {
-				commands.BindPipeline(pipeline.Raw());
-				commands.UseResource(frame.backBufferView);
-				const uint32_t parameters[] = {
-					frame.backBufferView->GetStorageImageDescriptorIndex(),
-					frame.width,
-					frame.height,
-					0,
-				};
-				commands.SetPushConstants(parameters, sizeof(parameters));
-				commands.DispatchCompute((frame.width + 7) / 8, (frame.height + 7) / 8, 1);
-			});
+			graph.AddPass({.name = "Compute backbuffer",
+							  .resources =
+								  {{backbuffer,
+									  {PipelineStage::ComputeShader, ResourceAccess::ShaderWrite},
+									  TextureLayout::General,
+									  RenderGraphAccess::Write}},
+							  .queue = QueueType::Compute},
+				[&](CommandList& commands) {
+					commands.BindShaderProgram(shader.Raw());
+					commands.UseResource(frame.backBufferView);
+					const uint32_t parameters[] = {
+						frame.backBufferView->GetStorageImageDescriptorIndex(),
+						frame.width,
+						frame.height,
+						0,
+					};
+					commands.SetPushConstants(parameters, sizeof(parameters));
+					commands.DispatchCompute((frame.width + 7) / 8, (frame.height + 7) / 8, 1);
+				});
 			RenderGraphSubmission completion;
-			if (graph.Submit(*device, completion) != Result::Success) {
+			if (graph.Submit(*device, completion) != RealRHI::Result::Success) {
 				device->WaitIdle();
 				return false;
 			}

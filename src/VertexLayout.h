@@ -28,15 +28,21 @@ namespace RealRHI {
 		uint32_t binding = 0;
 		VertexFormat format = VertexFormat::Float;
 		uint32_t offset = 0;
+
+		bool operator==(const VertexAttributeDesc&) const = default;
 	};
 	struct VertexBindingDesc {
 		uint32_t binding = 0;
 		uint32_t stride = 0;
 		VertexInputRate inputRate = VertexInputRate::Vertex;
+
+		bool operator==(const VertexBindingDesc&) const = default;
 	};
 	// An optional override for the tightly packed layout inferred from shader inputs.
 	struct VertexLayout {
 		std::vector<VertexBindingDesc> bindings;
 		std::vector<VertexAttributeDesc> attributes;
+
+		bool operator==(const VertexLayout&) const = default;
 	};
 }
