@@ -254,6 +254,46 @@ Omit `--frames` to keep the window open. Resize or minimize it to exercise frame
 acquisition and extent-dependent transient targets. Source and shaders live under
 `examples/RenderGraphExample/`.
 
+### Multithreaded rendering
+
+`MultithreadedExample` and `MultithreadedRenderGraphExample` render the same animated
+scene using four persistent CPU recording threads. Each worker draws 256 triangles
+into its own offscreen tile; the main thread composites the four tiles and presents.
+
+- **Raw calls:** each worker explicitly transitions its tile from its previous
+  sampled state to a color attachment, then back to shader read. The main thread
+  uses `Device::Submit` and `Swapchain::Present` for the composite.
+- **Render graph:** each worker builds its own graph, imports its tile, declares the
+  attachment write, exports a sampled final state, and calls `Execute` on its own
+  command list. The main thread imports those outputs into a composite graph;
+  `ImportBackBuffer` and `Submit` handle backbuffer synchronization and presentation.
+
+```powershell
+cmake --build --preset windows-release --target MultithreadedExample MultithreadedRenderGraphExample
+Push-Location out/build/windows-release/examples/MultithreadedExample
+./MultithreadedExample.exe --frames 120
+Pop-Location
+Push-Location out/build/windows-release/examples/MultithreadedRenderGraphExample
+./MultithreadedRenderGraphExample.exe --frames 120
+Pop-Location
+```
+
+Omit `--frames` for interactive use. Both examples enable validation and return a
+failure exit code on rendering errors, including errors during cleanup. Resizing
+recreates each frame slot's tiles at its next use; minimized windows pause rendering.
+
+Each worker has separate command allocators, command lists, and textures per frame
+slot. All CPU recordings join before submission. Only the main thread submits GPU
+work, in worker order on the graphics queue, and completion tokens connect the tile
+writes to the composite. A slot waits for its previous composite before overwriting
+its textures, so the previous reader has finished as well as the worker writers.
+This demonstrates parallel CPU recording, not parallel GPU queues or a measured
+performance improvement. The graph API requires serialized access to each graph;
+parallel recording here uses independent worker graphs rather than concurrent
+callbacks on one graph. Shared scheduling and drawing helpers are in
+`examples/MultithreadedSupport.h`; the two example source files show the raw-call
+and graph implementations side by side.
+
 ## Presenting a render graph
 
 Graph declarations, the compiled schedule, and each execution's resource bindings and

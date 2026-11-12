@@ -16,3 +16,16 @@ add_subdirectory(ComputeBackbufferExample)
 add_subdirectory(SceneExample)
 add_subdirectory(CullingExample)
 add_subdirectory(RenderGraphExample)
+add_subdirectory(MultithreadedExample)
+add_subdirectory(MultithreadedRenderGraphExample)
+
+if(REALRHI_BUILD_TESTS AND REALRHI_BUILD_GPU_TESTS)
+    foreach(name IN ITEMS MultithreadedExample MultithreadedRenderGraphExample)
+        add_test(NAME ${name}Smoke COMMAND $<TARGET_FILE:${name}> --frames 12)
+        set_tests_properties(${name}Smoke PROPERTIES
+            WORKING_DIRECTORY "$<TARGET_FILE_DIR:${name}>"
+            LABELS "gpu;integration;example"
+            TIMEOUT 60
+            RESOURCE_LOCK gpu)
+    endforeach()
+endif()

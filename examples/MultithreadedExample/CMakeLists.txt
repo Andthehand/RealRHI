@@ -1,0 +1,3 @@
+find_package(Threads REQUIRED)
+realrhi_add_example(MultithreadedExample MultithreadedExample.cpp)
+target_link_libraries(MultithreadedExample PRIVATE Threads::Threads)

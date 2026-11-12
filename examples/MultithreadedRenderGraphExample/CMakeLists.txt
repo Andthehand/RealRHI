@@ -1,0 +1,3 @@
+find_package(Threads REQUIRED)
+realrhi_add_example(MultithreadedRenderGraphExample MultithreadedRenderGraphExample.cpp)
+target_link_libraries(MultithreadedRenderGraphExample PRIVATE Threads::Threads)
