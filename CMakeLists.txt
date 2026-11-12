@@ -8,6 +8,10 @@ option(REALRHI_BUILD_VULKAN "Build the Vulkan backend" ON)
 option(BUILD_EXAMPLES "Build example applications" ${REALRHI_BUILD_VULKAN})
 option(REALRHI_BUILD_TESTS "Build RealRHI tests" ON)
 option(REALRHI_BUILD_BENCHMARKS "Build CPU benchmarks (backend benchmarks require Vulkan)" OFF)
+option(REALRHI_BUILD_IMGUI "Build the optional Dear ImGui renderer" OFF)
+if(REALRHI_BUILD_IMGUI AND NOT REALRHI_BUILD_VULKAN)
+    message(FATAL_ERROR "REALRHI_BUILD_IMGUI requires REALRHI_BUILD_VULKAN")
+endif()
 
 set(realrhi_gpu_tests_default OFF)
 if(REALRHI_BUILD_VULKAN AND REALRHI_BUILD_TESTS)
@@ -41,17 +45,7 @@ function(realrhi_configure_tracy target)
     endif()
 endfunction()
 
-# Graph compilation and resource pooling depend only on the RHI interfaces.
-add_library(RealRHIGraph
-    src/RenderGraph/RenderGraph.h
-    src/RenderGraph/RenderGraph.cpp
-    src/RenderGraph/RenderGraphCompiler.cpp
-    src/RenderGraph/RenderGraphExecution.cpp
-    src/RenderGraph/RenderGraphQueuePlanner.cpp
-    src/RenderGraph/TransientResourcePool.h
-    src/RenderGraph/TransientResourcePool.cpp)
-target_link_libraries(RealRHIGraph PUBLIC RealRHICore)
-realrhi_configure_tracy(RealRHIGraph)
+add_subdirectory(src/RenderGraph)
 
 # Vulkan dependencies are unnecessary for core and graph tests.
 if(REALRHI_BUILD_VULKAN)
@@ -173,6 +167,10 @@ if(REALRHI_BUILD_VULKAN)
 
     target_compile_features(RealRHI PUBLIC cxx_std_20)
 
+endif()
+
+if(REALRHI_BUILD_IMGUI)
+    add_subdirectory(src/ImGui)
 endif()
 
 if(REALRHI_BUILD_BENCHMARKS)

@@ -141,6 +141,70 @@ Queue backends implement `Submit(const SubmitInfo&)`; the single-list and list-s
 
 `Buffer::WriteData` now returns `Result`, matching `ReadData`, so callers can handle mapped-copy and flush failures. Existing calls may ignore the result; custom buffer implementations must update their override's return type. The redundant Vulkan-only `CopyToMappedMemory` helper and unused compiler accessor were removed. `DeviceDesc::maxFramesInFlight` was also removed because the backend never used it: the swapchain currently uses two frame slots, while `FrameResources::Initialize` accepts an explicit slot count.
 
+## Optional Dear ImGui module
+
+Configure with `-DREALRHI_BUILD_IMGUI=ON` and link `RealRHIImGui` alongside
+`RealRHI`. The option defaults to OFF and requires the Vulkan build. It fetches
+[Dear ImGui 1.91.9b](https://github.com/ocornut/imgui/tree/v1.91.9b), or reuses an
+application-provided `imgui` target with matching 1.91.x headers and configuration.
+The module rejects 1.92's different texture API and BGRA packed colors.
+
+```cmake
+target_link_libraries(MyApplication PRIVATE RealRHI RealRHIImGui)
+realrhi_copy_imgui_shader(MyApplication)
+```
+
+The helper copies `realrhi_imgui.slang` into `shaders` beside the executable.
+Set `DeviceDesc::shaderDirectory` to that directory (or copy the shader into your
+own shader directory). `Initialize` also accepts a custom shader module name.
+
+```cpp
+#include "ImGui/ImGuiRenderer.h"
+
+ImGui::CreateContext();
+RealRHI::ImGuiRenderer ui;
+// Configure fonts before initialization. Check Result from each renderer call.
+auto result = ui.Initialize(*device);
+
+// Each frame: update input, DisplaySize, FramebufferScale, and DeltaTime through
+// your platform backend, then build the UI.
+ImGui::NewFrame();
+ImGui::ShowDemoWindow();
+ImGui::Render();
+
+// BeginRendering with one color attachment (LoadOp::Load for an overlay).
+result = ui.RenderDrawData(*commands, *ImGui::GetDrawData());
+// EndRendering, submit, and present as usual.
+
+// After the final GPU submission has completed:
+device->WaitIdle();
+ui.Shutdown();
+ImGui::DestroyContext();
+```
+
+This is a renderer backend; the application owns the context, input/platform
+integration, frame lifecycle, attachment transitions, submission, and presentation.
+Call with the initialized context current. Shut down before destroying that
+context or device. Font upload is synchronous during initialization; changing the
+atlas requires shutdown and reinitialization. Multi-viewport rendering is not enabled.
+
+Use `ImGuiRenderer::GetTextureID(texture)` with `ImGui::Image` for custom images.
+Textures must belong to the same device, be single-sampled 2D sampled images,
+and be in `ShaderRead` layout with graphics-queue ownership. Keep the texture alive
+until rendering is recorded; commands retain its view until reset. The renderer
+uses a shared linear clamp sampler. It supports framebuffer scaling, nonzero
+display origins, large meshes, draw callbacks, and the reset-render-state callback.
+Pass the attachment sample count as the third argument for multisampled rendering.
+
+Rendering replaces graphics state, bindings, push constants, viewport, scissor,
+and shader resource declarations; restore these before subsequent scene draws.
+Each call allocates immutable vertex/index buffers, retained by the recording,
+so multiple frames can remain in flight without overwriting UI data. Indices are
+converted to the RHI's 32-bit format. With the module enabled, `ShaderTests` also
+checks the ImGui shader and push-constant layout without a GPU. When GPU tests
+are enabled, `ImGuiTests` checks offscreen pixel output for custom textures, atlas
+rendering, clipping at 2× framebuffer scale, callbacks, and backend cleanup.
+
 ## Window title
 
 Set the initial title with `WindowDesc::title`, or change it at runtime with

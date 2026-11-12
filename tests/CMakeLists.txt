@@ -24,8 +24,19 @@ target_compile_definitions(ShaderTests PRIVATE
     REALRHI_TEST_SHADER_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/shaders"
     REALRHI_OTHER_SHADER_DIRECTORY="${RealRHI_SOURCE_DIR}/examples/TriangleExample/shaders")
 set_tests_properties(ShaderTests PROPERTIES LABELS "cpu;shader" TIMEOUT 120)
+if(REALRHI_BUILD_IMGUI)
+    target_compile_definitions(ShaderTests PRIVATE
+        REALRHI_IMGUI_SHADER_DIRECTORY="${RealRHI_SOURCE_DIR}/src/ImGui/shaders")
+endif()
 
 if(REALRHI_BUILD_GPU_TESTS)
+    if(REALRHI_BUILD_IMGUI)
+        realrhi_add_test(ImGuiTests ImGuiTests.cpp)
+        target_link_libraries(ImGuiTests PRIVATE RealRHIImGui)
+        target_compile_definitions(ImGuiTests PRIVATE
+            REALRHI_IMGUI_SHADER_DIRECTORY="${RealRHI_SOURCE_DIR}/src/ImGui/shaders")
+        set_tests_properties(ImGuiTests PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
+    endif()
     realrhi_add_test(RenderGraphQueueTests RenderGraphQueueTests.cpp)
     realrhi_add_test(TransientResourcePoolTests TransientResourcePoolTests.cpp)
     realrhi_add_test(RenderGraphTests RenderGraphTests.cpp)
