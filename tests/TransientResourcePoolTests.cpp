@@ -49,10 +49,10 @@ namespace {
 				const auto data = graph.CreateBuffer({.size = size, .usage = BufferUsage::TransferDst});
 				graph.AddPass({.name = "Budget buffer",
 								  .resources = {{data, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-					[&](CommandList&) {
-						bufferBytes = graph.GetBuffer(data)->GetAllocationSize();
+					[&](RenderGraphContext& context) {
+						bufferBytes = context.GetBuffer(data)->GetAllocationSize();
 						if (keep) {
-							retained = graph.GetBuffer(data);
+							retained = context.GetBuffer(data);
 						}
 					});
 				Expect(graph.Execute(device, *commands, &pool) == Result::Success, "Allocate budget buffer");
@@ -70,8 +70,8 @@ namespace {
 				{.width = 4, .height = 4, .format = TextureFormat::RGBA8_UNorm, .usage = TextureUsage::TransferDst});
 			graph.AddPass({.name = "Budget texture",
 							  .resources = {{image, s_Write, TextureLayout::TransferDst, RenderGraphAccess::Write}}},
-				[&](CommandList&) {
-					textureBytes = graph.GetTexture(image)->GetAllocationSize();
+				[&](RenderGraphContext& context) {
+					textureBytes = context.GetTexture(image)->GetAllocationSize();
 				});
 			Expect(graph.Execute(device, *commands, &pool) == Result::Success, "Allocate budget texture");
 		}
@@ -160,10 +160,11 @@ namespace {
 									  {{source, s_Read},
 										  {data, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write},
 										  {image, s_Write, TextureLayout::TransferDst, RenderGraphAccess::Write}}},
-					[&, data, image, phase](CommandList& list) {
-						list.CopyBuffer(upload.Raw(), graph.GetBuffer(data), {.sourceOffset = phase * 16, .size = 16});
+					[&, data, image, phase](RenderGraphContext& context) {
+						auto& list = context.GetCommands();
+						list.CopyBuffer(upload.Raw(), context.GetBuffer(data), {.sourceOffset = phase * 16, .size = 16});
 						list.CopyBufferToTexture(upload.Raw(),
-							graph.GetTexture(image),
+							context.GetTexture(image),
 							{.width = 4, .height = 1, .bufferOffset = phase * 16});
 					});
 				graph.AddPass({.name = "Snapshot transient " + std::to_string(phase),
@@ -171,10 +172,11 @@ namespace {
 									  {{data, s_Read},
 										  {image, s_Read, TextureLayout::TransferSrc},
 										  {output, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-					[&, data, image, phase](CommandList& list) {
+					[&, data, image, phase](RenderGraphContext& context) {
+						auto& list = context.GetCommands();
 						list.CopyBuffer(
-							graph.GetBuffer(data), readback.Raw(), {.destinationOffset = phase * 32, .size = 16});
-						list.CopyTextureToBuffer(graph.GetTexture(image),
+							context.GetBuffer(data), readback.Raw(), {.destinationOffset = phase * 32, .size = 16});
+						list.CopyTextureToBuffer(context.GetTexture(image),
 							readback.Raw(),
 							{.width = 4, .height = 1, .bufferOffset = phase * 32 + 16});
 					});
@@ -257,21 +259,21 @@ namespace {
 				const auto b = graph.CreateBuffer(desc);
 				graph.AddPass({.name = "Write first",
 								  .resources = {{a, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-					[](CommandList&) { });
+					[](RenderGraphContext&) { });
 				if (variant == 0) {
 					graph.AddPass(
 						{.name = "Overlapping lifetimes",
 							.resources =
 								{{a, s_Read}, {b, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-						[](CommandList&) { });
+						[](RenderGraphContext&) { });
 				}
 				else {
-					graph.AddPass({.name = "Read first", .resources = {{a, s_Read}}}, [](CommandList&) { });
+					graph.AddPass({.name = "Read first", .resources = {{a, s_Read}}}, [](RenderGraphContext&) { });
 					graph.AddPass({.name = "Write second",
 									  .resources = {{b, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-						[](CommandList&) { });
+						[](RenderGraphContext&) { });
 				}
-				graph.AddPass({.name = "Read second", .resources = {{b, s_Read}}}, [](CommandList&) { });
+				graph.AddPass({.name = "Read second", .resources = {{b, s_Read}}}, [](RenderGraphContext&) { });
 				if (variant == 1) {
 					graph.SetFinalState(a, s_Read);
 				}
@@ -300,19 +302,19 @@ namespace {
 			const auto b = graph.CreateBuffer(desc);
 			graph.AddPass({.name = "Graphics lifetime",
 							  .resources = {{a, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-				[](CommandList&) { });
+				[](RenderGraphContext&) { });
 			if (crossesQueues) {
 				graph.AddPass(
-					{.name = "Ownership handoff", .resources = {{a, s_Read}}, .queue = other}, [](CommandList&) { });
+					{.name = "Ownership handoff", .resources = {{a, s_Read}}, .queue = other}, [](RenderGraphContext&) { });
 				graph.AddPass({.name = "Next graphics lifetime",
 								  .resources = {{b, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-					[](CommandList&) { });
+					[](RenderGraphContext&) { });
 			}
 			else {
 				graph.AddPass({.name = "Independent foreign lifetime",
 								  .resources = {{b, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}},
 								  .queue = other},
-					[](CommandList&) { });
+					[](RenderGraphContext&) { });
 			}
 			RenderGraphSubmission completion;
 			Expect(graph.Submit(device, completion) == Result::Success &&
@@ -392,19 +394,21 @@ namespace {
 									  {{source, s_Read},
 										  {texture, s_Write, TextureLayout::TransferDst, RenderGraphAccess::Write},
 										  {buffer, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-					[&](CommandList& list) {
-						list.CopyBufferToTexture(upload.Raw(), graph.GetTexture(texture), {.width = 2, .height = 2});
-						list.CopyBuffer(upload.Raw(), graph.GetBuffer(buffer), {.size = sizeof(initial)});
+					[&](RenderGraphContext& context) {
+						auto& list = context.GetCommands();
+						list.CopyBufferToTexture(upload.Raw(), context.GetTexture(texture), {.width = 2, .height = 2});
+						list.CopyBuffer(upload.Raw(), context.GetBuffer(buffer), {.size = sizeof(initial)});
 					});
 				graph.AddPass({.name = "Readback",
 								  .resources =
 									  {{texture, s_Read, TextureLayout::TransferSrc},
 										  {buffer, s_Read},
 										  {output, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-					[&](CommandList& list) {
+					[&](RenderGraphContext& context) {
+						auto& list = context.GetCommands();
 						list.CopyTextureToBuffer(
-							graph.GetTexture(texture), outputs[slot].Raw(), {.width = 2, .height = 2});
-						list.CopyBuffer(graph.GetBuffer(buffer),
+							context.GetTexture(texture), outputs[slot].Raw(), {.width = 2, .height = 2});
+						list.CopyBuffer(context.GetBuffer(buffer),
 							outputs[slot].Raw(),
 							{.destinationOffset = sizeof(initial), .size = sizeof(initial)});
 					});
@@ -470,7 +474,7 @@ namespace {
 					graph.AddPass(
 						{.name = "Reserve texture",
 							.resources = {{texture, s_Write, TextureLayout::TransferDst, RenderGraphAccess::Write}}},
-						[](CommandList&) { });
+						[](RenderGraphContext&) { });
 					Expect(graph.Execute(device, *commands, &pool) == Result::Success, "Allocate exported resource");
 					if (execution == 0) {
 						original = graph.GetTexture(texture);
@@ -524,7 +528,7 @@ namespace {
 				const auto handle = graph.CreateTexture(desc);
 				graph.AddPass({.name = "Texture",
 								  .resources = {{handle, s_Write, TextureLayout::General, RenderGraphAccess::Write}}},
-					[](CommandList&) { });
+					[](RenderGraphContext&) { });
 				Expect(graph.Execute(device, commands, &pool) == Result::Success, "Acquire matching texture");
 				result = graph.GetTexture(handle);
 			}
@@ -540,7 +544,7 @@ namespace {
 				const auto handle = graph.CreateBuffer(desc);
 				graph.AddPass({.name = "Buffer",
 								  .resources = {{handle, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-					[](CommandList&) { });
+					[](RenderGraphContext&) { });
 				Expect(graph.Execute(device, commands, &pool) == Result::Success, "Acquire matching buffer");
 				result = graph.GetBuffer(handle);
 			}

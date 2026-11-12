@@ -1,9 +1,11 @@
 #pragma once
+
 #include "BufferDesc.h"
 #include "CommandList.h"
 #include "DeviceDesc.h"
 #include "Swapchain.h"
 
+#include <array>
 #include <functional>
 #include <optional>
 #include <string>
@@ -12,6 +14,7 @@
 namespace RealRHI {
 	class Device;
 	class TransientResourcePool;
+	class RenderGraph;
 
 	struct RenderGraphResource {
 		uint32_t index = UINT32_MAX;
@@ -31,13 +34,47 @@ namespace RealRHI {
 
 	struct RenderGraphUse {
 		RenderGraphResource resource;
+
 		ResourceState state;
 		TextureLayout layout = TextureLayout::Undefined;
 		RenderGraphAccess access = RenderGraphAccess::Read;
+
+		static RenderGraphUse SampledRead(RenderGraphResource resource,
+			PipelineStage stages = PipelineStage::FragmentShader) {
+			return {resource, {stages, ResourceAccess::ShaderRead}, TextureLayout::ShaderRead};
+		}
+
+		static RenderGraphUse ColorAttachmentWrite(RenderGraphResource resource) {
+			return {resource, {PipelineStage::ColorAttachmentOutput, ResourceAccess::ColorAttachmentWrite},
+				TextureLayout::ColorAttachment, RenderGraphAccess::Write};
+		}
+	};
+
+	// Borrowed for one callback. Resolution is restricted to that pass's declarations.
+	// UseResource is still required for bindless operations.
+	class RenderGraphContext {
+	public:
+		CommandList& GetCommands() const { return m_Commands; }
+
+		Texture* GetTexture(RenderGraphResource resource) const;
+		Buffer* GetBuffer(RenderGraphResource resource) const;
+
+	private:
+		friend class RenderGraph;
+
+		RenderGraphContext(RenderGraph& graph, CommandList& commands, uint32_t pass)
+			: m_Graph(graph), m_Commands(commands), m_Pass(pass) { }
+
+		bool Declares(RenderGraphResource resource) const;
+
+		RenderGraph& m_Graph;
+		CommandList& m_Commands;
+		uint32_t m_Pass;
 	};
 
 	struct RenderGraphOptions {
 		bool cullUnusedPasses = false;
+
 		// Reuse an identical physical resource for disjoint logical lifetimes on one
 		// native queue. Exports, imports, host-visible buffers, and cross-queue resources
 		// stay distinct. A retained Ref preserves allocation lifetime, not old contents:
@@ -47,10 +84,13 @@ namespace RealRHI {
 
 	struct RenderGraphPassDesc {
 		std::string name;
+
 		std::vector<RenderGraphUse> resources;
 		std::vector<RenderGraphPass> dependsOn;
+
 		// Submit honors this preference; Execute uses its caller-owned list.
 		QueueType queue = QueueType::Graphics;
+
 		// Required when culling is enabled and the callback affects unmanaged resources
 		// or performs other externally observable work. Writes to imports are roots too.
 		bool hasSideEffects = false;
@@ -58,10 +98,12 @@ namespace RealRHI {
 
 	struct RenderGraphStep {
 		std::string name;
+
 		BarrierDesc barriers;
 		QueueType queue = QueueType::Graphics;
 		BarrierDesc afterBarriers;
 		std::optional<QueueId> nativeQueue;
+
 		// Submit batch index; UINT32_MAX until batch planning (or when culled).
 		uint32_t batchIndex = UINT32_MAX;
 	};
@@ -69,11 +111,14 @@ namespace RealRHI {
 	struct RenderGraphPassInfo {
 		RenderGraphPass pass;
 		std::string name;
+
 		QueueType queue = QueueType::Graphics;
+
 		// UINT32_MAX identifies a culled pass; other indices address GetExecutionPlan().
 		uint32_t executionIndex = UINT32_MAX;
 		std::vector<RenderGraphPass> prerequisites;
 		std::optional<QueueId> nativeQueue;
+
 		// Submit batch index; UINT32_MAX until batch planning (or when culled).
 		uint32_t batchIndex = UINT32_MAX;
 	};
@@ -81,13 +126,16 @@ namespace RealRHI {
 	struct RenderGraphResourceInfo {
 		RenderGraphResource resource;
 		std::string name;
+
 		bool texture = false;
 		bool imported = false;
 		bool exported = false;
+
 		// Inclusive schedule positions, UINT32_MAX for unused resources. These describe
 		// CPU scheduling order, not GPU time overlap or permission to alias allocations.
 		uint32_t firstUse = UINT32_MAX;
 		uint32_t lastUse = UINT32_MAX;
+
 		std::optional<RenderGraphResource> aliasOf;
 		uint64_t allocationBytes = 0;
 	};
@@ -101,10 +149,13 @@ namespace RealRHI {
 	struct RenderGraphBatchInfo {
 		QueueType queue = QueueType::Graphics;
 		QueueId nativeQueue;
+
 		// Indices into GetExecutionPlan(), in recording order.
 		std::vector<uint32_t> steps;
+
 		// Earlier batch indices; same-queue ordering needs no semaphore wait.
 		std::vector<uint32_t> prerequisites;
+
 		// Prefix batches contain initial barriers instead of graph passes.
 		std::optional<uint32_t> initialRelease;
 		bool waitForAcquire = false;
@@ -114,12 +165,15 @@ namespace RealRHI {
 	struct RenderGraphDiagnostics {
 		bool compiled = false;
 		bool multiQueue = false;
+
 		std::vector<RenderGraphPassInfo> passes;
 		std::vector<RenderGraphResourceInfo> resources;
 		std::vector<RenderGraphInitialBarriers> initialBarriers;
 		std::vector<RenderGraphBatchInfo> batches;
+
 		uint64_t transientBytes = 0;
 		uint64_t aliasSavedBytes = 0;
+
 		BarrierDesc presentationBarriers;
 	};
 
@@ -127,11 +181,12 @@ namespace RealRHI {
 		// One token per successful batch, in diagnostic batch order, including the
 		// queued prefix when Submit fails. A batch may contain several passes.
 		std::vector<SubmissionToken> completions;
+
 		bool IsComplete(Device& device) const;
 		void Wait(Device& device) const;
 	};
 
-	// Serialize building/execution; callbacks must not mutate the graph. Resource
+	// Serialize graph access, including diagnostic inspection; callbacks must not mutate it. Resource
 	// versions follow insertion order; explicit dependencies reorder independent passes.
 	// Execute records into one caller-owned list. Submit honors each pass's queue,
 	// creates its own lists, and schedules GPU dependencies without CPU waits.
@@ -145,7 +200,8 @@ namespace RealRHI {
 		// are copied; initialize data in a Write pass rather than BufferDesc::initialData.
 		RenderGraphResource CreateTexture(const TextureDesc& desc);
 		RenderGraphResource CreateBuffer(const BufferDesc& desc);
-		// Borrowed until the next Execute/Reset/destruction; retain a Ref to keep an
+
+		// Borrowed until the next Execute/Submit/Reset/destruction; retain a Ref to keep an
 		// output externally. Created resources resolve inside callbacks and after Execute.
 		Texture* GetTexture(RenderGraphResource resource);
 		Buffer* GetBuffer(RenderGraphResource resource);
@@ -167,6 +223,7 @@ namespace RealRHI {
 			uint64_t offset = 0,
 			uint64_t size = 0,
 			std::optional<QueueType> owner = {});
+
 		// One acquired frame per graph. Contents are discarded; first use must write.
 		// Submit handles acquire synchronization, final ownership/layout, and Present.
 		RenderGraphResource ImportBackBuffer(Swapchain& swapchain, const FrameContext& frame);
@@ -176,28 +233,42 @@ namespace RealRHI {
 
 		// Callbacks record complete passes, beginning/ending their own rendering scopes.
 		// Imported ranges must enter and leave the callback in the declared state/layout.
+		// Resolve declared resources and access the command list through the context.
 		// Declare every graph-managed resource here. Callbacks may also access resources
 		// whose states/dependencies are managed externally. UseResource belongs in each
 		// callback: Execute clears prior declarations at pass boundaries and on exit,
 		// retaining their lifetimes through CommandList reset as usual.
-		RenderGraphPass AddPass(RenderGraphPassDesc desc, std::function<void(CommandList&)> record);
+		RenderGraphPass AddPass(RenderGraphPassDesc desc, std::function<void(RenderGraphContext&)> record);
 		void AddDependency(RenderGraphPass pass, RenderGraphPass prerequisite);
 
 		// Compile validates the entire graph without recording anything. Plans remain
 		// valid until the graph changes; rebuild if external resource states change.
-		// Created-resource barrier pointers resolve during Execute. Compile allocates nothing.
+		// Logical compilation is cached until mutation. Compile creates no GPU resources
+		// and leaves an existing execution snapshot intact when the graph is unchanged.
+		// Diagnostic snapshots are materialized on demand by the inspection methods.
+		// Created-resource barrier pointers resolve during Execute/Submit.
 		bool Compile(std::string& error);
+
 		// Reset preserves options. Culling keeps exports, writes to imported resources,
 		// side-effect passes, and all their prerequisites. Other callbacks may be skipped.
 		void SetOptions(RenderGraphOptions options);
+
 		// Snapshots describe the latest compiled/recording plan, including a failed submission. Submit adds
 		// actual queue dependencies and prefix ownership releases. Barrier pointers are
 		// borrowed from the graph; the plan and final barriers expose complete states.
 		RenderGraphDiagnostics GetDiagnostics() const;
 		std::string GetDebugDescription() const;
 		std::string GetDependencyGraphDot() const;
-		const std::vector<RenderGraphStep>& GetExecutionPlan() const { return m_Plan; }
-		const BarrierDesc& GetFinalBarriers() const { return m_FinalBarriers; }
+		const std::vector<RenderGraphStep>& GetExecutionPlan() const {
+			EnsureSnapshot();
+			return m_Execution.steps;
+		}
+
+		const BarrierDesc& GetFinalBarriers() const {
+			EnsureSnapshot();
+			return m_Execution.finalBarriers;
+		}
+
 		// Compile, allocate resources, and record into an active list outside rendering.
 		// An optional pool reuses compatible idle allocations; contents are always
 		// discarded and require initialization. Debug names do not affect pool identity;
@@ -206,6 +277,7 @@ namespace RealRHI {
 		Result Execute(Device& device,
 			CommandList& commands,
 			TransientResourcePool* pool = nullptr);
+
 		// Batch consecutive passes sharing a native queue when no new cross-queue wait
 		// or earlier cross-queue signal is needed. Record all lists before submitting any work.
 		// External waits apply to all submissions; matching release/acquire pairs handle exclusive ownership.
@@ -223,93 +295,216 @@ namespace RealRHI {
 		void Reset();
 
 	private:
+		friend class RenderGraphContext;
 		struct Resource {
 			std::optional<TextureDesc> textureDesc;
 			std::optional<BufferDesc> bufferDesc;
 			std::string debugName;
+
 			Ref<Texture> texture;
 			Ref<Buffer> buffer;
+
 			TextureSubresourceRange subresources;
+
 			uint64_t offset = 0;
 			uint64_t size = 0;
-			uint32_t aliasSource = UINT32_MAX;
+
 			ResourceState initialState;
 			TextureLayout initialLayout = TextureLayout::Undefined;
 			std::optional<QueueType> initialQueue;
+
 			bool hasFinalState = false;
 			ResourceState finalState;
 			TextureLayout finalLayout = TextureLayout::Undefined;
 		};
+
 		struct Pass {
 			RenderGraphPassDesc desc;
-			std::function<void(CommandList&)> record;
+			std::function<void(RenderGraphContext&)> record;
 		};
+
 		struct Dependency {
 			RenderGraphPass pass;
 			RenderGraphPass prerequisite;
 		};
+
+		// Planned barriers carry logical identities; native pointers are bound only
+		// in the execution snapshot.
+		struct PlannedTextureBarrier {
+			uint32_t resource = UINT32_MAX;
+
+			ResourceState before;
+			ResourceState after;
+
+			TextureLayout oldLayout = TextureLayout::Undefined;
+			TextureLayout newLayout = TextureLayout::Undefined;
+			TextureSubresourceRange subresources;
+
+			std::optional<QueueType> sourceQueue;
+			std::optional<QueueType> destinationQueue;
+
+			bool acquireFromPresent = false;
+			bool releaseToPresent = false;
+		};
+
+		struct PlannedBufferBarrier {
+			uint32_t resource = UINT32_MAX;
+
+			ResourceState before;
+			ResourceState after;
+
+			uint64_t offset = 0;
+			uint64_t size = 0;
+
+			std::optional<QueueType> sourceQueue;
+			std::optional<QueueType> destinationQueue;
+		};
+
+		struct PlannedBarriers {
+			std::vector<PlannedTextureBarrier> textures;
+			std::vector<PlannedBufferBarrier> buffers;
+		};
+
+		struct PlannedStep {
+			std::string name;
+
+			PlannedBarriers barriers;
+			QueueType queue = QueueType::Graphics;
+			PlannedBarriers afterBarriers;
+			std::optional<QueueId> nativeQueue;
+			uint32_t batchIndex = UINT32_MAX;
+		};
+
 		struct InitialRelease {
 			QueueType queue;
-			BarrierDesc barriers;
+			PlannedBarriers barriers;
 			std::vector<uint32_t> consumers;
 		};
+
+		struct CompiledGraph {
+			bool valid = false;
+
+			std::vector<uint8_t> usedResources;
+			std::vector<uint32_t> order;
+			std::vector<std::vector<uint32_t>> prerequisites;
+
+			std::vector<PlannedStep> steps;
+			PlannedBarriers finalBarriers;
+		};
+
+		struct SubmissionPlan {
+			bool multiQueue = false;
+
+			std::vector<std::vector<uint32_t>> prerequisites;
+
+			std::vector<InitialRelease> initialReleases;
+			std::vector<RenderGraphBatchInfo> batches;
+		};
+
+		struct QueuePlan {
+			SubmissionPlan submission;
+
+			std::vector<PlannedStep> steps;
+			PlannedBarriers finalBarriers;
+			PlannedBarriers presentationBarriers;
+		};
+
+		struct PhysicalResource {
+			Ref<Texture> texture;
+			Ref<Buffer> buffer;
+
+			bool reused = false;
+		};
+
+		struct Execution {
+			std::vector<PhysicalResource> resources;
+			std::vector<uint32_t> aliasSources;
+
+			SubmissionPlan plan;
+
+			// Diagnostic views are materialized on demand after logical compilation,
+			// or once after physical resources and queues are prepared for recording.
+			mutable bool hasSnapshot = false;
+			mutable std::vector<RenderGraphStep> steps;
+			mutable BarrierDesc finalBarriers;
+			mutable BarrierDesc presentationBarriers;
+		};
+
 		struct TrackedState {
 			ResourceState state;
 			TextureLayout layout = TextureLayout::Undefined;
+
 			bool used = false;
 			bool initialized = false;
+
 			std::vector<ResourceState> visibleReads;
 		};
 
 	private:
 		static bool IsTexture(const Resource& resource);
 		static bool IsCreated(const Resource& resource);
+
 		void ReleaseCreatedResources();
+
+		Texture* ResolveTexture(uint32_t resource) const;
+		Buffer* ResolveBuffer(uint32_t resource) const;
+
+		BarrierDesc ResolveBarriers(const PlannedBarriers& barriers) const;
+		void EnsureSnapshot() const;
+		void ResolvePlan(std::span<const PlannedStep> steps,
+			const PlannedBarriers& finalBarriers,
+			const PlannedBarriers& presentationBarriers = {}) const;
+		void BindQueuePlan(QueuePlan plan);
+		void PrepareSingleQueuePlan(QueueId queue);
+
 		void BuildAliasPlan(std::span<const QueueId> queues, std::span<const uint8_t> poolingAllowed);
 		Result AllocateResources(Device& device,
 			std::span<const QueueId> queues,
 			TransientResourcePool* pool,
 			std::span<const uint8_t> poolingAllowed = {});
+
 		bool IsValid(RenderGraphResource resource) const;
 		bool IsValid(RenderGraphPass pass) const;
+
 		bool ValidateResources(std::string& error) const;
 		bool ValidatePasses(std::string& error) const;
+
 		void BuildDependencies();
 		bool BuildOrder(std::string& error);
 		void CullUnusedPasses();
+
 		void RecordPass(CommandList& commands, size_t position);
 		bool BuildBarriers(std::string& error);
 		bool ValidateQueues(Device& device, std::string& error) const;
-		void BuildQueuePlan(Device& device, std::vector<InitialRelease>& initialReleases);
-		void BuildBatches(Device& device);
+
+		// Queue planning consumes resolved identities, without allocation or submission.
+		QueuePlan BuildQueuePlan(const std::array<QueueId, 3>& queues) const;
+		void BuildBatches(QueuePlan& plan, const std::array<QueueId, 3>& queues) const;
+
 		void Transition(uint32_t resource,
 			ResourceState after,
 			TextureLayout layout,
 			TrackedState& before,
-			BarrierDesc& barriers);
+			PlannedBarriers& barriers) const;
+
 		void Invalidate();
 		void Report(const std::string& error) const;
 
 	private:
 		DebugCallback m_Callback;
+
 		Ref<Swapchain> m_FrameSwapchain;
 		FrameContext m_Frame;
 		uint32_t m_BackBuffer = UINT32_MAX;
-		BarrierDesc m_PresentationBarriers;
+
 		RenderGraphOptions m_Options;
-		bool m_Compiled = false;
-		bool m_MultiQueue = false;
-		std::vector<uint8_t> m_UsedResources;
-		std::vector<uint32_t> m_AliasSources;
-		std::vector<InitialRelease> m_InitialReleases;
-		std::vector<RenderGraphBatchInfo> m_Batches;
 		uint64_t m_Id = 0;
+
 		std::vector<Resource> m_Resources;
 		std::vector<Pass> m_Passes;
 		std::vector<Dependency> m_Dependencies;
-		std::vector<uint32_t> m_Order;
-		std::vector<std::vector<uint32_t>> m_Prerequisites;
-		std::vector<RenderGraphStep> m_Plan;
-		BarrierDesc m_FinalBarriers;
+
+		CompiledGraph m_Compiled;
+		Execution m_Execution;
 	};
 }

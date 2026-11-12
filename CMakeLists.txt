@@ -48,6 +48,9 @@ endfunction()
 add_library(RealRHIGraph
     src/RenderGraph/RenderGraph.h
     src/RenderGraph/RenderGraph.cpp
+    src/RenderGraph/RenderGraphCompiler.cpp
+    src/RenderGraph/RenderGraphExecution.cpp
+    src/RenderGraph/RenderGraphQueuePlanner.cpp
     src/RenderGraph/TransientResourcePool.h
     src/RenderGraph/TransientResourcePool.cpp)
 target_link_libraries(RealRHIGraph PUBLIC RealRHICore)

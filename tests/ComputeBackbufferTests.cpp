@@ -174,7 +174,8 @@ namespace {
 									  TextureLayout::General,
 									  RenderGraphAccess::Write}},
 							  .queue = queue},
-				[&](CommandList& list) {
+				[&](RenderGraphContext& context) {
+					auto& list = context.GetCommands();
 					list.BindShaderProgram(render.Raw());
 					list.UseResource(frame.backBufferView);
 					list.SetPushConstants(parameters, sizeof(parameters));
@@ -189,7 +190,8 @@ namespace {
 								TextureLayout::Undefined,
 								RenderGraphAccess::Write}},
 					.queue = queue},
-				[&](CommandList& list) {
+				[&](RenderGraphContext& context) {
+					auto& list = context.GetCommands();
 					list.BindShaderProgram(read.Raw());
 					list.UseResource(frame.backBufferView);
 					list.UseResource(pixels.Raw());

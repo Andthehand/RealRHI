@@ -256,6 +256,32 @@ acquisition and extent-dependent transient targets. Source and shaders live unde
 
 ## Presenting a render graph
 
+Graph declarations, the compiled schedule, and each execution's resource bindings and
+queue plan are stored separately. `Compile` caches the logical schedule until a pass,
+resource, dependency, final state, or option changes. Repeated `Execute` and `Submit`
+calls bind fresh allocations without recompiling that schedule. Queue ownership
+dependencies belong to the submission plan and do not alter logical dependencies.
+An unchanged `Compile` preserves the latest execution diagnostics. Diagnostic views
+are materialized when requested; recording binds the plan once after allocation.
+
+Pass callbacks take a `RenderGraphContext&` to resolve resources from the current
+execution without capturing the graph. The context only resolves resources declared
+by that pass. Access the command list with `context.GetCommands()`.
+`RenderGraphUse::ColorAttachmentWrite(resource)` and
+`RenderGraphUse::SampledRead(resource, stages)` provide common state/layout declarations;
+sampled reads default to the fragment stage. For example:
+
+```cpp
+graph.AddPass({.name = "Sample scene",
+                  .resources = {RenderGraphUse::SampledRead(scene)}},
+    [scene](RenderGraphContext& context) {
+        auto& commands = context.GetCommands();
+        auto* texture = context.GetTexture(scene);
+        commands.UseResource(texture); // Still required for bindless shader access.
+        // Bind shaders and record the pass.
+    });
+```
+
 Acquire a frame, import its backbuffer, and declare that resource in the passes that render to it:
 
 ```cpp

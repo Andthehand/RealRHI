@@ -20,7 +20,44 @@ namespace {
 		}
 	}
 
-	void EmptyPass(CommandList&) { }
+	void EmptyPass(RenderGraphContext&) { }
+
+	void TestUseHelpersAndCachedCompilation() {
+		RenderGraph graph;
+		const auto image = graph.CreateTexture({.width = 4, .height = 4,
+			.format = TextureFormat::RGBA8_UNorm,
+			.usage = TextureUsage::RenderTarget | TextureUsage::ShaderResource});
+		graph.AddPass({.name = "Clear", .resources = {RenderGraphUse::ColorAttachmentWrite(image)}}, EmptyPass);
+		graph.AddPass({.name = "Sample",
+			.resources = {RenderGraphUse::SampledRead(image, PipelineStage::ComputeShader)},
+			.queue = QueueType::Compute}, [](RenderGraphContext&) { });
+		std::string error;
+		Expect(graph.Compile(error), "Usage helpers compile with context callbacks");
+		const auto& barrier = graph.GetExecutionPlan()[1].barriers.textures[0];
+		Expect(barrier.texture == nullptr && barrier.oldLayout == TextureLayout::ColorAttachment &&
+			barrier.newLayout == TextureLayout::ShaderRead &&
+			barrier.before.access == ResourceAccess::ColorAttachmentWrite &&
+			barrier.after.stages == PipelineStage::ComputeShader && barrier.after.access == ResourceAccess::ShaderRead,
+			"Helpers preserve requested shader stages and infer matching access/layout");
+		const auto* published = graph.GetExecutionPlan().data();
+		error = "old error";
+		Expect(graph.Compile(error) && error.empty() && graph.GetExecutionPlan().data() == published,
+			"An unchanged compilation preserves its published snapshot and clears the error");
+		graph.AddPass({.name = "Additional pass"}, [](auto& context) {
+			context.GetCommands().InsertDebugLabel("Generic context");
+		});
+		Expect(!graph.GetDiagnostics().compiled && graph.GetExecutionPlan().empty(),
+			"Mutation invalidates the cached plan; generic callbacks receive a context");
+		Expect(graph.Compile(error) && graph.GetExecutionPlan().size() == 3,
+			"Compilation after mutation includes new passes");
+		graph.AddPass({.name = "Missing callback"}, {});
+		Expect(!graph.Compile(error) && error.find("callback") != std::string::npos,
+			"Empty callbacks fail validation");
+		graph.Reset();
+		graph.AddPass({.name = "Missing context callback"}, std::function<void(RenderGraphContext&)>{});
+		Expect(!graph.Compile(error) && error.find("callback") != std::string::npos,
+			"Empty context callbacks fail validation before recording");
+	}
 
 	class PlanningBuffer : public Buffer {
 	public:
@@ -368,6 +405,7 @@ namespace {
 }
 
 int main() {
+	TestUseHelpersAndCachedCompilation();
 	TestImportValidation();
 	TestManyResourceDeclarations();
 	TestScheduling();

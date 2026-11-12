@@ -100,7 +100,8 @@ namespace {
 								   RenderGraphAccess::Write},
 								  {dispatchResource, indirect}},
 						  .queue = computeQueue},
-			[&](CommandList& list) {
+			[&](RenderGraphContext& context) {
+				auto& list = context.GetCommands();
 				list.BindShaderProgram(cullShader.Raw());
 				list.UseResource(arguments.Raw());
 				struct CullParameters {
@@ -127,7 +128,8 @@ namespace {
 									  TextureLayout::ColorAttachment,
 									  RenderGraphAccess::Write}},
 						  .queue = QueueType::Graphics},
-			[&](CommandList& list) {
+			[&](RenderGraphContext& context) {
+				auto& list = context.GetCommands();
 				list.BeginRendering(
 					{.colorAttachments = {{.target = color->GetTextureView()}},
 						.renderArea = {.width = 64, .height = 64}});
@@ -194,7 +196,8 @@ namespace {
 									  TextureLayout::Undefined,
 									  RenderGraphAccess::Write}},
 						  .queue = QueueType::Transfer},
-			[&](CommandList& list) {
+			[&](RenderGraphContext& context) {
+				auto& list = context.GetCommands();
 				list.CopyTextureToBuffer(color.Raw(), readback.Raw(), {.width = 64, .height = 64});
 				list.CopyBuffer(
 					arguments.Raw(), readback.Raw(), {.destinationOffset = 64 * 64 * 4, .size = s_ArgumentSize});

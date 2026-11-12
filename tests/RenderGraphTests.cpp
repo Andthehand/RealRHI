@@ -1,5 +1,6 @@
 #include "Device.h"
 #include "RenderGraph/RenderGraph.h"
+#include "RenderGraph/TransientResourcePool.h"
 
 #include <array>
 #include <cstdlib>
@@ -34,7 +35,104 @@ namespace {
 		DefaultDebugCallback(message);
 	}
 
-	void EmptyPass(CommandList&) { }
+	void EmptyPass(RenderGraphContext&) { }
+
+	void TestContextAndPlanReuse(Device& device) {
+		const std::array<uint32_t, 4> initial{0x11223344, 0x55667788, 0x99aabbcc, 0xddeeff00};
+		Ref<Buffer> upload;
+		Expect(device.CreateBuffer({.size = sizeof(initial), .usage = BufferUsage::TransferSrc,
+			.memoryUsage = MemoryUsage::CPUToGPU, .initialData = initial.data()}, upload) == Result::Success,
+			"Create context test input");
+		TransientResourcePool pool(device);
+		RenderGraph graph(Capture);
+		const auto source = graph.ImportBuffer(upload.Raw(), s_TransferRead);
+		const auto data = graph.CreateBuffer({.size = sizeof(initial),
+			.usage = BufferUsage::TransferSrc | BufferUsage::TransferDst});
+		const auto image = graph.CreateTexture({.width = 4, .height = 1, .format = TextureFormat::RGBA8_UNorm,
+			.usage = TextureUsage::TransferSrc | TextureUsage::TransferDst | TextureUsage::ShaderResource});
+		const auto output = graph.CreateBuffer({.size = 2 * sizeof(initial),
+			.usage = BufferUsage::TransferDst, .memoryUsage = MemoryUsage::GPUToCPU});
+		// Use a separate graph's handle to verify graph identity as well as pass membership.
+		RenderGraph other;
+		const auto foreign = other.ImportBuffer(upload.Raw(), s_TransferRead);
+		uint32_t calls = 0;
+		graph.AddPass({.name = "Context upload",
+			.resources = {{source, s_TransferRead},
+				{data, s_TransferWrite, TextureLayout::Undefined, RenderGraphAccess::Write},
+				{image, s_TransferWrite, TextureLayout::TransferDst, RenderGraphAccess::Write}}},
+			[&](RenderGraphContext& context) {
+				++calls;
+				Expect(context.GetBuffer(source) == upload.Raw() && context.GetBuffer(data) == graph.GetBuffer(data) &&
+					context.GetTexture(image) == graph.GetTexture(image), "Context resolves this execution's resources");
+				++s_ExpectedErrors;
+				Expect(context.GetBuffer(foreign) == nullptr, "Context rejects a foreign graph's resource handle");
+				++s_ExpectedErrors;
+				Expect(context.GetBuffer(output) == nullptr, "Context rejects resources absent from the pass");
+				auto& commands = context.GetCommands();
+				commands.CopyBuffer(context.GetBuffer(source), context.GetBuffer(data), {.size = sizeof(initial)});
+				commands.CopyBufferToTexture(context.GetBuffer(source), context.GetTexture(image), {.width = 4, .height = 1});
+			});
+		const auto computeReader = graph.AddPass({.name = "Compute sample state",
+			.resources = {RenderGraphUse::SampledRead(image, PipelineStage::ComputeShader)}, .queue = QueueType::Compute},
+			[image](RenderGraphContext& context) { context.GetCommands().UseResource(context.GetTexture(image)); });
+		const auto graphicsReader = graph.AddPass({.name = "Graphics sample state",
+			.resources = {RenderGraphUse::SampledRead(image)}},
+			[image](auto& context) { context.GetCommands().UseResource(context.GetTexture(image)); });
+		graph.AddPass({.name = "Context readback",
+			.resources = {{data, s_TransferRead}, {image, s_TransferRead, TextureLayout::TransferSrc},
+				{output, s_TransferWrite, TextureLayout::Undefined, RenderGraphAccess::Write}}},
+			[=](RenderGraphContext& context) {
+				auto& commands = context.GetCommands();
+				commands.CopyBuffer(context.GetBuffer(data), context.GetBuffer(output), {.size = sizeof(initial)});
+				commands.CopyTextureToBuffer(context.GetTexture(image), context.GetBuffer(output),
+					{.width = 4, .height = 1, .bufferOffset = sizeof(initial)});
+			});
+		std::string error;
+		Expect(graph.Compile(error), "Compile context graph before binding native resources");
+		for (uint32_t iteration = 0; iteration < 3; ++iteration) {
+			Ref<CommandAllocator> allocator;
+			Ref<CommandList> commands;
+			RenderGraphSubmission completion;
+			if (iteration == 1) {
+				Expect(device.CreateCommandAllocator(QueueType::Graphics, allocator) == Result::Success &&
+					device.CreateCommandList(allocator.Raw(), commands) == Result::Success &&
+					commands->Begin() == Result::Success, "Begin caller-owned context recording");
+				Expect(graph.Execute(device, *commands, &pool) == Result::Success &&
+					commands->End() == Result::Success, "Record a previously submitted compiled graph");
+				completion.completions.push_back(device.GetGraphicsCommandQueue()->Submit(*commands));
+			}
+			else {
+				Expect(graph.Submit(device, completion, &pool) == Result::Success,
+					"Submit the same compiled graph with fresh bindings");
+			}
+			const auto* published = graph.GetExecutionPlan().data();
+			const auto previousDiagnostics = graph.GetDiagnostics();
+			const auto& readerDependencies = previousDiagnostics.passes[graphicsReader.index].prerequisites;
+			bool dependsOnComputeReader = false;
+			for (auto dependency : readerDependencies) {
+				dependsOnComputeReader |= dependency.index == computeReader.index;
+			}
+			const bool distinctQueues = device.GetCommandQueue(QueueType::Compute)->GetQueueId() !=
+				device.GetGraphicsCommandQueue()->GetQueueId();
+			Expect(dependsOnComputeReader == (iteration != 1 && distinctQueues),
+				"Queue ownership dependencies never leak into the logical graph or caller-owned recording");
+			Expect(graph.Compile(error) && graph.GetExecutionPlan().data() == published &&
+				graph.GetDiagnostics().multiQueue == previousDiagnostics.multiQueue &&
+				graph.GetDiagnostics().batches.size() == previousDiagnostics.batches.size(),
+				"Cached compilation preserves the latest recording and submission diagnostics");
+			Expect(graph.GetExecutionPlan()[0].barriers.textures[0].texture == graph.GetTexture(image),
+				"Logical texture barriers bind to the current allocation");
+			completion.Wait(device);
+			std::array<uint32_t, 8> actual{};
+			Expect(graph.GetBuffer(output)->ReadData(actual.data(), sizeof(actual)) == Result::Success,
+				"Read context outputs");
+			for (uint32_t i = 0; i < actual.size(); ++i) {
+				Expect(actual[i] == initial[i % initial.size()], "Rebound buffer and texture barriers preserve output data");
+			}
+		}
+		Expect(calls == 3 && pool.GetStatistics().bufferReuses > 0,
+			"Repeated context recordings reuse eligible idle allocations");
+	}
 
 	void ExpectInvalid(RenderGraph& graph, const char* diagnostic) {
 		std::string error;
@@ -140,7 +238,7 @@ namespace {
 								  {PipelineStage::ColorAttachmentOutput, ResourceAccess::ColorAttachmentWrite},
 								  TextureLayout::ColorAttachment,
 								  RenderGraphAccess::Write}}},
-			[&](CommandList&) {
+			[&](RenderGraphContext&) {
 				++callbacks;
 			});
 		const auto write = graph.AddPass(
@@ -163,10 +261,10 @@ namespace {
 			EmptyPass);
 		const auto prerequisite = graph.AddPass({.name = "Required side work"}, EmptyPass);
 		const auto effect = graph.AddPass(
-			{.name = "External side effect", .dependsOn = {prerequisite}, .hasSideEffects = true}, [&](CommandList&) {
+			{.name = "External side effect", .dependsOn = {prerequisite}, .hasSideEffects = true}, [&](RenderGraphContext&) {
 				++callbacks;
 			});
-		graph.AddPass({.name = "Unreferenced callback"}, [&](CommandList&) {
+		graph.AddPass({.name = "Unreferenced callback"}, [&](RenderGraphContext&) {
 			callbacks += 100;
 		});
 		graph.SetOptions({.cullUnusedPasses = true});
@@ -227,7 +325,7 @@ namespace {
 		graph.SetOptions({});
 		callbacks = 0;
 		for (uint32_t i = 0; i < 70; ++i) {
-			graph.AddPass({.name = "Capacity pass " + std::to_string(i)}, [&](CommandList&) {
+			graph.AddPass({.name = "Capacity pass " + std::to_string(i)}, [&](RenderGraphContext&) {
 				++callbacks;
 			});
 		}
@@ -326,7 +424,7 @@ namespace {
 		uint32_t callbacks = 0;
 		graph.AddPass({.name = "No partial execution",
 						  .resources = {{data, s_TransferWrite, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-			[&](CommandList&) {
+			[&](RenderGraphContext&) {
 				++callbacks;
 			});
 		++s_ExpectedErrors;
@@ -375,15 +473,17 @@ namespace {
 						  .resources =
 							  {{source, s_TransferRead},
 								  {data, s_TransferWrite, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-			[&](CommandList& list) {
-				list.CopyBuffer(graph.GetBuffer(source), graph.GetBuffer(data), {.size = sizeof(initial)});
+			[&](RenderGraphContext& context) {
+				auto& list = context.GetCommands();
+				list.CopyBuffer(context.GetBuffer(source), context.GetBuffer(data), {.size = sizeof(initial)});
 			});
 		graph.AddPass({.name = "Readback",
 						  .resources =
 							  {{data, s_TransferRead},
 								  {output, s_TransferWrite, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-			[&](CommandList& list) {
-				list.CopyBuffer(graph.GetBuffer(data), graph.GetBuffer(output), {.size = sizeof(initial)});
+			[&](RenderGraphContext& context) {
+				auto& list = context.GetCommands();
+				list.CopyBuffer(context.GetBuffer(data), context.GetBuffer(output), {.size = sizeof(initial)});
 			});
 		std::array<Ref<CommandAllocator>, 2> allocators;
 		std::array<Ref<CommandList>, 2> commands;
@@ -474,31 +574,35 @@ namespace {
 			graph.AddPass(
 				{.name = "Green source",
 					.resources = {{first, attachment, TextureLayout::ColorAttachment, RenderGraphAccess::Write}}},
-				[&](CommandList& list) {
-					draw(list, graph.GetTexture(first), nullptr, {0, 1, 0, 1});
+				[&](RenderGraphContext& context) {
+					auto& list = context.GetCommands();
+					draw(list, context.GetTexture(first), nullptr, {0, 1, 0, 1});
 				});
 			graph.AddPass({.name = "Sample source",
 							  .resources =
 								  {{first, sampled, TextureLayout::ShaderRead},
 									  {second, attachment, TextureLayout::ColorAttachment, RenderGraphAccess::Write}}},
-				[&](CommandList& list) {
-					draw(list, graph.GetTexture(second), graph.GetTexture(first), {});
+				[&](RenderGraphContext& context) {
+					auto& list = context.GetCommands();
+					draw(list, context.GetTexture(second), context.GetTexture(first), {});
 				});
 			graph.AddPass(
 				{.name = "Overwrite sampled texture",
 					.resources = {{first, attachment, TextureLayout::ColorAttachment, RenderGraphAccess::Write}}},
-				[&](CommandList& list) {
-					draw(list, graph.GetTexture(first), nullptr, {0, 0, 1, 1});
+				[&](RenderGraphContext& context) {
+					auto& list = context.GetCommands();
+					draw(list, context.GetTexture(first), nullptr, {0, 0, 1, 1});
 				});
 			graph.AddPass({.name = "Read textures",
 							  .resources =
 								  {{first, s_TransferRead, TextureLayout::TransferSrc},
 									  {second, s_TransferRead, TextureLayout::TransferSrc},
 									  {output, s_TransferWrite, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-				[&](CommandList& list) {
-					list.CopyTextureToBuffer(graph.GetTexture(first), readback.Raw(), {.width = 8, .height = 8});
+				[&](RenderGraphContext& context) {
+					auto& list = context.GetCommands();
+					list.CopyTextureToBuffer(context.GetTexture(first), readback.Raw(), {.width = 8, .height = 8});
 					list.CopyTextureToBuffer(
-						graph.GetTexture(second), readback.Raw(), {.width = 8, .height = 8, .bufferOffset = 8 * 8 * 4});
+						context.GetTexture(second), readback.Raw(), {.width = 8, .height = 8, .bufferOffset = 8 * 8 * 4});
 				});
 			const auto before = device.GetStatistics();
 			std::string error;
@@ -560,7 +664,7 @@ namespace {
 		uint32_t skipped = 0;
 		RenderGraph invalid(Capture);
 		const auto bad = invalid.ImportBuffer(nullptr);
-		invalid.AddPass({.name = "Invalid", .resources = {{bad, s_ComputeRead}}}, [&](CommandList&) {
+		invalid.AddPass({.name = "Invalid", .resources = {{bad, s_ComputeRead}}}, [&](RenderGraphContext&) {
 			++skipped;
 		});
 		++s_ExpectedErrors;
@@ -585,25 +689,28 @@ namespace {
 							  .resources =
 								  {{source, s_TransferRead},
 									  {working, s_TransferWrite, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-				[&](CommandList& list) {
+				[&](RenderGraphContext& context) {
+					auto& list = context.GetCommands();
 					order.push_back("Upload");
-					list.CopyBuffer(upload.Raw(), graph.GetBuffer(working), {.size = sizeof(initial)});
+					list.CopyBuffer(upload.Raw(), context.GetBuffer(working), {.size = sizeof(initial)});
 				});
 			graph.AddPass({.name = "Snapshot",
 							  .resources =
 								  {{working, s_TransferRead},
 									  {original, s_TransferWrite, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-				[&](CommandList& list) {
+				[&](RenderGraphContext& context) {
+					auto& list = context.GetCommands();
 					order.push_back("Snapshot");
-					list.CopyBuffer(graph.GetBuffer(working), snapshot.Raw(), {.size = sizeof(initial)});
+					list.CopyBuffer(context.GetBuffer(working), snapshot.Raw(), {.size = sizeof(initial)});
 				});
 			graph.AddPass({.name = "Repeated snapshot",
 							  .resources =
 								  {{working, s_TransferRead},
 									  {original, s_TransferWrite, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-				[&](CommandList& list) {
+				[&](RenderGraphContext& context) {
+					auto& list = context.GetCommands();
 					order.push_back("Repeated snapshot");
-					list.CopyBuffer(graph.GetBuffer(working), snapshot.Raw(), {.size = sizeof(initial)});
+					list.CopyBuffer(context.GetBuffer(working), snapshot.Raw(), {.size = sizeof(initial)});
 				});
 			for (uint32_t i = 0; i < 2; ++i) {
 				graph.AddPass({.name = "Compute",
@@ -613,11 +720,12 @@ namespace {
 											  ResourceAccess::ShaderRead | ResourceAccess::ShaderWrite},
 										  TextureLayout::Undefined,
 										  RenderGraphAccess::ReadWrite}}},
-					[&](CommandList& list) {
+					[&](RenderGraphContext& context) {
+						auto& list = context.GetCommands();
 						order.push_back("Compute");
 						list.BindShaderProgram(shader.Raw());
-						list.UseResource(graph.GetBuffer(working));
-						const uint32_t parameters[] = {graph.GetBuffer(working)->GetDescriptorIndex(), 64};
+						list.UseResource(context.GetBuffer(working));
+						const uint32_t parameters[] = {context.GetBuffer(working)->GetDescriptorIndex(), 64};
 						list.SetPushConstants(parameters, sizeof(parameters));
 						list.DispatchCompute(1, 1, 1);
 					});
@@ -626,9 +734,10 @@ namespace {
 							  .resources =
 								  {{working, s_TransferRead},
 									  {result, s_TransferWrite, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-				[&](CommandList& list) {
+				[&](RenderGraphContext& context) {
+					auto& list = context.GetCommands();
 					order.push_back("Readback");
-					list.CopyBuffer(graph.GetBuffer(working), readback.Raw(), {.size = sizeof(initial)});
+					list.CopyBuffer(context.GetBuffer(working), readback.Raw(), {.size = sizeof(initial)});
 				});
 			Expect(graph.Execute(device, *commands) == Result::Success, "Allocate and record graph working buffer");
 			Expect(graph.GetExecutionPlan()[2].barriers.buffers.size() == 1 &&
@@ -689,6 +798,7 @@ int main() {
 		TestTexturePasses(*device);
 		TestCreatedValidation(*device);
 		TestExecutionsInFlight(*device);
+		TestContextAndPlanReuse(*device);
 	}
 	device->WaitIdle();
 	device.reset();

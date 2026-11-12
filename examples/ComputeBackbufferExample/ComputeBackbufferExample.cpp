@@ -61,7 +61,8 @@ namespace {
 									  TextureLayout::General,
 									  RenderGraphAccess::Write}},
 							  .queue = QueueType::Compute},
-				[&](CommandList& commands) {
+				[&](RenderGraphContext& context) {
+					auto& commands = context.GetCommands();
 					commands.BindShaderProgram(shader.Raw());
 					commands.UseResource(frame.backBufferView);
 					const uint32_t parameters[] = {

@@ -616,15 +616,6 @@ namespace RealRHI::Examples {
 				.format = m_DepthFormat,
 				.usage = TextureUsage::DepthStencil | TextureUsage::ShaderResource,
 				.debugName = "Scene shadow map"});
-		auto resolveTargets = [&graph, color, depth, shadow, width = size.width, height = size.height] {
-			return FrameTargets{
-				.color = graph.GetTexture(color),
-				.depth = graph.GetTexture(depth),
-				.shadow = graph.GetTexture(shadow),
-				.width = width,
-				.height = height
-			};
-		};
 		const auto pattern = graph.ImportTexture(m_Pattern.Raw(), TextureLayout::ShaderRead, sampled, {0, 6, 0, 1});
 		const ResourceState vertexState{PipelineStage::VertexInput, ResourceAccess::VertexAttributeRead};
 		const ResourceState indexState{PipelineStage::VertexInput, ResourceAccess::IndexRead};
@@ -648,7 +639,8 @@ namespace RealRHI::Examples {
 			return resources;
 		};
 
-		const auto setup = graph.AddPass({.name = "Frame setup"}, [this, pendingUpload, sampled](CommandList& list) {
+		const auto setup = graph.AddPass({.name = "Frame setup"}, [this, pendingUpload, sampled](RenderGraphContext& context) {
+			auto& list = context.GetCommands();
 			if (pendingUpload.completion.IsValid()) {
 				list.Barrier(pendingUpload.acquireBarriers);
 				list.GenerateMipmaps(m_Pattern.Raw(), {.finalState = sampled});
@@ -666,8 +658,9 @@ namespace RealRHI::Examples {
 					},
 					false),
 				.dependsOn = {setup}},
-			[this, resolveTargets, rotation, shadowsEnabled](CommandList& list) {
-				auto targets = resolveTargets();
+			[this, shadow, size, rotation, shadowsEnabled](RenderGraphContext& context) {
+				auto& list = context.GetCommands();
+				FrameTargets targets{.shadow = context.GetTexture(shadow), .width = size.width, .height = size.height};
 				DrawShadowMap(list, targets, rotation, shadowsEnabled);
 			});
 
@@ -683,8 +676,11 @@ namespace RealRHI::Examples {
 						{indices, indexState},
 					},
 					true)},
-			[this, resolveTargets, rotation, shadowsEnabled](CommandList& list) {
-				auto targets = resolveTargets();
+			[this, color, depth, shadow, size, rotation, shadowsEnabled](RenderGraphContext& context) {
+				auto& list = context.GetCommands();
+				FrameTargets targets{.color = context.GetTexture(color),
+					.depth = context.GetTexture(depth), .shadow = context.GetTexture(shadow),
+					.width = size.width, .height = size.height};
 				list.SetViewport(
 					{.width = static_cast<float>(targets.width), .height = static_cast<float>(targets.height)});
 				list.SetScissor({.width = targets.width, .height = targets.height});
@@ -699,8 +695,9 @@ namespace RealRHI::Examples {
 				{*outputResource, colorAttachment, TextureLayout::ColorAttachment, RenderGraphAccess::Write});
 		}
 		graph.AddPass({.name = "Postprocess", .resources = std::move(outputs), .hasSideEffects = true},
-			[this, resolveTargets, output](CommandList& list) {
-				auto targets = resolveTargets();
+			[this, color, size, output](RenderGraphContext& context) {
+				auto& list = context.GetCommands();
+				FrameTargets targets{.color = context.GetTexture(color), .width = size.width, .height = size.height};
 				DrawPostprocess(list, targets, output);
 			});
 		return Result::Success;

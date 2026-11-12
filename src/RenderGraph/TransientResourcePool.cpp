@@ -22,9 +22,11 @@ namespace RealRHI {
 		if (entry.texture->GetRefCount() != 1) {
 			return false;
 		}
+
 		// Default views borrow their image. An independently retained default view
 		// must also prevent recycling; custom views already retain their parent.
 		const auto* view = entry.texture->GetTextureView();
+
 		return view == nullptr || view->GetRefCount() == 1;
 	}
 
@@ -35,6 +37,7 @@ namespace RealRHI {
 	Result TransientResourcePool::AcquireTexture(QueueId queue, const TextureDesc& desc, Ref<Texture>& outTexture) {
 		std::scoped_lock lock(m_Mutex);
 		EvictToBudget(m_BudgetBytes);
+
 		for (auto& entry : m_Textures) {
 			if (entry.queue == queue && Matches(entry.desc, desc) && IsIdle(entry)) {
 				outTexture = entry.texture;
@@ -50,6 +53,7 @@ namespace RealRHI {
 		if (result != Result::Success) {
 			return result;
 		}
+
 		auto storedDesc = desc;
 		storedDesc.debugName = nullptr;
 		m_Textures.push_back({storedDesc, queue, texture, ++m_Clock});
@@ -58,12 +62,14 @@ namespace RealRHI {
 		EvictToBudget(m_BudgetBytes);
 		++m_TextureAllocations;
 		outTexture = std::move(texture);
+
 		return Result::Success;
 	}
 
 	Result TransientResourcePool::AcquireBuffer(QueueId queue, const BufferDesc& desc, Ref<Buffer>& outBuffer) {
 		std::scoped_lock lock(m_Mutex);
 		EvictToBudget(m_BudgetBytes);
+
 		for (auto& entry : m_Buffers) {
 			if (entry.queue == queue && Matches(entry.desc, desc) && IsIdle(entry)) {
 				outBuffer = entry.buffer;
@@ -79,6 +85,7 @@ namespace RealRHI {
 		if (result != Result::Success) {
 			return result;
 		}
+
 		auto storedDesc = desc;
 		storedDesc.debugName = nullptr;
 		storedDesc.initialData = nullptr;
@@ -88,6 +95,7 @@ namespace RealRHI {
 		EvictToBudget(m_BudgetBytes);
 		++m_BufferAllocations;
 		outBuffer = std::move(buffer);
+
 		return Result::Success;
 	}
 
@@ -105,18 +113,21 @@ namespace RealRHI {
 			.peakResidentBytes = m_PeakResidentBytes,
 			.evictions = m_Evictions,
 		};
+
 		for (const auto& entry : m_Textures) {
 			if (IsIdle(entry)) {
 				++statistics.idleTextureCount;
 				statistics.idleBytes += entry.texture->GetAllocationSize();
 			}
 		}
+
 		for (const auto& entry : m_Buffers) {
 			if (IsIdle(entry)) {
 				++statistics.idleBufferCount;
 				statistics.idleBytes += entry.buffer->GetAllocationSize();
 			}
 		}
+
 		return statistics;
 	}
 
@@ -125,18 +136,21 @@ namespace RealRHI {
 			size_t texture = m_Textures.size();
 			size_t buffer = m_Buffers.size();
 			uint64_t oldest = UINT64_MAX;
+
 			for (size_t i = 0; i < m_Textures.size(); ++i) {
 				if (m_Textures[i].lastUse < oldest && IsIdle(m_Textures[i])) {
 					oldest = m_Textures[i].lastUse;
 					texture = i;
 				}
 			}
+
 			for (size_t i = 0; i < m_Buffers.size(); ++i) {
 				if (m_Buffers[i].lastUse < oldest && IsIdle(m_Buffers[i])) {
 					oldest = m_Buffers[i].lastUse;
 					buffer = i;
 				}
 			}
+
 			if (buffer < m_Buffers.size()) {
 				m_ResidentBytes -= m_Buffers[buffer].buffer->GetAllocationSize();
 				m_Buffers.erase(m_Buffers.begin() + buffer);
@@ -148,6 +162,7 @@ namespace RealRHI {
 			else {
 				break;
 			}
+
 			++m_Evictions;
 		}
 	}

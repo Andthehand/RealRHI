@@ -1,4 +1,5 @@
 #pragma once
+
 #include "Queue.h"
 
 #include <algorithm>
@@ -20,7 +21,6 @@ namespace RealRHI {
 
 	public:
 		using CompletionQuery = std::function<bool(const SubmissionToken&)>;
-		using CompletionWait = std::function<void(const SubmissionToken&)>;
 
 	public:
 		void Enqueue(std::vector<SubmissionToken> dependencies, std::function<void()> destroy) {
@@ -48,6 +48,7 @@ namespace RealRHI {
 				if (completed) {
 					ready.push_back(std::move(entry.destroy));
 				}
+
 				return completed;
 			});
 			if (!pending.empty()) {
@@ -60,25 +61,6 @@ namespace RealRHI {
 			for (auto& callback : ready) {
 				callback();
 			}
-		}
-
-		void Drain(const CompletionWait& wait, const CompletionQuery& isComplete) {
-			std::vector<SubmissionToken> dependencies;
-			{
-				std::scoped_lock lock(m_Mutex);
-				for (const auto& entry : m_Entries) {
-					for (const SubmissionToken& token : entry.dependencies) {
-						if (token.IsValid()) {
-							dependencies.push_back(token);
-						}
-					}
-				}
-			}
-
-			for (const SubmissionToken& token : dependencies) {
-				wait(token);
-			}
-			Process(isComplete);
 		}
 
 		size_t PendingCount() const {

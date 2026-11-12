@@ -108,18 +108,18 @@ namespace {
 				.debugName = "Triangle color",
 			});
 			const auto backbuffer = graph.ImportBackBuffer(*m_Swapchain, frame);
-			const ResourceState colorWrite{PipelineStage::ColorAttachmentOutput, ResourceAccess::ColorAttachmentWrite};
 
 			graph.AddPass(
 				{
 					.name = "Draw triangle",
-					.resources = {{scene, colorWrite, TextureLayout::ColorAttachment, RenderGraphAccess::Write}},
+					.resources = {RenderGraphUse::ColorAttachmentWrite(scene)},
 				},
-				[&, scene](CommandList& commands) {
+				[&, scene](RenderGraphContext& context) {
+					auto& commands = context.GetCommands();
 					// Graph-created textures resolve only when recording begins.
 					commands.BeginRendering({
 						.colorAttachments = {{
-							.target = graph.GetTexture(scene)->GetTextureView(),
+							.target = context.GetTexture(scene)->GetTextureView(),
 							.clearColor = {0.025f, 0.035f, 0.06f, 1.0f},
 						}},
 						.renderArea = {.width = frame.width, .height = frame.height},
@@ -140,14 +140,12 @@ namespace {
 					.name = "Postprocess",
 					.resources =
 						{
-							{scene,
-								{PipelineStage::FragmentShader, ResourceAccess::ShaderRead},
-								TextureLayout::ShaderRead,
-								RenderGraphAccess::Read},
-							{backbuffer, colorWrite, TextureLayout::ColorAttachment, RenderGraphAccess::Write},
+							RenderGraphUse::SampledRead(scene),
+							RenderGraphUse::ColorAttachmentWrite(backbuffer),
 						},
 				},
-				[&, scene](CommandList& commands) {
+				[&, scene](RenderGraphContext& context) {
+					auto& commands = context.GetCommands();
 					commands.BeginRendering({
 						.colorAttachments = {{.target = frame.backBufferView}},
 						.renderArea = {.width = frame.width, .height = frame.height},
@@ -157,7 +155,7 @@ namespace {
 					commands.SetGraphicsState(
 						{.raster = {.cullMode = CullMode::None},
 							.depth = {.depthTestEnable = false, .depthWriteEnable = false}});
-					auto* texture = graph.GetTexture(scene);
+					auto* texture = context.GetTexture(scene);
 					// Bindless accesses still need a recording-local resource declaration.
 					commands.UseResource(texture);
 					const uint32_t parameters[] = {

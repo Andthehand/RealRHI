@@ -155,7 +155,8 @@ namespace {
 						{image, s_Read, TextureLayout::TransferSrc},
 						{imageOutput, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}},
 				.queue = QueueType::Compute},
-			[&](CommandList& list) {
+			[&](RenderGraphContext& context) {
+				auto& list = context.GetCommands();
 				list.BindShaderProgram(shader.Raw());
 				list.UseResource(data.Raw());
 				const uint32_t parameters[] = {data->GetDescriptorIndex(), 64};
@@ -170,7 +171,8 @@ namespace {
 								  {outputHandles[0], s_Write, TextureLayout::Undefined, RenderGraphAccess::Write},
 								  {imageOutput, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}},
 						  .queue = QueueType::Graphics},
-			[&](CommandList& list) {
+			[&](RenderGraphContext& context) {
+				auto& list = context.GetCommands();
 				list.CopyBuffer(data.Raw(), outputs[0].Raw(), {.size = sizeof(initial)});
 				list.CopyTextureToBuffer(texture.Raw(), images.Raw(), {.width = 4, .height = 4, .bufferOffset = 64});
 			});
@@ -179,7 +181,8 @@ namespace {
 				.resources =
 					{{input, s_Read}, {outputHandles[1], s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}},
 				.queue = QueueType::Compute},
-			[&](CommandList& list) {
+			[&](RenderGraphContext& context) {
+				auto& list = context.GetCommands();
 				list.CopyBuffer(data.Raw(), outputs[1].Raw(), {.size = sizeof(initial)});
 			});
 		graph.AddPass(
@@ -187,7 +190,8 @@ namespace {
 				.resources =
 					{{input, s_Read}, {outputHandles[2], s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}},
 				.queue = QueueType::Transfer},
-			[&](CommandList& list) {
+			[&](RenderGraphContext& context) {
+				auto& list = context.GetCommands();
 				list.CopyBuffer(data.Raw(), outputs[2].Raw(), {.size = sizeof(initial)});
 			});
 		graph.SetFinalState(image, {PipelineStage::AllCommands, ResourceAccess::MemoryRead}, TextureLayout::ShaderRead);
@@ -252,7 +256,8 @@ namespace {
 							 {{exported, s_Read, TextureLayout::TransferSrc},
 								 {destination, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}},
 						 .queue = QueueType::Transfer},
-			[&](CommandList& list) {
+			[&](RenderGraphContext& context) {
+				auto& list = context.GetCommands();
 				list.CopyTextureToBuffer(texture.Raw(), readback.Raw(), {.width = 4, .height = 4});
 			});
 		RenderGraphSubmission consumed;
@@ -270,13 +275,13 @@ namespace {
 	void TestIndependentAndFailedSubmissions(Device& device) {
 		RenderGraph graph(Capture);
 		uint32_t recorded = 0;
-		const auto a = graph.AddPass({.name = "Independent compute", .queue = QueueType::Compute}, [&](CommandList&) {
+		const auto a = graph.AddPass({.name = "Independent compute", .queue = QueueType::Compute}, [&](RenderGraphContext&) {
 			++recorded;
 		});
-		const auto b = graph.AddPass({.name = "Independent transfer", .queue = QueueType::Transfer}, [&](CommandList&) {
+		const auto b = graph.AddPass({.name = "Independent transfer", .queue = QueueType::Transfer}, [&](RenderGraphContext&) {
 			++recorded;
 		});
-		graph.AddPass({.name = "Join", .dependsOn = {a, b}}, [&](CommandList&) {
+		graph.AddPass({.name = "Join", .dependsOn = {a, b}}, [&](RenderGraphContext&) {
 			++recorded;
 		});
 		s_Submit = vkQueueSubmit2;
@@ -340,7 +345,8 @@ namespace {
 		std::vector<CommandList*> recordings;
 		uint32_t callbacks = 0;
 		for (uint32_t i = 0; i < 5; ++i) {
-			graph.AddPass({.name = "Batched pass " + std::to_string(i)}, [&](CommandList& list) {
+			graph.AddPass({.name = "Batched pass " + std::to_string(i)}, [&](RenderGraphContext& context) {
+				auto& list = context.GetCommands();
 				recordings.push_back(&list);
 				++callbacks;
 			});
@@ -382,9 +388,9 @@ namespace {
 		}
 
 		graph.Reset();
-		const auto producer = graph.AddPass({.name = "Foreign producer", .queue = *other}, [](CommandList&) { });
-		graph.AddPass({.name = "Earlier independent graphics"}, [](CommandList&) { });
-		graph.AddPass({.name = "Graphics needs foreign work", .dependsOn = {producer}}, [](CommandList&) { });
+		const auto producer = graph.AddPass({.name = "Foreign producer", .queue = *other}, [](RenderGraphContext&) { });
+		graph.AddPass({.name = "Earlier independent graphics"}, [](RenderGraphContext&) { });
+		graph.AddPass({.name = "Graphics needs foreign work", .dependsOn = {producer}}, [](RenderGraphContext&) { });
 		Expect(graph.Submit(device, completion) == Result::Success, "Submit a later foreign wait");
 		const auto waiting = graph.GetDiagnostics();
 		Expect(waiting.batches.size() == 3 && waiting.batches[1].prerequisites.empty() &&
@@ -393,9 +399,9 @@ namespace {
 		completion.Wait(device);
 
 		graph.Reset();
-		const auto early = graph.AddPass({.name = "Early graphics producer"}, [](CommandList&) { });
-		graph.AddPass({.name = "Later graphics work"}, [](CommandList&) { });
-		graph.AddPass({.name = "Foreign consumer", .dependsOn = {early}, .queue = *other}, [](CommandList&) { });
+		const auto early = graph.AddPass({.name = "Early graphics producer"}, [](RenderGraphContext&) { });
+		graph.AddPass({.name = "Later graphics work"}, [](RenderGraphContext&) { });
+		graph.AddPass({.name = "Foreign consumer", .dependsOn = {early}, .queue = *other}, [](RenderGraphContext&) { });
 		Expect(graph.Submit(device, completion) == Result::Success, "Submit early cross-queue signal");
 		const auto signaling = graph.GetDiagnostics();
 		Expect(signaling.batches.size() == 3 && signaling.batches[2].prerequisites == std::vector<uint32_t>{0},
@@ -404,9 +410,9 @@ namespace {
 
 		graph.Reset();
 		const auto shared =
-			graph.AddPass({.name = "Shared foreign prerequisite", .queue = *other}, [](CommandList&) { });
-		graph.AddPass({.name = "First graphics consumer", .dependsOn = {shared}}, [](CommandList&) { });
-		graph.AddPass({.name = "Second graphics consumer", .dependsOn = {shared}}, [](CommandList&) { });
+			graph.AddPass({.name = "Shared foreign prerequisite", .queue = *other}, [](RenderGraphContext&) { });
+		graph.AddPass({.name = "First graphics consumer", .dependsOn = {shared}}, [](RenderGraphContext&) { });
+		graph.AddPass({.name = "Second graphics consumer", .dependsOn = {shared}}, [](RenderGraphContext&) { });
 		Expect(graph.Submit(device, completion) == Result::Success, "Submit consumers sharing the same wait");
 		const auto sharedWait = graph.GetDiagnostics();
 		Expect(sharedWait.batches.size() == 2 && sharedWait.batches[1].steps.size() == 2 &&
@@ -415,10 +421,10 @@ namespace {
 		completion.Wait(device);
 
 		graph.Reset();
-		const auto first = graph.AddPass({.name = "First joined producer"}, [](CommandList&) { });
-		const auto second = graph.AddPass({.name = "Second joined producer"}, [](CommandList&) { });
+		const auto first = graph.AddPass({.name = "First joined producer"}, [](RenderGraphContext&) { });
+		const auto second = graph.AddPass({.name = "Second joined producer"}, [](RenderGraphContext&) { });
 		graph.AddPass(
-			{.name = "Consumer needs both", .dependsOn = {first, second}, .queue = *other}, [](CommandList&) { });
+			{.name = "Consumer needs both", .dependsOn = {first, second}, .queue = *other}, [](RenderGraphContext&) { });
 		Expect(graph.Submit(device, completion) == Result::Success, "Submit producers with a common consumer");
 		const auto joined = graph.GetDiagnostics();
 		Expect(joined.batches.size() == 2 && joined.batches[0].steps.size() == 2 &&
@@ -431,13 +437,16 @@ namespace {
 		RenderGraph graph(Capture);
 		RenderGraphSubmission completion;
 		uint32_t callbacks = 0;
-		graph.AddPass({.name = "Unavailable queue", .queue = static_cast<QueueType>(99)}, [&](CommandList&) {
+		graph.AddPass({.name = "Unavailable queue", .queue = static_cast<QueueType>(99)}, [&](RenderGraphContext&) {
 			++callbacks;
 		});
 		++s_ExpectedErrors;
 		Expect(graph.Submit(device, completion) == Result::InvalidParameter && callbacks == 0 &&
 				completion.completions.empty(),
 			"Invalid queues fail before callbacks or submissions");
+		Expect(graph.GetExecutionPlan().size() == 1 && graph.GetDiagnostics().passes[0].executionIndex == 0 &&
+			!graph.GetExecutionPlan()[0].nativeQueue,
+			"Queue validation failures still expose the logical diagnostic plan on demand");
 		graph.Reset();
 		const auto data = graph.CreateBuffer({.size = 16, .usage = BufferUsage::Storage});
 		graph.AddPass({.name = "Compute on transfer",
@@ -447,14 +456,17 @@ namespace {
 								  TextureLayout::Undefined,
 								  RenderGraphAccess::Write}},
 						  .queue = QueueType::Transfer},
-			[&](CommandList&) {
+			[&](RenderGraphContext&) {
 				++callbacks;
 			});
 		++s_ExpectedErrors;
 		Expect(graph.Submit(device, completion) == Result::InvalidParameter && callbacks == 0,
 			"Queue-incompatible stages fail before allocation");
+		Expect(graph.GetExecutionPlan().size() == 1 &&
+			graph.GetExecutionPlan()[0].barriers.buffers[0].buffer == nullptr,
+			"Rejected queue plans expose deferred resource barriers without allocating");
 		graph.Reset();
-		graph.AddPass({.name = "No work"}, [](CommandList&) { });
+		graph.AddPass({.name = "No work"}, [](RenderGraphContext&) { });
 		const std::array<SubmissionToken, 1> invalid{{}};
 		++s_ExpectedErrors;
 		Expect(graph.Submit(device, completion, nullptr, invalid) == Result::InvalidParameter &&
@@ -529,8 +541,9 @@ namespace {
 						{{source, s_Read}, {scratch, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}},
 					.queue = QueueType::Transfer,
 					.hasSideEffects = true},
-				[&](CommandList& list) {
-					list.CopyBuffer(upload.Raw(), graph.GetBuffer(scratch), {.size = sizeof(initial)});
+				[&](RenderGraphContext& context) {
+					auto& list = context.GetCommands();
+					list.CopyBuffer(upload.Raw(), context.GetBuffer(scratch), {.size = sizeof(initial)});
 				});
 			const auto draw =
 				graph.AddPass({.name = "Clear acquired image",
@@ -539,7 +552,8 @@ namespace {
 										  {PipelineStage::ColorAttachmentOutput, ResourceAccess::ColorAttachmentWrite},
 										  TextureLayout::ColorAttachment,
 										  RenderGraphAccess::Write}}},
-					[frame](CommandList& list) {
+					[frame](RenderGraphContext& context) {
+						auto& list = context.GetCommands();
 						list.BeginRendering(
 							{.colorAttachments =
 									{{.target = frame.backBufferView,
@@ -553,7 +567,8 @@ namespace {
 					.resources =
 						{{source, s_Read}, {output, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}},
 					.queue = QueueType::Transfer},
-				[&](CommandList& list) {
+				[&](RenderGraphContext& context) {
+					auto& list = context.GetCommands();
 					list.CopyBuffer(upload.Raw(), readback.Raw(), {.size = sizeof(initial)});
 				});
 			if (iteration % 2 != 0) {
@@ -562,7 +577,7 @@ namespace {
 						.resources =
 							{{image, {PipelineStage::AllCommands, ResourceAccess::MemoryRead}, TextureLayout::Present}},
 						.queue = QueueType::Transfer},
-					[](CommandList&) { });
+					[](RenderGraphContext&) { });
 			}
 			s_SubmitCalls = 0;
 			s_FailCall = 0;
@@ -614,7 +629,8 @@ namespace {
 									{PipelineStage::ColorAttachmentOutput, ResourceAccess::ColorAttachmentWrite},
 									TextureLayout::ColorAttachment,
 									RenderGraphAccess::Write}}},
-			[frame](CommandList& list) {
+			[frame](RenderGraphContext& context) {
+				auto& list = context.GetCommands();
 				list.BeginRendering(
 					{.colorAttachments = {{.target = frame.backBufferView, .loadOp = LoadOp::Clear}},
 						.renderArea = {.width = frame.width, .height = frame.height}});
@@ -661,23 +677,26 @@ namespace {
 									  {shared, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write},
 									  {local, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}},
 							  .queue = QueueType::Compute},
-				[&](CommandList& list) {
-					list.CopyBuffer(upload.Raw(), graph.GetBuffer(shared), {.size = 16});
-					list.CopyBuffer(upload.Raw(), graph.GetBuffer(local), {.size = sizeof(initial)});
+				[&](RenderGraphContext& context) {
+					auto& list = context.GetCommands();
+					list.CopyBuffer(upload.Raw(), context.GetBuffer(shared), {.size = 16});
+					list.CopyBuffer(upload.Raw(), context.GetBuffer(local), {.size = sizeof(initial)});
 				});
 			graph.AddPass(
 				{.name = "Graphics queue read",
 					.resources =
 						{{shared, s_Read}, {output, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-				[&](CommandList& list) {
-					list.CopyBuffer(graph.GetBuffer(shared), readback.Raw(), {.size = 16});
+				[&](RenderGraphContext& context) {
+					auto& list = context.GetCommands();
+					list.CopyBuffer(context.GetBuffer(shared), readback.Raw(), {.size = 16});
 				});
 			graph.AddPass(
 				{.name = "Repeated graphics queue read",
 					.resources =
 						{{shared, s_Read}, {output, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}},
-				[&](CommandList& list) {
-					list.CopyBuffer(graph.GetBuffer(shared), readback.Raw(), {.size = 16});
+				[&](RenderGraphContext& context) {
+					auto& list = context.GetCommands();
+					list.CopyBuffer(context.GetBuffer(shared), readback.Raw(), {.size = 16});
 				});
 			RenderGraphSubmission completion;
 			Expect(graph.Submit(device, completion, &pool) == Result::Success,
