@@ -381,12 +381,19 @@ namespace RealRHI {
 			std::vector<uint32_t> consumers;
 		};
 
+		struct ResourceLifetime {
+			// Inclusive positions in the culled schedule, not GPU execution times.
+			uint32_t firstUse = UINT32_MAX;
+			uint32_t lastUse = UINT32_MAX;
+		};
+
 		struct CompiledGraph {
 			bool valid = false;
 
 			std::vector<uint8_t> usedResources;
 			std::vector<uint32_t> order;
 			std::vector<std::vector<uint32_t>> prerequisites;
+			std::vector<ResourceLifetime> lifetimes;
 
 			std::vector<PlannedStep> steps;
 			PlannedBarriers finalBarriers;

@@ -7,7 +7,7 @@ option(REALRHI_ENABLE_TRACY "Enable Tracy CPU profiling (requires an enabled Tra
 option(REALRHI_BUILD_VULKAN "Build the Vulkan backend" ON)
 option(BUILD_EXAMPLES "Build example applications" ${REALRHI_BUILD_VULKAN})
 option(REALRHI_BUILD_TESTS "Build RealRHI tests" ON)
-option(REALRHI_BUILD_BENCHMARKS "Build resource-tracking and scene CPU benchmarks" OFF)
+option(REALRHI_BUILD_BENCHMARKS "Build CPU benchmarks (backend benchmarks require Vulkan)" OFF)
 
 set(realrhi_gpu_tests_default OFF)
 if(REALRHI_BUILD_VULKAN AND REALRHI_BUILD_TESTS)
@@ -20,9 +20,6 @@ if(REALRHI_BUILD_GPU_TESTS AND (NOT REALRHI_BUILD_VULKAN OR NOT REALRHI_BUILD_TE
 endif()
 if(BUILD_EXAMPLES AND NOT REALRHI_BUILD_VULKAN)
     message(FATAL_ERROR "BUILD_EXAMPLES requires REALRHI_BUILD_VULKAN. Set BUILD_EXAMPLES=OFF for a core-only build.")
-endif()
-if(REALRHI_BUILD_BENCHMARKS AND NOT REALRHI_BUILD_VULKAN)
-    message(FATAL_ERROR "REALRHI_BUILD_BENCHMARKS requires REALRHI_BUILD_VULKAN.")
 endif()
 
 add_library(RealRHICore INTERFACE)

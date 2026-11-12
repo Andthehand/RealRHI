@@ -429,6 +429,7 @@ namespace RealRHI {
 	}
 
 	bool RenderGraph::BuildBarriers(std::string& error) {
+		m_Compiled.lifetimes.assign(m_Resources.size(), {});
 		std::vector<TrackedState> states;
 
 		for (const auto& resource : m_Resources) {
@@ -440,7 +441,8 @@ namespace RealRHI {
 			states.push_back({resource.initialState, resource.initialLayout, false, initialized});
 		}
 
-		for (uint32_t index : m_Compiled.order) {
+		for (uint32_t position = 0; position < m_Compiled.order.size(); ++position) {
+			const auto index = m_Compiled.order[position];
 			const auto& pass = m_Passes[index];
 			PlannedStep step{.name = pass.desc.name, .queue = pass.desc.queue};
 
@@ -451,6 +453,13 @@ namespace RealRHI {
 						"Pass '" + pass.desc.name + "': undefined resource contents must be written before reading.";
 					return false;
 				}
+
+				auto& lifetime = m_Compiled.lifetimes[use.resource.index];
+				if (lifetime.firstUse == UINT32_MAX) {
+					lifetime.firstUse = position;
+				}
+
+				lifetime.lastUse = position;
 
 				Transition(use.resource.index, use.state, use.layout, before, step.barriers);
 				before.initialized = true;

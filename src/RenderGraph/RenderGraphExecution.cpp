@@ -33,30 +33,17 @@ namespace RealRHI {
 			return;
 		}
 
-		std::vector<uint32_t> firstUse(m_Resources.size(), UINT32_MAX);
-		std::vector<uint32_t> lastUse(m_Resources.size(), UINT32_MAX);
-
-		for (uint32_t position = 0; position < m_Compiled.order.size(); ++position) {
-			for (const auto& use : m_Passes[m_Compiled.order[position]].desc.resources) {
-				const auto index = use.resource.index;
-				if (firstUse[index] == UINT32_MAX) {
-					firstUse[index] = position;
-				}
-
-				lastUse[index] = position;
-			}
-		}
-
+		const auto& lifetimes = m_Compiled.lifetimes;
 		std::vector<uint32_t> ordered(m_Resources.size());
 		std::iota(ordered.begin(), ordered.end(), 0u);
 		std::stable_sort(ordered.begin(), ordered.end(), [&](uint32_t left, uint32_t right) {
-			return firstUse[left] < firstUse[right];
+			return lifetimes[left].firstUse < lifetimes[right].firstUse;
 		});
 		std::vector<uint32_t> occupants;
 
 		for (uint32_t index : ordered) {
 			const auto& resource = m_Resources[index];
-			if (!IsCreated(resource) || resource.hasFinalState || firstUse[index] == UINT32_MAX ||
+			if (!IsCreated(resource) || resource.hasFinalState || lifetimes[index].firstUse == UINT32_MAX ||
 				(!poolingAllowed.empty() && !poolingAllowed[index]) ||
 				(resource.bufferDesc && resource.bufferDesc->memoryUsage != MemoryUsage::GPUOnly)) {
 				continue;
@@ -66,7 +53,7 @@ namespace RealRHI {
 
 			for (auto& occupant : occupants) {
 				const auto& previous = m_Resources[occupant];
-				if (lastUse[occupant] >= firstUse[index] || queues[occupant] != queues[index]) {
+				if (lifetimes[occupant].lastUse >= lifetimes[index].firstUse || queues[occupant] != queues[index]) {
 					continue;
 				}
 

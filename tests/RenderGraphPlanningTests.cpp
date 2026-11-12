@@ -22,6 +22,58 @@ namespace {
 
 	void EmptyPass(RenderGraphContext&) { }
 
+	void TestResourceLifetimes() {
+		RenderGraph graph;
+		graph.SetOptions({.cullUnusedPasses = true});
+
+		const auto data = graph.CreateBuffer({.size = 64, .usage = BufferUsage::Storage});
+		const auto discarded = graph.CreateBuffer({.size = 64, .usage = BufferUsage::Storage});
+		const auto unused = graph.CreateBuffer({.size = 64, .usage = BufferUsage::Storage});
+
+		graph.AddPass({.name = "Discarded write",
+			.resources = {{discarded, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}}, EmptyPass);
+		const auto writer = graph.AddPass({.name = "Write",
+			.resources = {{data, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}}, EmptyPass);
+		const auto beforeWriter = graph.AddPass({.name = "Before writer", .hasSideEffects = true}, EmptyPass);
+		graph.AddPass({.name = "Read", .resources = {{data, s_Read}}, .hasSideEffects = true}, EmptyPass);
+		graph.AddDependency(writer, beforeWriter);
+
+		auto expectLifetime = [](const RenderGraphDiagnostics& info, RenderGraphResource resource,
+			uint32_t first, uint32_t last) {
+			const auto& lifetime = info.resources[resource.index];
+			Expect(lifetime.firstUse == first && lifetime.lastUse == last,
+				"Resource lifetimes use the final execution order and omit culled uses");
+		};
+
+		std::string error;
+		Expect(graph.Compile(error), "Compile reordered and culled resource lifetimes");
+		auto info = graph.GetDiagnostics();
+		expectLifetime(info, data, 1, 2);
+		expectLifetime(info, discarded, UINT32_MAX, UINT32_MAX);
+		expectLifetime(info, unused, UINT32_MAX, UINT32_MAX);
+
+		Expect(graph.Compile(error), "Reuse the compiled schedule");
+		expectLifetime(graph.GetDiagnostics(), data, 1, 2);
+
+		graph.AddPass({.name = "Late read", .resources = {{data, s_Read}}, .hasSideEffects = true}, EmptyPass);
+		Expect(graph.Compile(error), "Recompile lifetimes after adding a consumer");
+		expectLifetime(graph.GetDiagnostics(), data, 1, 3);
+
+		graph.SetOptions({.cullUnusedPasses = false});
+		Expect(graph.Compile(error), "Recompile lifetimes after changing culling");
+		info = graph.GetDiagnostics();
+		expectLifetime(info, data, 2, 4);
+		expectLifetime(info, discarded, 0, 0);
+		expectLifetime(info, unused, UINT32_MAX, UINT32_MAX);
+
+		graph.Reset();
+		const auto replacement = graph.CreateBuffer({.size = 64, .usage = BufferUsage::Storage});
+		graph.AddPass({.name = "Replacement write",
+			.resources = {{replacement, s_Write, TextureLayout::Undefined, RenderGraphAccess::Write}}}, EmptyPass);
+		Expect(graph.Compile(error), "Compile lifetimes after resetting the graph");
+		expectLifetime(graph.GetDiagnostics(), replacement, 0, 0);
+	}
+
 	void TestUseHelpersAndCachedCompilation() {
 		RenderGraph graph;
 		const auto image = graph.CreateTexture({.width = 4, .height = 4,
@@ -405,6 +457,7 @@ namespace {
 }
 
 int main() {
+	TestResourceLifetimes();
 	TestUseHelpersAndCachedCompilation();
 	TestImportValidation();
 	TestManyResourceDeclarations();

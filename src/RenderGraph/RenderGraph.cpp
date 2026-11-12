@@ -373,7 +373,9 @@ namespace RealRHI {
 					.name = resource.debugName,
 					.texture = IsTexture(resource),
 					.imported = !IsCreated(resource),
-					.exported = resource.hasFinalState});
+					.exported = resource.hasFinalState,
+					.firstUse = m_Compiled.lifetimes[i].firstUse,
+					.lastUse = m_Compiled.lifetimes[i].lastUse});
 		}
 
 		for (uint32_t i = 0; i < m_Resources.size(); ++i) {
@@ -400,15 +402,6 @@ namespace RealRHI {
 			diagnostics.passes[index].executionIndex = position;
 			diagnostics.passes[index].nativeQueue = m_Execution.steps[position].nativeQueue;
 			diagnostics.passes[index].batchIndex = m_Execution.steps[position].batchIndex;
-
-			for (const auto& use : m_Passes[index].desc.resources) {
-				auto& resource = diagnostics.resources[use.resource.index];
-				if (resource.firstUse == UINT32_MAX) {
-					resource.firstUse = position;
-				}
-
-				resource.lastUse = position;
-			}
 		}
 
 		for (const auto& release : m_Execution.plan.initialReleases) {

@@ -261,6 +261,9 @@ queue plan are stored separately. `Compile` caches the logical schedule until a 
 resource, dependency, final state, or option changes. Repeated `Execute` and `Submit`
 calls bind fresh allocations without recompiling that schedule. Queue ownership
 dependencies belong to the submission plan and do not alter logical dependencies.
+First/last resource-use positions are computed during compilation after scheduling
+and culling, then reused by alias planning and diagnostics. These positions describe
+schedule order; allocation reuse still requires the existing queue-safety checks.
 An unchanged `Compile` preserves the latest execution diagnostics. Diagnostic views
 are materialized when requested; recording binds the plan once after allocation.
 
@@ -349,6 +352,36 @@ Resolve targets require matching formats, selected-mip extents and view layer co
 For depth/stencil resolves, set `DepthStencilAttachment::resolveTarget` and the desired `depthResolveMode`/`stencilResolveMode`. Check `GetCapabilities().depthStencilResolve` for supported mode masks and whether the two aspects can resolve independently. Modes default to `None`.
 
 Declare both the source and resolve target in render graph pass resources. Color resolve targets use `ColorAttachment` layout and `ColorAttachmentOutput`/`ColorAttachmentWrite` state. Depth/stencil resolve targets use **the same stage/access state**, with `DepthStencilAttachment` layout: Vulkan performs depth/stencil resolve writes at color output. Include those writes in the source state of subsequent barriers as well. Source depth/stencil attachments continue to use early/late fragment tests and depth/stencil access.
+
+## Render graph benchmarks
+
+`RenderGraphBenchmarks` runs without a Vulkan SDK or GPU. It uses a simulated backend
+to isolate graph CPU overhead, including lightweight resource objects and command
+list creation. It does not measure native memory allocation, driver calls, GPU
+execution, or frame rate. The other benchmark targets still require Vulkan.
+
+From an x64 Developer PowerShell on Windows:
+
+```powershell
+cmake --preset cpu -B out/build/graph-benchmarks -DCMAKE_BUILD_TYPE=Release -DREALRHI_BUILD_BENCHMARKS=ON
+cmake --build out/build/graph-benchmarks --target RenderGraphBenchmarks
+./out/build/graph-benchmarks/benchmarks/RenderGraphBenchmarks.exe --passes 128 --iterations 100 --samples 7
+```
+
+On other platforms, use the corresponding executable without the `.exe` suffix.
+Omit `--passes` to run 32, 128, and 512 passes. The inputs and insertion order are
+deterministic: 16 imported buffers and 16 imported textures, with rotating reads
+and writes. Submission workloads use three distinct simulated queues. Alias
+workloads add one transient buffer per pass and use one queue, checking that the
+disjoint lifetimes share an allocation.
+
+CSV output reports median/minimum/maximum microseconds per operation after one
+discarded warmup sample. Compiler and build configuration are printed to stderr.
+The workloads cover fresh build/compile, compile plus plan inspection, fresh
+recording/submission, cached compilation, diagnostics, repeated recording/submission,
+and repeated alias planning. Fresh workloads include graph construction and
+destruction; repeated workloads reuse a compiled graph. Compare CSV files from
+Release builds on the same machine with identical arguments.
 
 ## Resource-tracking benchmarks
 
@@ -522,7 +555,7 @@ verification metadata are saved locally under `out/test-results/sampler-sharing/
 | `BUILD_EXAMPLES` | Same as Vulkan option | Build all examples. Requires the backend. |
 | `REALRHI_BUILD_TESTS` | `ON` | Build and register tests. |
 | `REALRHI_BUILD_GPU_TESTS` | `ON` when backend and tests are enabled | Build device-creating tests. Requires both options. |
-| `REALRHI_BUILD_BENCHMARKS` | `OFF` | Build resource-tracking and scene CPU benchmarks. Requires the Vulkan backend and a device to run. |
+| `REALRHI_BUILD_BENCHMARKS` | `OFF` | Build CPU benchmarks. Render graph benchmarks need no GPU; resource-tracking and scene benchmarks require Vulkan and a device. |
 
 Presets set these options explicitly. For example, a library-only build uses:
 
