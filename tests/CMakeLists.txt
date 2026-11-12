@@ -30,6 +30,8 @@ if(REALRHI_BUILD_IMGUI)
 endif()
 
 if(REALRHI_BUILD_GPU_TESTS)
+    realrhi_add_test(WindowTests WindowTests.cpp)
+    set_tests_properties(WindowTests PROPERTIES LABELS "gpu;integration" TIMEOUT 120 RESOURCE_LOCK gpu)
     if(REALRHI_BUILD_IMGUI)
         realrhi_add_test(ImGuiTests ImGuiTests.cpp)
         target_link_libraries(ImGuiTests PRIVATE RealRHIImGui)

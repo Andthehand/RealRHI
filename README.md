@@ -205,7 +205,44 @@ checks the ImGui shader and push-constant layout without a GPU. When GPU tests
 are enabled, `ImGuiTests` checks offscreen pixel output for custom textures, atlas
 rendering, clipping at 2× framebuffer scale, callbacks, and backend cleanup.
 
-## Window title
+## Window controls
+
+### Window size, display scaling, and controls
+
+All `Window` methods must be called on the main thread. `GetWidth()` and
+`GetHeight()` continue to return physical framebuffer pixels. `GetSizeInPixels(w, h)`
+queries both dimensions together; `GetSize(w, h)` returns window coordinates.
+`SetSize(w, h)` uses window coordinates and rejects zero or values exceeding
+the native signed integer range. `GetPosition(x, y)` and `SetPosition(x, y)`
+use desktop window coordinates. Failed output-parameter queries preserve outputs.
+
+`GetDisplayScale()` returns SDL's recommended content scale; `GetPixelDensity()`
+returns physical pixels per window coordinate. Both return zero on failure.
+Display scale can change when the window moves between monitors or the user
+changes display settings. It is distinct from framebuffer density; see
+[SDL's display-scale documentation](https://wiki.libsdl.org/SDL3/SDL_GetWindowDisplayScale).
+Enable high-density framebuffers at creation with
+`WindowDesc::enableHighPixelDensity = true` (default `false`).
+
+```cpp
+uint32_t width = 0, height = 0, pixelWidth = 0, pixelHeight = 0;
+window->GetSize(width, height);
+window->GetSizeInPixels(pixelWidth, pixelHeight);
+const float uiScale = window->GetDisplayScale();
+// For ImGui, use window coordinates for DisplaySize and the pixel/window ratios
+// for DisplayFramebufferScale; use uiScale to choose font and style sizes.
+```
+
+`GetTitle()` returns an owned UTF-8 string. Runtime controls include
+`Show`, `Hide`, `Minimize`, `Maximize`, `Restore`, `SetResizable`, `SetBordered`,
+`SetAlwaysOnTop`, and `SetFullscreen` (desktop fullscreen). Query actual state
+with `IsVisible`, `IsMinimized`, `IsMaximized`, `IsFullscreen`, and `HasInputFocus`.
+Changes return `Result` and may take effect asynchronously or be constrained by
+the window manager; process window events and query the resulting state.
+These additions extend the abstract `Window` interface; custom implementations
+must implement the new methods.
+
+### Window title
 
 Set the initial title with `WindowDesc::title`, or change it at runtime with
 `window->SetTitle("My application")`. Call `SetTitle` on the main thread with a UTF-8
