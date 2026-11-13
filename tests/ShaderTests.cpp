@@ -29,7 +29,7 @@ int main() {
 		Expect(imguiCompiler.Compile({.moduleName = "realrhi_imgui"}, imguiProgram) == Result::Success,
 			"Compile ImGui graphics program without a GPU");
 		Expect(imguiProgram.reflection.vertexInputs.size() == 3, "ImGui reflects position, UV, and color inputs");
-		Expect(imguiProgram.reflection.pushData.size == 24, "ImGui push constants match the renderer's C++ layout");
+		Expect(imguiProgram.reflection.pushData.size == 32, "ImGui push constants match the renderer's C++ layout");
 	}
 #endif
 	SlangShaderCompiler compiler(REALRHI_TEST_SHADER_DIRECTORY, true, Capture);

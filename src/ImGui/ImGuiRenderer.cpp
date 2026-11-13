@@ -9,6 +9,9 @@
 #if IMGUI_VERSION_NUM < 19100 || IMGUI_VERSION_NUM >= 19200
 #error RealRHIImGui supports Dear ImGui 1.91.x
 #endif
+#ifndef IMGUI_HAS_DOCK
+#error RealRHIImGui requires the Dear ImGui docking branch
+#endif
 #ifdef IMGUI_USE_BGRA_PACKED_COLOR
 #error RealRHIImGui requires the default RGBA packed vertex colors
 #endif
@@ -26,15 +29,18 @@ namespace RealRHI {
 		if (m_Device || !ImGui::GetCurrentContext() || !shaderModule || !shaderModule[0]) {
 			return Result::InvalidParameter;
 		}
+
 		auto& io = ImGui::GetIO();
 		if (io.BackendRendererUserData) {
 			return Result::InvalidParameter;
 		}
+
 		Ref<Shader> shader;
 		auto result = device.CreateShader({.moduleName = shaderModule}, shader);
 		if (result != Result::Success) {
 			return result;
 		}
+
 		Ref<Sampler> sampler;
 		result = device.CreateSampler({.addressU = SamplerAddressMode::ClampToEdge,
 										  .addressV = SamplerAddressMode::ClampToEdge,
@@ -43,12 +49,14 @@ namespace RealRHI {
 		if (result != Result::Success) {
 			return result;
 		}
+
 		unsigned char* pixels = nullptr;
 		int width = 0, height = 0;
 		io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
 		if (!pixels || width <= 0 || height <= 0 || uint64_t(width) * uint64_t(height) * 4 > UINT32_MAX) {
 			return Result::InvalidParameter;
 		}
+
 		Ref<Texture> font;
 		result = device.CreateTexture({.width = uint32_t(width),
 										  .height = uint32_t(height),
@@ -59,20 +67,24 @@ namespace RealRHI {
 		if (result != Result::Success) {
 			return result;
 		}
+
 		// UploadData is synchronous, so no upload dependency escapes initialization.
 		result = font->UploadData(pixels, uint32_t(uint64_t(width) * height * 4));
 		if (result != Result::Success) {
 			return result;
 		}
+
 		m_Device = &device;
 		m_Context = ImGui::GetCurrentContext();
 		m_Shader = std::move(shader);
 		m_Font = std::move(font);
 		m_Sampler = std::move(sampler);
+
 		io.Fonts->SetTexID(GetTextureID(m_Font.Raw()));
 		io.BackendRendererUserData = this;
 		io.BackendRendererName = "RealRHIImGui";
 		io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
+
 		return Result::Success;
 	}
 
@@ -80,14 +92,19 @@ namespace RealRHI {
 		if (!m_Context) {
 			return;
 		}
+
 		auto* previous = ImGui::GetCurrentContext();
 		ImGui::SetCurrentContext(m_Context);
+		ShutdownPlatform();
+
 		auto& io = ImGui::GetIO();
 		io.Fonts->SetTexID(0);
 		io.BackendFlags &= ~ImGuiBackendFlags_RendererHasVtxOffset;
 		io.BackendRendererName = nullptr;
 		io.BackendRendererUserData = nullptr;
+
 		ImGui::SetCurrentContext(previous);
+
 		m_Font.Reset();
 		m_Shader.Reset();
 		m_Sampler.Reset();
@@ -95,11 +112,15 @@ namespace RealRHI {
 		m_Device = nullptr;
 	}
 
-	Result ImGuiRenderer::RenderDrawData(CommandList& commands, const ImDrawData& data, uint32_t sampleCount) {
+	Result ImGuiRenderer::RenderDrawData(CommandList& commands,
+		const ImDrawData& data,
+		uint32_t sampleCount,
+		ImGuiColorSpace outputColorSpace) {
 		if (!m_Device || ImGui::GetCurrentContext() != m_Context || !data.Valid ||
 			commands.GetState() != CommandListState::Recording) {
 			return Result::InvalidParameter;
 		}
+
 		const float width = data.DisplaySize.x * data.FramebufferScale.x;
 		const float height = data.DisplaySize.y * data.FramebufferScale.y;
 		if (!std::isfinite(width) || !std::isfinite(height) || width > float(INT32_MAX - 128) ||
@@ -122,6 +143,7 @@ namespace RealRHI {
 			// RHI index buffers use uint32_t, independently of ImDrawIdx configuration.
 			indices.insert(indices.end(), list->IdxBuffer.begin(), list->IdxBuffer.end());
 		}
+
 		Ref<Buffer> vertexBuffer, indexBuffer;
 		// Each recording gets immutable buffers. Command-list retention keeps them
 		// alive through reset, including when multiple frames are in flight.
@@ -134,6 +156,7 @@ namespace RealRHI {
 		if (result != Result::Success) {
 			return result;
 		}
+
 		result = m_Device->CreateBuffer({.size = indices.size() * sizeof(uint32_t),
 											.usage = BufferUsage::Index,
 											.memoryUsage = MemoryUsage::CPUToGPU,
@@ -151,6 +174,7 @@ namespace RealRHI {
 		state.multisample.sampleCount = sampleCount;
 		state.blend.enable = true;
 		state.blend.destinationAlphaFactor = BlendFactor::OneMinusSourceAlpha;
+
 		const VertexLayout layout{
 			.bindings = {{.stride = sizeof(ImDrawVert)}},
 			.attributes = {
@@ -159,37 +183,50 @@ namespace RealRHI {
 				{.location = 2, .format = VertexFormat::UNorm8x4, .offset = offsetof(ImDrawVert, col)}
 			}
 		};
+
 		auto setup = [&]() {
 			commands.BindShaderProgram(m_Shader.Raw());
 			auto status = commands.SetGraphicsState(state);
 			if (status != Result::Success) {
 				return status;
 			}
+
 			status = commands.SetVertexLayout(layout);
 			if (status != Result::Success) {
 				return status;
 			}
+
 			commands.BindVertexBuffer(vertexBuffer.Raw());
 			commands.BindIndexBuffer(indexBuffer.Raw());
 			commands.SetViewport({.width = width, .height = height});
+
 			return Result::Success;
 		};
+
 		result = setup();
 		if (result != Result::Success) {
 			return result;
 		}
+
 		struct PushData {
 			float scale[2];
 			float translate[2];
 			uint32_t texture;
 			uint32_t sampler;
+			uint32_t linearColorOutput;
+			uint32_t padding;
 		};
+
+		static_assert(sizeof(PushData) == 32);
 		PushData push{
 			{2.f / data.DisplaySize.x, 2.f / data.DisplaySize.y},
 			{-1.f - data.DisplayPos.x * 2.f / data.DisplaySize.x, -1.f - data.DisplayPos.y * 2.f / data.DisplaySize.y},
 			0,
-			m_Sampler->GetDescriptorIndex()
+			m_Sampler->GetDescriptorIndex(),
+			outputColorSpace == ImGuiColorSpace::Linear ? 1u : 0u,
+			0
 		};
+
 		uint32_t indexOffset = 0;
 		int32_t vertexOffset = 0;
 		for (const auto* list : data.CmdLists) {
@@ -206,6 +243,7 @@ namespace RealRHI {
 					}
 					continue;
 				}
+
 				const float minX =
 					std::clamp((draw.ClipRect.x - data.DisplayPos.x) * data.FramebufferScale.x, 0.f, width);
 				const float minY =
@@ -217,25 +255,32 @@ namespace RealRHI {
 				if (!(maxX > minX && maxY > minY) || draw.ElemCount == 0) {
 					continue;
 				}
+
 				auto* texture = reinterpret_cast<Texture*>(static_cast<uintptr_t>(draw.GetTexID()));
 				if (!texture || texture->GetSampledImageDescriptorIndex() == UINT32_MAX) {
 					return Result::InvalidParameter;
 				}
+
 				push.texture = texture->GetSampledImageDescriptorIndex();
+
 				commands.ClearResourceDeclarations();
 				commands.UseResource(texture);
 				commands.UseResource(m_Sampler.Raw());
 				commands.SetPushConstants(&push, sizeof(push));
+
 				const auto x = int32_t(std::floor(minX)), y = int32_t(std::floor(minY));
 				commands.SetScissor(
 					{x, y, uint32_t(std::ceil(maxX)) - uint32_t(x), uint32_t(std::ceil(maxY)) - uint32_t(y)});
 				commands.DrawIndexed(
 					draw.ElemCount, 1, indexOffset + draw.IdxOffset, vertexOffset + int32_t(draw.VtxOffset));
 			}
+
 			indexOffset += uint32_t(list->IdxBuffer.Size);
 			vertexOffset += list->VtxBuffer.Size;
 		}
+
 		commands.ClearResourceDeclarations();
+
 		return Result::Success;
 	}
 }

@@ -128,9 +128,10 @@ namespace RealRHI {
 		}
 		const auto format = Utils::VkFormatToTextureFormat(texture->GetFormat());
 		const uint32_t texelSize = Utils::TextureFormatByteSize(format);
-		// Readback retains its existing RGBA8 restriction; upload supports packed color formats.
-		if (!upload && texture->GetFormat() != VK_FORMAT_R8G8B8A8_UNORM) {
-			return Reject(operation, "Unsupported texture format for readback; use RGBA8_UNorm.");
+		// Both RGBA8 encodings copy their stored bytes without color conversion.
+		if (!upload && texture->GetFormat() != VK_FORMAT_R8G8B8A8_UNORM &&
+			texture->GetFormat() != VK_FORMAT_R8G8B8A8_SRGB) {
+			return Reject(operation, "Unsupported texture format for readback; use RGBA8_UNorm or RGBA8_SRGB.");
 		}
 		uint64_t byteSize = 0;
 		if (!TryGetPackedSize(extent, region.layerCount, texelSize, byteSize) || region.bufferOffset % texelSize != 0 ||

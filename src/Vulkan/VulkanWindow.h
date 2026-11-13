@@ -16,6 +16,10 @@ namespace RealRHI {
 		static Result Create(const VulkanDevice* device, const WindowDesc& desc, Ref<VulkanWindow>& outWindow);
 		Result Init(const WindowDesc& desc);
 
+		SDL_Window* GetSDLWindow() const { return m_Window; }
+		// Borrow a platform-owned window. Release all swapchains before SDL destroys it.
+		static Ref<VulkanWindow> Borrow(const VulkanDevice* device, SDL_Window* window);
+
 		Result SetTitle(const char* title) override;
 		std::string GetTitle() const override;
 
@@ -60,5 +64,6 @@ namespace RealRHI {
 	private:
 		const VulkanDevice* m_Device = nullptr;
 		SDL_Window* m_Window = nullptr;
+		bool m_OwnsWindow = true;
 	};
 }

@@ -7,9 +7,16 @@ namespace RealRHI {
 		: m_Device(device) { }
 
 	VulkanWindow::~VulkanWindow() {
-		if (m_Window) {
+		if (m_Window && m_OwnsWindow) {
 			SDL_DestroyWindow(m_Window);
 		}
+	}
+
+	Ref<VulkanWindow> VulkanWindow::Borrow(const VulkanDevice* device, SDL_Window* window) {
+		auto borrowed = Ref<VulkanWindow>::Create(device);
+		borrowed->m_Window = window;
+		borrowed->m_OwnsWindow = false;
+		return borrowed;
 	}
 
 	Result VulkanWindow::Create(const VulkanDevice* device, const WindowDesc& desc, Ref<VulkanWindow>& outWindow) {

@@ -145,8 +145,10 @@ Queue backends implement `Submit(const SubmitInfo&)`; the single-list and list-s
 
 Configure with `-DREALRHI_BUILD_IMGUI=ON` and link `RealRHIImGui` alongside
 `RealRHI`. The option defaults to OFF and requires the Vulkan build. It fetches
-[Dear ImGui 1.91.9b](https://github.com/ocornut/imgui/tree/v1.91.9b), or reuses an
-application-provided `imgui` target with matching 1.91.x headers and configuration.
+[Dear ImGui 1.91.9b docking](https://github.com/ocornut/imgui/tree/v1.91.9b-docking), or reuses an
+application-provided `imgui` target with matching 1.91.x docking headers and configuration.
+For a supplied target, its source `backends` directory must also be available
+(set `realrhi_imgui_backend_dir` if it cannot be found from the target's includes).
 The module rejects 1.92's different texture API and BGRA packed colors.
 
 ```cmake
@@ -182,11 +184,63 @@ ui.Shutdown();
 ImGui::DestroyContext();
 ```
 
-This is a renderer backend; the application owns the context, input/platform
-integration, frame lifecycle, attachment transitions, submission, and presentation.
+The application owns the context, frame lifecycle, main viewport attachment
+transitions, submission, and presentation. Input/platform integration may be supplied
+by the application or enabled through the bundled SDL3 backend below.
 Call with the initialized context current. Shut down before destroying that
 context or device. Font upload is synchronous during initialization; changing the
-atlas requires shutdown and reinitialization. Multi-viewport rendering is not enabled.
+atlas requires shutdown and reinitialization.
+
+### Docking and multiple OS windows
+
+After `Initialize`, call `ui.InitializePlatform(*window)` to enable
+`ImGuiConfigFlags_DockingEnable` and `ImGuiConfigFlags_ViewportsEnable` and initialize
+SDL3 input/window handling. Check its `Result`; it fails if the window system cannot
+support platform viewports or a platform backend is already installed. This helper
+requires a RealRHI Vulkan window. The main window must outlive the platform backend.
+All platform operations and event polling must run on the main thread.
+
+Docking drags use `io.ConfigDockingTransparentPayload = true`: the dragged panel
+becomes translucent and the docking preview stays in the destination viewport.
+This avoids a split preview caused by drawing the same marker in independently
+presented OS windows while one is moving. The previous setting is restored at
+platform shutdown. Applications may change this setting after initialization.
+
+```cpp
+result = ui.InitializePlatform(*window);
+
+// Forward every SDL event, including events for secondary windows.
+SDL_Event event;
+while (SDL_PollEvent(&event)) {
+    ui.ProcessEvent(event);
+    // Handle application quit and the main window's close request here.
+    // Secondary window close requests are handled by ImGui.
+}
+ui.NewFrame(); // SDL input, DeltaTime, DisplaySize, DisplayFramebufferScale
+ImGui::NewFrame();
+ImGui::DockSpaceOverViewport();
+ImGui::ShowDemoWindow();
+ImGui::Render();
+result = ui.RenderPlatformWindows();
+// Then RenderDrawData, submit, and present the main viewport as above.
+```
+
+Detached viewports use independent RHI swapchains and frame resources. The helper
+updates platform windows, renders their draw data, and presents them; it reports
+creation, recording, submission, and presentation errors through its return value.
+Stop rendering on failure. Resize is handled by each swapchain at frame acquisition.
+Secondary swapchains request presentation without VSync so they do not add their
+own frame pacing. Keep VSync or application frame pacing on the main viewport.
+Update/render secondary viewports before main viewport acquisition/presentation
+can block, and avoid an extra per-frame sleep while any viewport is visible.
+`Shutdown` waits for secondary GPU work, releases their rendering resources, destroys
+their OS windows, and shuts down the SDL3 backend before releasing the renderer.
+It must run before destroying the main window, ImGui context, or device.
+
+With examples enabled, build and run `ImGuiExample` for a dockspace, the ImGui demo,
+and a detachable panel. `ImGuiExample --frames 32` exercises secondary viewport
+creation, resizing, closure, and recreation with Vulkan validation enabled; it is
+registered as `ImGuiViewportSmoke` when GPU tests are enabled.
 
 Use `ImGuiRenderer::GetTextureID(texture)` with `ImGui::Image` for custom images.
 Textures must belong to the same device, be single-sampled 2D sampled images,
@@ -195,6 +249,16 @@ until rendering is recorded; commands retain its view until reset. The renderer
 uses a shared linear clamp sampler. It supports framebuffer scaling, nonzero
 display origins, large meshes, draw callbacks, and the reset-render-state callback.
 Pass the attachment sample count as the third argument for multisampled rendering.
+
+ImGui style/vertex colors are sRGB encoded. By default, the renderer converts RGB
+to linear before texture modulation and blending, so sRGB swapchain attachments
+display the intended colors. Alpha and sampled textures are left unchanged; use
+sRGB texture formats for encoded image data and linear formats for scene images.
+For a UNorm target that stores display-encoded colors directly, pass
+`ImGuiColorSpace::SRGB` as the fourth argument to retain encoded vertex colors.
+For a linear offscreen target, keep the default `ImGuiColorSpace::Linear` and
+apply display encoding when presenting it. Secondary viewports select their output
+color space from their swapchain format automatically.
 
 Rendering replaces graphics state, bindings, push constants, viewport, scissor,
 and shader resource declarations; restore these before subsequent scene draws.
